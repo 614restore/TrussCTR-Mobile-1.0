@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { LogIn, Mail, Lock, AlertCircle } from 'lucide-react';
+import { Mail, Lock, AlertCircle } from 'lucide-react';
+import trussLogo from '../assets/trussctr-logo.png';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -30,8 +31,8 @@ export default function Login() {
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-10">
         <div className="text-center space-y-4">
-          <div className="mx-auto h-24 w-24 bg-white rounded-[2.5rem] flex items-center justify-center shadow-xl border border-slate-100">
-            <LogIn className="text-accent" size={48} />
+          <div className="mx-auto h-24 w-24 bg-white rounded-[2.5rem] flex items-center justify-center shadow-xl border border-slate-100 overflow-hidden">
+            <img src={trussLogo} alt="TrussCTR" className="h-full w-full object-cover" />
           </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-bold text-primary tracking-tight">TrussCTR</h1>
