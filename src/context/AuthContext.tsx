@@ -24,37 +24,55 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const isFetchingProfile = useRef(false);
   const hasInitialized = useRef(false);
+  const lastUserId = useRef<string | null>(null);
 
   useEffect(() => {
-    // Safety timeout
-    const timeout = setTimeout(() => {
-      console.warn('Auth initialization timed out');
-      setLoading(false);
-    }, 10000);
+    let isMounted = true;
+
+    const init = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) console.error('Error getting session:', error);
+        if (!isMounted) return;
+
+        const session = data?.session ?? null;
+        setSession(session);
+        setUser(session?.user ?? null);
+
+        if (session?.user) {
+          lastUserId.current = session.user.id;
+          await fetchProfile(session.user.id, session.user.email);
+        } else {
+          setProfile(null);
+          setLoading(false);
+        }
+      } catch (err) {
+        console.error('Auth init error:', err);
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    init().finally(() => { hasInitialized.current = true; });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Skip duplicate INITIAL_SESSION events
-      if (event === 'INITIAL_SESSION') {
-        if (hasInitialized.current) return;
-        hasInitialized.current = true;
-      }
+      if (event === 'INITIAL_SESSION' && hasInitialized.current) return;
 
       setSession(session);
       setUser(session?.user ?? null);
 
       if (session?.user) {
+        if (lastUserId.current === session.user.id && isFetchingProfile.current) return;
+        lastUserId.current = session.user.id;
         await fetchProfile(session.user.id, session.user.email);
       } else {
         setProfile(null);
         setLoading(false);
       }
-
-      clearTimeout(timeout);
     });
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
-      clearTimeout(timeout);
     };
   }, []);
 
