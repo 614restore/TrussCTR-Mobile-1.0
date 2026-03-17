@@ -20,10 +20,9 @@ export default function Layout() {
   ];
 
   return (
-    <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 shadow-2xl relative overflow-hidden">
+    <div className="flex flex-col fixed inset-0 max-w-md mx-auto bg-slate-50 shadow-2xl relative overflow-hidden">
       {/* Safe area top spacer — pushes content below iOS status bar */}
       <div style={{ height: 'env(safe-area-inset-top)' }} className="bg-slate-50 shrink-0" />
-
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto no-scrollbar" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
         <Outlet />
