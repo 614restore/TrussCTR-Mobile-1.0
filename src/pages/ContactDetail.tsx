@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -303,41 +304,46 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     }
   };
 
+  const uploadInspectionBlob = async (blob: Blob, originalName?: string) => {
+    if (!contact?.id || !userId) return;
+    const ext = (originalName?.split('.').pop() || blob.type.split('/').pop() || 'jpg').toLowerCase();
+    const fileName = `${activeElevation}_${Date.now()}.${ext}`;
+    const filePath = `${contact.id}/${fileName}`;
+    const { error: uploadError } = await supabase.storage
+      .from('projectceo-photos')
+      .upload(filePath, blob, { contentType: blob.type || 'image/jpeg' });
+    if (uploadError) throw uploadError;
+    const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
+    const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
+    let displayUrl = signedData?.signedUrl || publicUrl;
+    try {
+      const resp = await fetch(displayUrl);
+      if (resp.ok) {
+        const fetchedBlob = await resp.blob();
+        displayUrl = URL.createObjectURL(fetchedBlob);
+      }
+    } catch {
+      // fall back to signed/public URL
+    }
+    const { error: dbError } = await supabase.from('documents').insert({
+      contact_id: contact.id,
+      company_id: contact.company_id,
+      name: `${activeElevation} Inspection Photo`,
+      type: 'photo',
+      url: publicUrl,
+      size: blob.size,
+      uploaded_by: userId,
+    } as any);
+    if (dbError) throw dbError;
+    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: blob.size }, ...prev]);
+  };
+
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !contact?.id || !userId) return;
     setUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${activeElevation}_${Date.now()}.${fileExt}`;
-      const filePath = `${contact.id}/${fileName}`;
-      const { error: uploadError } = await supabase.storage
-        .from('projectceo-photos')
-        .upload(filePath, file, { contentType: file.type });
-      if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
-      const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
-      let displayUrl = signedData?.signedUrl || publicUrl;
-      try {
-        const resp = await fetch(displayUrl);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          displayUrl = URL.createObjectURL(blob);
-        }
-      } catch {
-        // fall back to signed/public URL
-      }
-      const { error: dbError } = await supabase.from('documents').insert({
-        contact_id: contact.id,
-        company_id: contact.company_id,
-        name: `${activeElevation} Inspection Photo`,
-        type: 'photo',
-        url: publicUrl,
-        size: file.size,
-        uploaded_by: userId,
-      } as any);
-      if (dbError) throw dbError;
-      setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: file.size }, ...prev]);
+      await uploadInspectionBlob(file, file.name);
     } catch (err) {
       console.error('Photo upload error:', err);
       const message = (err as any)?.message || 'Check Supabase storage bucket and policies.';
@@ -345,6 +351,28 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     } finally {
       setUploading(false);
       e.target.value = '';
+    }
+  };
+
+  const capturePhoto = async () => {
+    if (!contact?.id || !userId) return;
+    setUploading(true);
+    try {
+      const photo = await Camera.getPhoto({
+        resultType: CameraResultType.Uri,
+        source: CameraSource.Camera,
+        quality: 80,
+      });
+      if (!photo.webPath) throw new Error('No photo path returned');
+      const resp = await fetch(photo.webPath);
+      const blob = await resp.blob();
+      await uploadInspectionBlob(blob, photo.path || 'camera.jpg');
+    } catch (err) {
+      console.error('Camera capture error:', err);
+      const message = (err as any)?.message || 'Camera capture failed.';
+      alert(`Camera capture failed. ${message}`);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -547,6 +575,13 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
               <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
             </div>
           </label>
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
+            <label className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
+              Choose from Library
+              <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+            </label>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             {photos.map((p, i) => (
               <div key={`${p.url}-${i}`} className="card p-2 space-y-2">
