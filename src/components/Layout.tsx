@@ -21,24 +21,30 @@ export default function Layout() {
 
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 shadow-2xl relative overflow-hidden">
+      {/* Safe area top spacer — pushes content below iOS status bar */}
+      <div style={{ height: 'env(safe-area-inset-top)' }} className="bg-slate-50 shrink-0" />
+
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto pb-20 no-scrollbar">
+      <main className="flex-1 overflow-y-auto no-scrollbar" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
         <Outlet />
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-6 py-3 flex justify-between items-center z-50">
+      {/* Bottom Navigation — sits above iOS home indicator */}
+      <nav
+        className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-6 pt-3 flex justify-between items-center z-50"
+        style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
+      >
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
-          
+
           return (
             <NavLink
               key={item.path}
               to={item.path}
               className={cn(
-                "bottom-nav-item",
-                isActive && "active"
+                'bottom-nav-item',
+                isActive && 'active'
               )}
             >
               <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
