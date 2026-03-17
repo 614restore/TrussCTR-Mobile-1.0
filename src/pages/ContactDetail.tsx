@@ -317,9 +317,27 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
       const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
-      const displayUrl = signedData?.signedUrl || publicUrl;
+      let displayUrl = signedData?.signedUrl || publicUrl;
+      try {
+        const resp = await fetch(displayUrl);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          displayUrl = URL.createObjectURL(blob);
+        }
+      } catch {
+        // fall back to signed/public URL
+      }
       const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
-      const displayUrl = signedData?.signedUrl || publicUrl;
+      let displayUrl = signedData?.signedUrl || publicUrl;
+      try {
+        const resp = await fetch(displayUrl);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          displayUrl = URL.createObjectURL(blob);
+        }
+      } catch {
+        // fall back to signed/public URL
+      }
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
