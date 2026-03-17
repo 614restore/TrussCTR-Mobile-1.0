@@ -24,7 +24,7 @@ export default function Layout() {
       {/* Safe area top spacer — pushes content below iOS status bar */}
       <div style={{ height: 'env(safe-area-inset-top)' }} className="bg-slate-50 shrink-0" />
       {/* Main Content */}
-      <main className="flex-1 min-h-0 overflow-y-auto no-scrollbar scrollable" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
+      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar scrollable" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
         <Outlet />
       </main>
 

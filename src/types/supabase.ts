@@ -7,11 +7,15 @@ export type Json =
   | Json[]
 
 export type CustomerStatus =
+  | 'new_lead'
   | 'lead'
   | 'contacted'
+  | 'inspection_scheduled'
+  | 'inspection_complete'
   | 'appointment_set'
   | 'inspected'
   | 'estimate_sent'
+  | 'signed_won'
   | 'approved'
   | 'scheduled'
   | 'in_progress'

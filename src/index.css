@@ -12,6 +12,7 @@
   html, body {
     height: 100%;
     width: 100%;
+    overflow-x: hidden;
     @apply bg-slate-50 text-slate-900 font-sans;
     -webkit-tap-highlight-color: transparent;
     -webkit-overflow-scrolling: touch;
@@ -19,6 +20,7 @@
 
   #root {
     height: 100%;
+    overflow-x: hidden;
   }
 }
 
@@ -33,6 +35,8 @@
 
   .bottom-nav-item {
     @apply flex flex-col items-center justify-center gap-1 text-slate-400 transition-colors;
+    flex: 1 1 0%;
+    min-width: 0;
   }
 
   .bottom-nav-item.active {

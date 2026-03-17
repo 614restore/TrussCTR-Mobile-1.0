@@ -685,7 +685,11 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         direction: 'outbound',
       } as any);
       if (error) throw error;
-      await supabase.from('contacts').update({ status: 'inspected' }).eq('id', contact.id);
+      // Try to move pipeline using web-app status; fallback to mobile status if enum blocks it.
+      const { error: statusError } = await supabase.from('contacts').update({ status: 'inspection_complete' }).eq('id', contact.id);
+      if (statusError) {
+        await supabase.from('contacts').update({ status: 'inspected' }).eq('id', contact.id);
+      }
       try {
         const { data } = await supabase.from('inspections').upsert({
           contact_id: contact.id,
