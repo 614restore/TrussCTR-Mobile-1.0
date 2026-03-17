@@ -8,6 +8,27 @@ import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
 
+const STAGE_COLORS: Record<string, string> = {
+  lead: 'bg-blue-500',
+  contacted: 'bg-sky-500',
+  appointment_set: 'bg-indigo-500',
+  inspected: 'bg-amber-500',
+  estimate_sent: 'bg-orange-500',
+  approved: 'bg-emerald-500',
+  scheduled: 'bg-teal-500',
+  in_progress: 'bg-primary',
+  completed: 'bg-slate-800',
+};
+
+const PIPELINE_STAGES = [
+  { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
+  { id: 'inspected', label: 'Inspected', color: 'bg-amber-500' },
+  { id: 'approved', label: 'Approved', color: 'bg-emerald-500' },
+  { id: 'scheduled', label: 'Scheduled', color: 'bg-teal-500' },
+  { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
+  { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
+];
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const { profile, loading: loadingAuth } = useAuth();
@@ -19,6 +40,7 @@ export default function Dashboard() {
     revenueMTD: 0
   });
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
+  const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -72,6 +94,13 @@ export default function Dashboard() {
 
       setStats({ pipelineValue, openLeads, jobsInProgress, revenueMTD });
 
+      // Real stage counts for pipeline distribution
+      const counts: Record<string, number> = {};
+      PIPELINE_STAGES.forEach(s => {
+        counts[s.id] = (contacts as any[]).filter(c => c.status === s.id).length;
+      });
+      setStageCounts(counts);
+
       const activity = (contacts as any[])
         .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
         .slice(0, 4)
@@ -97,6 +126,8 @@ export default function Dashboard() {
     { label: 'Jobs In Progress', value: stats.jobsInProgress.toString(), icon: Briefcase, color: 'bg-amber-500' },
     { label: 'Revenue (MTD)', value: formatCurrency(stats.revenueMTD), icon: TrendingUp, color: 'bg-indigo-500' },
   ];
+
+  const totalContacts = Object.values(stageCounts).reduce((a, b) => a + b, 0);
 
   if (loadingAuth) return (
     <div className="h-full flex items-center justify-center">
@@ -181,14 +212,25 @@ export default function Dashboard() {
       <div className="space-y-4">
         <div className="flex justify-between items-center px-1">
           <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Recent Activity</h2>
-          <button className="text-accent text-xs font-bold">View All</button>
+          <button 
+            onClick={() => navigate('/contacts')}
+            className="text-accent text-xs font-bold"
+          >
+            View All
+          </button>
         </div>
         <div className="space-y-3">
-          {recentActivity.map((activity) => (
-            <div key={activity.id} className="card p-4 flex items-center justify-between group active:bg-slate-50 transition-colors">
+          {recentActivity.length === 0 ? (
+            <div className="card p-6 text-center text-slate-400 text-sm">No recent activity yet</div>
+          ) : recentActivity.map((activity) => (
+            <div 
+              key={activity.id} 
+              onClick={() => navigate(`/contacts/${activity.id}`)}
+              className="card p-4 flex items-center justify-between group active:bg-slate-50 transition-colors cursor-pointer"
+            >
               <div className="flex items-center gap-4">
                 <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary font-bold text-sm">
-                  {activity.name.split(' ').map(n => n[0]).join('')}
+                  {activity.name.split(' ').map((n: string) => n[0]).join('')}
                 </div>
                 <div>
                   <p className="font-bold text-primary text-sm">{activity.name}</p>
@@ -204,32 +246,32 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Pipeline Progress */}
+      {/* Pipeline Distribution - real data */}
       <div className="card p-6 space-y-6">
         <h2 className="text-sm font-bold text-primary">Pipeline Distribution</h2>
-        <div className="flex h-3 rounded-full overflow-hidden bg-slate-100">
-          <div className="bg-blue-500 w-[30%]" />
-          <div className="bg-amber-500 w-[20%]" />
-          <div className="bg-emerald-500 w-[25%]" />
-          <div className="bg-indigo-500 w-[15%]" />
-          <div className="bg-slate-300 w-[10%]" />
-        </div>
-        <div className="grid grid-cols-2 gap-y-3 gap-x-6">
-          {[
-            { label: 'Leads', color: 'bg-blue-500', count: 12 },
-            { label: 'Inspected', color: 'bg-amber-500', count: 8 },
-            { label: 'Approved', color: 'bg-emerald-500', count: 10 },
-            { label: 'Scheduled', color: 'bg-indigo-500', count: 6 },
-          ].map(stage => (
-            <div key={stage.label} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={`h-2 w-2 rounded-full ${stage.color}`} />
-                <span className="text-xs text-slate-600 font-medium">{stage.label}</span>
-              </div>
-              <span className="text-xs font-bold text-primary">{stage.count}</span>
+        {totalContacts > 0 ? (
+          <>
+            <div className="flex h-3 rounded-full overflow-hidden bg-slate-100">
+              {PIPELINE_STAGES.map(stage => {
+                const pct = totalContacts > 0 ? Math.round((stageCounts[stage.id] || 0) / totalContacts * 100) : 0;
+                return pct > 0 ? <div key={stage.id} className={stage.color} style={{ width: `${pct}%` }} /> : null;
+              })}
             </div>
-          ))}
-        </div>
+            <div className="grid grid-cols-2 gap-y-3 gap-x-6">
+              {PIPELINE_STAGES.map(stage => (
+                <div key={stage.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`h-2 w-2 rounded-full ${stage.color}`} />
+                    <span className="text-xs text-slate-600 font-medium">{stage.label}</span>
+                  </div>
+                  <span className="text-xs font-bold text-primary">{stageCounts[stage.id] || 0}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="text-sm text-slate-400 text-center">No pipeline data yet</p>
+        )}
       </div>
     </div>
   );

@@ -2,18 +2,16 @@ import React from 'react';
 import { 
   BarChart3, Users, Settings, CreditCard, 
   LogOut, ChevronRight, Building2, Bell, 
-  ShieldCheck, HelpCircle, Star, RefreshCw
+  HelpCircle, RefreshCw
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-
 import { useNavigate } from 'react-router-dom';
 
 export default function More() {
   const navigate = useNavigate();
   const { profile, user, refreshProfile } = useAuth();
   const [isRefreshing, setIsRefreshing] = React.useState(false);
-  
   const [isSigningOut, setIsSigningOut] = React.useState(false);
   
   const handleSignOut = async () => {
@@ -23,7 +21,6 @@ export default function More() {
       if (error) throw error;
     } catch (err) {
       console.error('Error signing out:', err);
-      // Fallback: Clear session manually if sign out fails
       localStorage.clear();
       window.location.reload();
     } finally {
@@ -51,14 +48,12 @@ export default function More() {
       items: [
         { label: 'Settings', icon: Settings, color: 'text-slate-600', path: '/settings' },
         { label: 'Notifications', icon: Bell, color: 'text-indigo-500', path: '/notifications' },
-        { label: 'Security & Privacy', icon: ShieldCheck, color: 'text-teal-500', path: '#' },
-        { label: 'Google Review Link', icon: Star, color: 'text-yellow-500', path: '#' },
       ]
     },
     {
       title: 'Account',
       items: [
-        { label: 'Subscription Plan', icon: CreditCard, color: 'text-slate-600', path: '#' },
+        { label: 'Subscription Plan', icon: CreditCard, color: 'text-slate-600', path: '/settings' },
         { label: 'Help & Support', icon: HelpCircle, color: 'text-slate-600', path: '/help' },
       ]
     }
@@ -98,7 +93,7 @@ export default function More() {
             {group.items.map((item) => (
               <button 
                 key={item.label}
-                onClick={() => item.path !== '#' && navigate(item.path)}
+                onClick={() => navigate(item.path)}
                 className="w-full p-4 flex items-center justify-between active:bg-slate-50 transition-colors"
               >
                 <div className="flex items-center gap-4">
