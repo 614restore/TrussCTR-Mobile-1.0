@@ -311,7 +311,9 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       const fileExt = file.name.split('.').pop();
       const fileName = `${activeElevation}_${Date.now()}.${fileExt}`;
       const filePath = `${contact.id}/${fileName}`;
-      const { error: uploadError } = await supabase.storage.from('projectceo-photos').upload(filePath, file);
+      const { error: uploadError } = await supabase.storage
+        .from('projectceo-photos')
+        .upload(filePath, file, { contentType: file.type });
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('documents').insert({
@@ -327,7 +329,8 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       setPhotos((prev) => [{ url: publicUrl, note: '', elevation: activeElevation, size: file.size }, ...prev]);
     } catch (err) {
       console.error('Photo upload error:', err);
-      alert('Photo upload failed. Check Supabase storage bucket.');
+      const message = (err as any)?.message || 'Check Supabase storage bucket and policies.';
+      alert(`Photo upload failed. ${message}`);
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -518,9 +521,13 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Photos</h3>
             <button onClick={() => setStep('report')} className="text-xs font-bold text-accent">Skip to Report</button>
           </div>
+          <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed. You can come back to any elevation.</div>
           <div className="grid grid-cols-3 gap-2">
             {(['North', 'South', 'East', 'West', 'Garage', 'Detached'] as const).map((dir) => (
-              <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>{dir}</button>
+              <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                {dir}
+                <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === dir).length})</span>
+              </button>
             ))}
           </div>
           <label className="block w-full cursor-pointer">
