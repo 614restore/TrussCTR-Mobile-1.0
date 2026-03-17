@@ -309,9 +309,9 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       const fileExt = file.name.split('.').pop();
       const fileName = `${activeElevation}_${Date.now()}.${fileExt}`;
       const filePath = `${contact.id}/${fileName}`;
-      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, file);
+      const { error: uploadError } = await supabase.storage.from('projectceo-photos').upload(filePath, file);
       if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
+      const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
@@ -376,9 +376,9 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     try {
       const fileName = `${photos[markupIndex].elevation}_markup_${Date.now()}.jpg`;
       const filePath = `${contact.id}/${fileName}`;
-      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, blob);
+      const { error: uploadError } = await supabase.storage.from('projectceo-photos').upload(filePath, blob);
       if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
+      const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
