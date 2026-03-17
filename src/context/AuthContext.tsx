@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface AuthContextType {
@@ -22,60 +22,51 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const isFetchingProfile = useRef(false);
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
-    const initAuth = async () => {
-      // Set a safety timeout to prevent infinite loading
-      const timeout = setTimeout(() => {
-        if (loading) {
-          console.warn('Auth initialization timed out');
-          setLoading(false);
-        }
-      }, 10000);
+    // Safety timeout
+    const timeout = setTimeout(() => {
+      console.warn('Auth initialization timed out');
+      setLoading(false);
+    }, 10000);
 
-      try {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        if (session?.user) {
-          await fetchProfile(session.user.id, session.user.email);
-        } else {
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error('Error initializing auth:', err);
-        setLoading(false);
-      } finally {
-        clearTimeout(timeout);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Skip duplicate INITIAL_SESSION events
+      if (event === 'INITIAL_SESSION') {
+        if (hasInitialized.current) return;
+        hasInitialized.current = true;
       }
-    };
 
-    initAuth();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      
+
       if (session?.user) {
         await fetchProfile(session.user.id, session.user.email);
       } else {
         setProfile(null);
         setLoading(false);
       }
+
+      clearTimeout(timeout);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const fetchProfile = async (userId: string, email?: string) => {
+    // Prevent duplicate simultaneous fetches
+    if (isFetchingProfile.current) return;
+    isFetchingProfile.current = true;
+
     try {
       const cleanEmail = email?.trim();
       console.log('Fetching profile for:', { userId, cleanEmail });
-      
-      // 1. Try fetching from 'profiles' table by id (which is the user_id)
+
       let { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -85,8 +76,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (error) {
         console.error('Error fetching from profiles by id:', error);
       }
-      
-      // 2. If not found by id, try fetching by email
+
       if (!data && cleanEmail) {
         console.log('Profile not found by id, trying email in profiles...');
         const { data: emailData, error: emailError } = await supabase
@@ -94,32 +84,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           .select('*')
           .eq('email', cleanEmail)
           .maybeSingle();
-        
+
         if (!emailError && emailData) {
-          console.log('Profile found by email, updating id to match user_id...');
-          // Note: In some setups, the id is the user_id. If they differ, we might need a user_id column.
-          // But based on the schema probe, 'id' is the primary key.
           data = emailData;
         }
       }
-      
+
       if (data) {
         const profileData = data as any;
-        setProfile(profileData);
-        
         const { data: companyData } = await supabase
           .from('companies')
           .select('*')
           .eq('id', profileData.company_id)
           .maybeSingle();
-        
-        if (companyData) {
-          setProfile({ ...profileData, companies: companyData });
-        }
+
+        setProfile(companyData ? { ...profileData, companies: companyData } : profileData);
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
     } finally {
+      isFetchingProfile.current = false;
       setLoading(false);
     }
   };
@@ -127,6 +111,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const refreshProfile = async () => {
     if (user?.id) {
       setLoading(true);
+      isFetchingProfile.current = false; // allow refresh to bypass guard
       await fetchProfile(user.id, user.email);
     }
   };
