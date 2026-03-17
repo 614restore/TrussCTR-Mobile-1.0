@@ -88,17 +88,19 @@ export default function ContactDetail() {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     try {
+      const isImage = file.type.startsWith('image/');
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${id}/${fileName}`;
-      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, file);
+      const bucket = isImage ? 'projectceo-photos' : 'documents';
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
       if (uploadError) throw uploadError;
-      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: id,
         company_id: contact.company_id,
         name: file.name,
-        type: 'photo',
+        type: isImage ? 'photo' : 'document',
         url: publicUrl,
         size: file.size,
         uploaded_by: user?.id ?? 'unknown',
