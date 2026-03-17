@@ -51,6 +51,11 @@
   scrollbar-width: none;
 }
 
+.scrollable {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+}
+
 /* iOS safe area support */
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom);
