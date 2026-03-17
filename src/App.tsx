@@ -21,6 +21,11 @@ import Settings from './pages/Settings';
 import HelpSupport from './pages/HelpSupport';
 import Notifications from './pages/Notifications';
 import Login from './pages/Login';
+import DocumentManager from './pages/DocumentManager';
+import DocumentSigner from './pages/DocumentSigner';
+import ReportBuilder from './pages/ReportBuilder';
+import RetailEstimator from './pages/RetailEstimator';
+import SmartInspection from './pages/SmartInspection';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
@@ -53,6 +58,14 @@ function AppRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/contacts" element={<Pipeline />} />
           <Route path="/contacts/:id" element={<ContactDetail />} />
+
+          {/* Contact sub-routes */}
+          <Route path="/contacts/:id/documents" element={<DocumentManager />} />
+          <Route path="/contacts/:id/documents/:docType" element={<DocumentSigner />} />
+          <Route path="/contacts/:id/report" element={<ReportBuilder />} />
+          <Route path="/contacts/:id/estimate" element={<RetailEstimator />} />
+          <Route path="/contacts/:id/inspection" element={<SmartInspection />} />
+
           <Route path="/calendar" element={<CalendarPage />} />
           <Route path="/tools" element={<FieldTools />} />
           <Route path="/more" element={<More />} />
