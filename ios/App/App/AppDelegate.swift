@@ -67,12 +67,12 @@ public class MultiShotCameraPlugin: CAPPlugin {
             self.savedCall = call
             let controller = MultiShotCameraViewController()
             controller.onDone = { urls in
-                self.savedCall?.resolve([\"photos\": urls])
+                self.savedCall?.resolve(["photos": urls])
                 self.savedCall = nil
                 self.cameraController = nil
             }
             controller.onCancel = {
-                self.savedCall?.resolve([\"photos\": []])
+                self.savedCall?.resolve(["photos": []])
                 self.savedCall = nil
                 self.cameraController = nil
             }
@@ -82,7 +82,7 @@ public class MultiShotCameraPlugin: CAPPlugin {
                 controller.modalPresentationStyle = .fullScreen
                 presenting.present(controller, animated: true)
             } else {
-                call.reject(\"No presenting view controller\")
+                call.reject("No presenting view controller")
             }
         }
     }
@@ -151,7 +151,7 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
         captureButton.addTarget(self, action: #selector(capturePhoto), for: .touchUpInside)
 
         doneButton.translatesAutoresizingMaskIntoConstraints = false
-        doneButton.setTitle(\"Done\", for: .normal)
+        doneButton.setTitle("Done", for: .normal)
         doneButton.setTitleColor(.white, for: .normal)
         doneButton.titleLabel?.font = .boldSystemFont(ofSize: 16)
         doneButton.addTarget(self, action: #selector(finish), for: .touchUpInside)
@@ -159,11 +159,11 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         countLabel.textColor = .white
         countLabel.font = .boldSystemFont(ofSize: 14)
-        countLabel.text = \"0\"
+        countLabel.text = "0"
 
         let cancelButton = UIButton(type: .system)
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        cancelButton.setTitle(\"Cancel\", for: .normal)
+        cancelButton.setTitle("Cancel", for: .normal)
         cancelButton.setTitleColor(.white, for: .normal)
         cancelButton.titleLabel?.font = .systemFont(ofSize: 14)
         cancelButton.addTarget(self, action: #selector(cancel), for: .touchUpInside)
@@ -208,12 +208,12 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
 
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation() else { return }
-        let fileName = \"capture_\\(Int(Date().timeIntervalSince1970 * 1000)).jpg\"
+        let fileName = "capture_\\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         do {
             try data.write(to: tempURL)
             capturedURLs.append(tempURL.absoluteString)
-            countLabel.text = \"\\(capturedURLs.count)\"
+            countLabel.text = "\\(capturedURLs.count)"
         } catch {
             // ignore write failures
         }
