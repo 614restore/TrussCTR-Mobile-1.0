@@ -253,7 +253,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
   const [pitch, setPitch] = useState({ rise: 4, run: 12 });
   const [footprintArea, setFootprintArea] = useState<number | ''>('');
   const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
-  const [photos, setPhotos] = useState<{ url: string; note: string; elevation: string; size: number }[]>([]);
+  const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [markupIndex, setMarkupIndex] = useState<number | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -316,6 +316,10 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         .upload(filePath, file, { contentType: file.type });
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
+      const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
+      const displayUrl = signedData?.signedUrl || publicUrl;
+      const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
+      const displayUrl = signedData?.signedUrl || publicUrl;
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
@@ -326,7 +330,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         uploaded_by: userId,
       } as any);
       if (dbError) throw dbError;
-      setPhotos((prev) => [{ url: publicUrl, note: '', elevation: activeElevation, size: file.size }, ...prev]);
+      setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: file.size }, ...prev]);
     } catch (err) {
       console.error('Photo upload error:', err);
       const message = (err as any)?.message || 'Check Supabase storage bucket and policies.';
@@ -351,7 +355,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
       };
-      img.src = photos[index].url;
+      img.src = photos[index].displayUrl || photos[index].url;
     }, 0);
   };
 
@@ -396,7 +400,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       if (dbError) throw dbError;
       setPhotos((prev) => {
         const next = [...prev];
-        next[markupIndex] = { ...next[markupIndex], url: publicUrl };
+        next[markupIndex] = { ...next[markupIndex], url: publicUrl, displayUrl };
         return next;
       });
       setMarkupIndex(null);
@@ -539,7 +543,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
           <div className="grid grid-cols-2 gap-3">
             {photos.map((p, i) => (
               <div key={`${p.url}-${i}`} className="card p-2 space-y-2">
-                <img src={p.url} alt="Inspection" className="w-full h-32 object-cover rounded-xl" referrerPolicy="no-referrer" />
+                <img src={p.displayUrl || p.url} alt="Inspection" className="w-full h-32 object-cover rounded-xl" referrerPolicy="no-referrer" />
                 <p className="text-[10px] font-bold text-slate-400">{p.elevation}</p>
                 <textarea className="w-full bg-slate-50 border-none rounded-lg p-2 text-xs" placeholder="Add note..." value={p.note} onChange={(e) => setPhotos((prev) => {
                   const next = [...prev];
@@ -570,7 +574,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
           </div>
           <div className="grid grid-cols-3 gap-2">
             {photos.slice(0, 6).map((p, i) => (
-              <img key={`${p.url}-${i}`} src={p.url} alt="Inspection" className="w-full h-20 object-cover rounded-lg" referrerPolicy="no-referrer" />
+              <img key={`${p.url}-${i}`} src={p.displayUrl || p.url} alt="Inspection" className="w-full h-20 object-cover rounded-lg" referrerPolicy="no-referrer" />
             ))}
           </div>
           <button onClick={() => setStep('photos')} className="w-full text-xs font-bold text-accent">Back to Photos</button>
