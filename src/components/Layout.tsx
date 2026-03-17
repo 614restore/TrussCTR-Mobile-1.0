@@ -28,9 +28,9 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      {/* Bottom Navigation — sits above iOS home indicator */}
+      {/* Bottom Navigation — locked to viewport */}
       <nav
-        className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-100 px-6 pt-3 flex justify-between items-center z-50"
+        className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-100 px-6 pt-3 flex justify-between items-center z-50"
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
       >
         {navItems.map((item) => {
