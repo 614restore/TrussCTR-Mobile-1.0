@@ -327,17 +327,6 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       } catch {
         // fall back to signed/public URL
       }
-      const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
-      let displayUrl = signedData?.signedUrl || publicUrl;
-      try {
-        const resp = await fetch(displayUrl);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          displayUrl = URL.createObjectURL(blob);
-        }
-      } catch {
-        // fall back to signed/public URL
-      }
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
