@@ -12,7 +12,7 @@ import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
 import { registerPlugin } from '@capacitor/core';
 
-const MultiShotCamera = registerPlugin<{ open: () => Promise<{ photos: string[] }> }>('MultiShotCameraPlugin');
+const MultiShotCamera = registerPlugin<{ open: () => Promise<{ photos: string[] }> }>('MultiShotCamera');
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Info },

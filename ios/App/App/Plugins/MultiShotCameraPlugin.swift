@@ -4,7 +4,12 @@ import AVFoundation
 import UIKit
 
 @objc(MultiShotCameraPlugin)
-public class MultiShotCameraPlugin: CAPPlugin {
+public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "MultiShotCameraPlugin"
+    public let jsName = "MultiShotCamera"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "open", returnType: CAPPluginReturnPromise)
+    ]
     private var cameraController: MultiShotCameraViewController?
     private var savedCall: CAPPluginCall?
 
