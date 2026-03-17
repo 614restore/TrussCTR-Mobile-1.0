@@ -245,10 +245,24 @@ function OverviewTab({ contact }: { contact: any }) {
 }
 
 function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
-  const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false, steepness: 'standard' });
+  const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
+  const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
   const [pitch, setPitch] = useState({ rise: 4, run: 12 });
-  const calculatePitch = () => (Math.atan(pitch.rise / pitch.run) * 180 / Math.PI).toFixed(1);
+  const [footprintArea, setFootprintArea] = useState<number | ''>('');
+  const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
+  const [photos, setPhotos] = useState<{ url: string; note: string; elevation: string; size: number }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [markupIndex, setMarkupIndex] = useState<number | null>(null);
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
+
+  const pitchDecimal = pitch.run ? pitch.rise / pitch.run : 0;
+  const angle = pitch.run ? (Math.atan(pitchDecimal) * 180 / Math.PI) : 0;
+  const rafterLength = pitch.run ? Math.sqrt(pitch.rise ** 2 + pitch.run ** 2) : 0;
+  const pitchMultiplier = pitch.run ? rafterLength / pitch.run : 0;
+  const roofSurfaceArea = footprintArea ? (Number(footprintArea) * pitchMultiplier) : 0;
 
   const toggleDamage = (type: string) => {
     setChecklist((prev) => {
@@ -267,7 +281,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     if (!userId) { alert('Not authenticated. Please sign in again.'); return; }
     setSaving(true);
     try {
-      const content = `ROOF INSPECTION REPORT:\nAge: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}\nSteepness: ${checklist.steepness}\nPitch: ${pitch.rise}/12 (${calculatePitch()}\u00b0)`;
+      const content = `ROOF INSPECTION REPORT:\nPitch: ${pitch.rise}/${pitch.run} (${angle.toFixed(1)}°)\nRafter: ${rafterLength.toFixed(2)}\nPitch Multiplier: ${pitchMultiplier.toFixed(3)}\n${footprintArea ? `Footprint: ${footprintArea} sq ft\nRoof Surface: ${roofSurfaceArea.toFixed(1)} sq ft\n` : ''}Age: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}`;
       const { error } = await supabase.from('communications').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
@@ -277,11 +291,139 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         direction: 'outbound',
       } as any);
       if (error) throw error;
-      alert('Inspection report saved to timeline!');
-      setChecklist({ roofAge: '', material: '', damageTypes: [], leaks: false, steepness: 'standard' });
+      alert('Inspection report saved! Continue to photos.');
+      setStep('photos');
     } catch (err) {
       console.error('Error saving inspection:', err);
       alert('Failed to save inspection. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !contact?.id || !userId) return;
+    setUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${activeElevation}_${Date.now()}.${fileExt}`;
+      const filePath = `${contact.id}/${fileName}`;
+      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
+      const { error: dbError } = await supabase.from('documents').insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        name: `${activeElevation} Inspection Photo`,
+        type: 'photo',
+        url: publicUrl,
+        size: file.size,
+        uploaded_by: userId,
+      } as any);
+      if (dbError) throw dbError;
+      setPhotos((prev) => [{ url: publicUrl, note: '', elevation: activeElevation, size: file.size }, ...prev]);
+    } catch (err) {
+      console.error('Photo upload error:', err);
+      alert('Photo upload failed. Check Supabase storage bucket.');
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const openMarkup = (index: number) => {
+    setMarkupIndex(index);
+    setTimeout(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = photos[index].url;
+    }, 0);
+  };
+
+  const handleDraw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing || !canvasRef.current) return;
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !lastPoint) return;
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(lastPoint.x, lastPoint.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    setLastPoint({ x, y });
+  };
+
+  const saveMarkup = async () => {
+    if (markupIndex === null || !canvasRef.current || !userId) return;
+    const canvas = canvasRef.current;
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) return;
+    try {
+      const fileName = `${photos[markupIndex].elevation}_markup_${Date.now()}.jpg`;
+      const filePath = `${contact.id}/${fileName}`;
+      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, blob);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
+      const { error: dbError } = await supabase.from('documents').insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        name: `${photos[markupIndex].elevation} Markup`,
+        type: 'photo',
+        url: publicUrl,
+        size: blob.size,
+        uploaded_by: userId,
+      } as any);
+      if (dbError) throw dbError;
+      setPhotos((prev) => {
+        const next = [...prev];
+        next[markupIndex] = { ...next[markupIndex], url: publicUrl };
+        return next;
+      });
+      setMarkupIndex(null);
+    } catch (err) {
+      console.error('Markup upload error:', err);
+      alert('Failed to save markup.');
+    }
+  };
+
+  const completeInspection = async () => {
+    if (!userId) return;
+    setSaving(true);
+    try {
+      const photoSummary = photos.reduce<Record<string, number>>((acc, p) => {
+        acc[p.elevation] = (acc[p.elevation] || 0) + 1;
+        return acc;
+      }, {});
+      const content = `✅ Inspection completed\nPhotos: ${Object.entries(photoSummary).map(([k, v]) => `${k}(${v})`).join(', ') || 'None'}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}`;
+      const { error } = await supabase.from('communications').insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        type: 'note',
+        content,
+        user_id: userId,
+        direction: 'outbound',
+      } as any);
+      if (error) throw error;
+      alert('Inspection completed and saved to timeline!');
+      setStep('report');
+    } catch (err) {
+      console.error('Error completing inspection:', err);
+      alert('Failed to complete inspection.');
     } finally {
       setSaving(false);
     }
@@ -297,17 +439,17 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         <div className="flex items-center justify-around py-4">
           <div className="text-center">
             <p className="text-[10px] text-slate-400 uppercase mb-1">Rise</p>
-            <input type="number" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2" value={pitch.rise} onChange={(e) => setPitch({...pitch, rise: parseInt(e.target.value) || 0})} />
+            <input type="number" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2" value={pitch.rise} onChange={(e) => setPitch({...pitch, rise: parseFloat(e.target.value) || 0})} />
           </div>
           <div className="text-2xl font-light text-slate-600">/</div>
           <div className="text-center">
             <p className="text-[10px] text-slate-400 uppercase mb-1">Run</p>
-            <div className="w-16 bg-white/5 rounded-lg text-center font-bold text-xl p-2 text-slate-400">12</div>
+            <input type="number" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2" value={pitch.run} onChange={(e) => setPitch({...pitch, run: parseFloat(e.target.value) || 0})} />
           </div>
           <div className="h-12 w-px bg-white/10" />
           <div className="text-center">
             <p className="text-[10px] text-slate-400 uppercase mb-1">Angle</p>
-            <p className="text-2xl font-bold text-accent">{calculatePitch()}\u00b0</p>
+            <p className="text-2xl font-bold text-accent">{angle.toFixed(1)}\u00b0</p>
           </div>
         </div>
         <div className="flex gap-2">
@@ -315,47 +457,138 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
             <button key={r} onClick={() => setPitch({...pitch, rise: r})} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors ${pitch.rise === r ? 'bg-accent text-white' : 'bg-white/5 text-slate-400'}`}>{r}/12</button>
           ))}
         </div>
+        <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
+          <div>Rafter: <span className="text-white font-bold">{rafterLength.toFixed(2)}</span></div>
+          <div>Multiplier: <span className="text-white font-bold">{pitchMultiplier.toFixed(3)}</span></div>
+        </div>
+        <div>
+          <label className="text-[10px] font-bold text-slate-400 uppercase">Footprint Area (sq ft)</label>
+          <input type="number" className="w-full bg-white/10 border-none rounded-lg text-sm p-2 mt-1" value={footprintArea} onChange={(e) => setFootprintArea(e.target.value === '' ? '' : Number(e.target.value))} />
+          {!!footprintArea && <p className="text-[10px] text-slate-400 mt-1">Roof Surface: <span className="text-white font-bold">{roofSurfaceArea.toFixed(1)} sq ft</span></p>}
+        </div>
       </div>
-      <div className="card p-5 space-y-4">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Roof Inspection Checklist</h3>
-        <div className="space-y-4">
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase">Approx. Roof Age</label>
-            <select className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm mt-1" value={checklist.roofAge} onChange={(e) => setChecklist({...checklist, roofAge: e.target.value})}>
-              <option value="">Select Age</option>
-              <option value="0-5">0-5 Years</option>
-              <option value="5-10">5-10 Years</option>
-              <option value="10-20">10-20 Years</option>
-              <option value="20+">20+ Years</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase">Primary Material</label>
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              {['Shingle', 'Metal', 'Tile', 'Flat'].map(m => (
-                <button key={m} onClick={() => setChecklist({...checklist, material: m})} className={`p-3 rounded-xl text-xs font-bold border transition-all ${checklist.material === m ? 'bg-accent border-accent text-white' : 'bg-white border-slate-100 text-slate-600'}`}>{m}</button>
-              ))}
+      {step === 'questions' && (
+        <div className="card p-5 space-y-4">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Roof Inspection Checklist</h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase">Approx. Roof Age</label>
+              <select className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm mt-1" value={checklist.roofAge} onChange={(e) => setChecklist({...checklist, roofAge: e.target.value})}>
+                <option value="">Select Age</option>
+                <option value="0-5">0-5 Years</option>
+                <option value="5-10">5-10 Years</option>
+                <option value="10-20">10-20 Years</option>
+                <option value="20+">20+ Years</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase">Primary Material</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                {['Shingle', 'Metal', 'Tile', 'Flat'].map(m => (
+                  <button key={m} onClick={() => setChecklist({...checklist, material: m})} className={`p-3 rounded-xl text-xs font-bold border transition-all ${checklist.material === m ? 'bg-accent border-accent text-white' : 'bg-white border-slate-100 text-slate-600'}`}>{m}</button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase">Immediate Damage Observed (Select all that apply)</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                {['Hail', 'Wind', 'Wear', 'None'].map(d => (
+                  <button key={d} onClick={() => toggleDamage(d)} className={`p-3 rounded-xl text-xs font-bold border transition-all ${checklist.damageTypes.includes(d) ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-100 text-slate-600'}`}>{d}</button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+              <span className="text-xs font-bold text-slate-600">Active Leaks?</span>
+              <button onClick={() => setChecklist({...checklist, leaks: !checklist.leaks})} className={`w-12 h-6 rounded-full transition-colors relative ${checklist.leaks ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${checklist.leaks ? 'left-7' : 'left-1'}`} />
+              </button>
             </div>
           </div>
-          <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase">Damage Observed</label>
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              {['Hail', 'Wind', 'Wear', 'None'].map(d => (
-                <button key={d} onClick={() => toggleDamage(d)} className={`p-3 rounded-xl text-xs font-bold border transition-all ${checklist.damageTypes.includes(d) ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-100 text-slate-600'}`}>{d}</button>
-              ))}
-            </div>
+          <button onClick={saveInspection} disabled={!checklist.material || !checklist.roofAge || checklist.damageTypes.length === 0 || saving} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save Inspection Report'}
+          </button>
+        </div>
+      )}
+
+      {step === 'photos' && (
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Photos</h3>
+            <button onClick={() => setStep('report')} className="text-xs font-bold text-accent">Skip to Report</button>
           </div>
-          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-            <span className="text-xs font-bold text-slate-600">Active Leaks?</span>
-            <button onClick={() => setChecklist({...checklist, leaks: !checklist.leaks})} className={`w-12 h-6 rounded-full transition-colors relative ${checklist.leaks ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-              <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${checklist.leaks ? 'left-7' : 'left-1'}`} />
-            </button>
+          <div className="grid grid-cols-3 gap-2">
+            {(['North', 'South', 'East', 'West', 'Garage', 'Detached'] as const).map((dir) => (
+              <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>{dir}</button>
+            ))}
+          </div>
+          <label className="block w-full cursor-pointer">
+            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+            <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
+              <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
+            </div>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            {photos.map((p, i) => (
+              <div key={`${p.url}-${i}`} className="card p-2 space-y-2">
+                <img src={p.url} alt="Inspection" className="w-full h-32 object-cover rounded-xl" referrerPolicy="no-referrer" />
+                <p className="text-[10px] font-bold text-slate-400">{p.elevation}</p>
+                <textarea className="w-full bg-slate-50 border-none rounded-lg p-2 text-xs" placeholder="Add note..." value={p.note} onChange={(e) => setPhotos((prev) => {
+                  const next = [...prev];
+                  next[i] = { ...next[i], note: e.target.value };
+                  return next;
+                })} />
+                <button onClick={() => openMarkup(i)} className="w-full text-xs font-bold text-accent">Markup Photo</button>
+              </div>
+            ))}
+          </div>
+          <button onClick={completeInspection} disabled={saving} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
+            {saving ? 'Saving...' : 'Complete Inspection'}
+          </button>
+        </div>
+      )}
+
+      {step === 'report' && (
+        <div className="card p-5 space-y-3">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Report</h3>
+          <div className="text-sm text-slate-700 space-y-1">
+            <div>Pitch: <span className="font-bold">{pitch.rise}/{pitch.run}</span> ({angle.toFixed(1)}°)</div>
+            <div>Multiplier: <span className="font-bold">{pitchMultiplier.toFixed(3)}</span></div>
+            {footprintArea && <div>Roof Surface: <span className="font-bold">{roofSurfaceArea.toFixed(1)} sq ft</span></div>}
+            <div>Age: <span className="font-bold">{checklist.roofAge || '—'}</span></div>
+            <div>Material: <span className="font-bold">{checklist.material || '—'}</span></div>
+            <div>Damage: <span className="font-bold">{checklist.damageTypes.join(', ') || 'None'}</span></div>
+            <div>Leaks: <span className="font-bold">{checklist.leaks ? 'Yes' : 'No'}</span></div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {photos.slice(0, 6).map((p, i) => (
+              <img key={`${p.url}-${i}`} src={p.url} alt="Inspection" className="w-full h-20 object-cover rounded-lg" referrerPolicy="no-referrer" />
+            ))}
+          </div>
+          <button onClick={() => setStep('photos')} className="w-full text-xs font-bold text-accent">Back to Photos</button>
+        </div>
+      )}
+
+      {markupIndex !== null && (
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-4 space-y-3">
+            <h4 className="text-sm font-bold">Markup Photo</h4>
+            <div className="w-full overflow-auto max-h-[60vh] border rounded-xl">
+              <canvas
+                ref={canvasRef}
+                onPointerDown={(e) => { setIsDrawing(true); const rect = (e.target as HTMLCanvasElement).getBoundingClientRect(); setLastPoint({ x: (e.clientX - rect.left) * (canvasRef.current!.width / rect.width), y: (e.clientY - rect.top) * (canvasRef.current!.height / rect.height) }); }}
+                onPointerMove={handleDraw}
+                onPointerUp={() => { setIsDrawing(false); setLastPoint(null); }}
+                onPointerLeave={() => { setIsDrawing(false); setLastPoint(null); }}
+                className="w-full h-auto touch-none"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setMarkupIndex(null)} className="flex-1 bg-slate-100 text-slate-700 py-2 rounded-lg text-sm font-bold">Cancel</button>
+              <button onClick={saveMarkup} className="flex-1 bg-accent text-white py-2 rounded-lg text-sm font-bold">Save Markup</button>
+            </div>
           </div>
         </div>
-        <button onClick={saveInspection} disabled={!checklist.material || checklist.damageTypes.length === 0 || saving} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
-          {saving ? 'Saving...' : 'Save Inspection Report'}
-        </button>
-      </div>
+      )}
     </div>
   );
 }
