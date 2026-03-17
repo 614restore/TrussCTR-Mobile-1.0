@@ -11,16 +11,14 @@
 @layer base {
   html, body {
     height: 100%;
-    overflow: hidden;
-    position: fixed;
     width: 100%;
     @apply bg-slate-50 text-slate-900 font-sans;
     -webkit-tap-highlight-color: transparent;
+    -webkit-overflow-scrolling: touch;
   }
 
   #root {
     height: 100%;
-    overflow: hidden;
   }
 }
 
