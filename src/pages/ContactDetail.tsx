@@ -10,7 +10,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { registerPlugin } from '@capacitor/core';
+
+const MultiShotCamera = registerPlugin<{ open: () => Promise<{ photos: string[] }> }>('MultiShotCamera');
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -358,15 +360,13 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     if (!contact?.id || !userId) return;
     setUploading(true);
     try {
-      const photo = await Camera.getPhoto({
-        resultType: CameraResultType.Uri,
-        source: CameraSource.Camera,
-        quality: 80,
-      });
-      if (!photo.webPath) throw new Error('No photo path returned');
-      const resp = await fetch(photo.webPath);
-      const blob = await resp.blob();
-      await uploadInspectionBlob(blob, photo.path || 'camera.jpg');
+      const result = await MultiShotCamera.open();
+      const photosToUpload = result?.photos || [];
+      for (const url of photosToUpload) {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        await uploadInspectionBlob(blob, url);
+      }
     } catch (err) {
       console.error('Camera capture error:', err);
       const message = (err as any)?.message || 'Camera capture failed.';
