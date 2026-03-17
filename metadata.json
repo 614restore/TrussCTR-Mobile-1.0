@@ -1,0 +1,8 @@
+{
+  "name": "TrussCTR Mobile",
+  "description": "Mobile-first contractor CRM for roofing and storm restoration companies.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}

@@ -1,0 +1,192 @@
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[]
+
+export type CustomerStatus =
+  | 'lead'
+  | 'contacted'
+  | 'appointment_set'
+  | 'inspected'
+  | 'estimate_sent'
+  | 'approved'
+  | 'scheduled'
+  | 'in_progress'
+  | 'completed'
+  | 'paid'
+  | 'lost'
+  | 'retail'
+
+export interface Database {
+  public: {
+    Tables: {
+      contacts: {
+        Row: {
+          id: string
+          company_id: string
+          first_name: string
+          last_name: string
+          email: string | null
+          phone1: string | null
+          phone2: string | null
+          address: string | null
+          city: string | null
+          state: string | null
+          zip: string | null
+          status: CustomerStatus
+          assigned_to: string | null
+          lead_source: string | null
+          tags: string[] | null
+          project_type: string | null
+          project_value: number | null
+          deposit_amount: number | null
+          deposit_paid: boolean
+          deposit_date: string | null
+          final_payment_amount: number | null
+          final_payment_paid: boolean
+          final_payment_date: string | null
+          insurance_company: string | null
+          policy_number: string | null
+          claim_number: string | null
+          adjuster_name: string | null
+          adjuster_phone: string | null
+          adjuster_email: string | null
+          deductible: number | null
+          is_retail: boolean
+          retail_notes: string | null
+          notes: string | null
+          status_changed_at: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['contacts']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['contacts']['Row']>
+      }
+      communications: {
+        Row: {
+          id: string
+          company_id: string
+          contact_id: string
+          type: 'note' | 'call' | 'email' | 'sms' | 'meeting'
+          direction: 'inbound' | 'outbound'
+          content: string
+          user_id: string
+          created_at: string
+        }
+      }
+      documents: {
+        Row: {
+          id: string
+          company_id: string
+          contact_id: string
+          name: string
+          type: 'contract' | 'estimate' | 'invoice' | 'photo' | 'insurance' | 'other'
+          url: string
+          size: number
+          uploaded_by: string
+          created_at: string
+        }
+      }
+      projects: {
+        Row: {
+          id: string
+          company_id: string
+          contact_id: string
+          name: string
+          status: string
+          start_date: string | null
+          end_date: string | null
+          value: number | null
+          cost: number | null
+          notes: string | null
+          created_at: string
+        }
+      }
+      estimates: {
+        Row: {
+          id: string
+          company_id: string
+          contact_id: string
+          title: string
+          items: Json
+          subtotal: number
+          tax_rate: number
+          tax_amount: number
+          total: number
+          notes: string | null
+          status: 'draft' | 'sent' | 'approved' | 'rejected'
+          created_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['estimates']['Row'], 'id' | 'created_at'>
+        Update: Partial<Database['public']['Tables']['estimates']['Row']>
+      }
+      work_orders: {
+        Row: {
+          id: string
+          company_id: string
+          contact_id: string
+          project_id: string | null
+          title: string
+          description: string | null
+          status: string
+          assigned_to: string | null
+          scheduled_date: string | null
+          completed_date: string | null
+          materials: Json
+          labor_cost: number | null
+          material_cost: number | null
+          created_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['work_orders']['Row'], 'id' | 'created_at'>
+        Update: Partial<Database['public']['Tables']['work_orders']['Row']>
+      }
+      team_members: {
+        Row: {
+          id: string
+          company_id: string
+          user_id: string
+          name: string
+          email: string
+          phone: string | null
+          role: 'owner' | 'admin' | 'sales_rep' | 'crew_lead' | 'crew_member'
+          avatar_url: string | null
+          is_active: boolean
+          created_at: string
+        }
+      }
+      profiles: {
+        Row: {
+          id: string
+          company_id: string | null
+          email: string | null
+          first_name: string | null
+          last_name: string | null
+          role: string | null
+          avatar_url: string | null
+          is_active: boolean | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Partial<Database['public']['Tables']['profiles']['Row']>
+        Update: Partial<Database['public']['Tables']['profiles']['Row']>
+      }
+      companies: {
+        Row: {
+          id: string
+          name: string
+          email: string | null
+          phone: string | null
+          address: string | null
+          logo_url: string | null
+          google_review_url: string | null
+          created_at: string
+        }
+        Insert: Partial<Database['public']['Tables']['companies']['Row']>
+        Update: Partial<Database['public']['Tables']['companies']['Row']>
+      }
+    }
+  }
+}

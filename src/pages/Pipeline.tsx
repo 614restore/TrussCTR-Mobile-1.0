@@ -1,0 +1,318 @@
+import React, { useState, useEffect } from 'react';
+import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import { CustomerStatus } from '../types/supabase';
+import { formatCurrency, getStatusColor } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
+import NewContactModal from '../components/NewContactModal';
+import NoProfileState from '../components/NoProfileState';
+
+const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
+  { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
+  { id: 'contacted', label: 'Contacted', color: 'bg-sky-500' },
+  { id: 'appointment_set', label: 'Appt Set', color: 'bg-indigo-500' },
+  { id: 'inspected', label: 'Inspected', color: 'bg-amber-500' },
+  { id: 'estimate_sent', label: 'Est. Sent', color: 'bg-orange-500' },
+  { id: 'approved', label: 'Approved', color: 'bg-emerald-500' },
+  { id: 'scheduled', label: 'Scheduled', color: 'bg-teal-500' },
+  { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
+  { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
+];
+
+export default function Pipeline() {
+  const navigate = useNavigate();
+  const { profile, loading: loadingAuth } = useAuth();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'map'>('kanban');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!profile?.company_id) {
+      if (!loadingAuth) setLoading(false);
+      return;
+    }
+    
+    fetchContacts();
+
+    // Set up real-time subscription
+    const channel = supabase
+      .channel('public:contacts')
+      .on(
+        'postgres_changes',
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'contacts',
+          filter: `company_id=eq.${profile.company_id}`
+        },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setContacts(prev => [payload.new, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+            setContacts(prev => prev.map(c => c.id === payload.new.id ? payload.new : c));
+          } else if (payload.eventType === 'DELETE') {
+            setContacts(prev => prev.filter(c => c.id === payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [profile?.company_id, loadingAuth]);
+
+  const fetchContacts = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('company_id', profile.company_id)
+        .order('updated_at', { ascending: false });
+      
+      if (error) throw error;
+      setContacts(data || []);
+    } catch (err) {
+      console.error('Error fetching contacts:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loadingAuth) return (
+    <div className="h-full flex items-center justify-center">
+      <div className="animate-spin rounded-full h-8 w-8 border-4 border-accent border-t-transparent"></div>
+    </div>
+  );
+
+  if (!profile?.company_id) {
+    return <NoProfileState />;
+  }
+
+  const filteredContacts = contacts.filter(c => 
+    `${c.first_name} ${c.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.address?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div className="h-full flex flex-col bg-slate-50">
+      {/* Search & Filter Header */}
+      <div className="p-6 space-y-4 bg-white border-b border-slate-100">
+        <div className="flex justify-between items-center">
+          <h1 className="text-2xl font-bold text-primary">Pipeline</h1>
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            <button 
+              onClick={() => setViewMode('kanban')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'kanban' ? 'bg-white shadow-sm text-accent' : 'text-slate-400'}`}
+            >
+              <LayoutGrid size={20} />
+            </button>
+            <button 
+              onClick={() => setViewMode('list')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-accent' : 'text-slate-400'}`}
+            >
+              <List size={20} />
+            </button>
+            <button 
+              onClick={() => setViewMode('map')}
+              className={`p-2 rounded-lg transition-all ${viewMode === 'map' ? 'bg-white shadow-sm text-accent' : 'text-slate-400'}`}
+            >
+              <MapPin size={20} />
+            </button>
+          </div>
+        </div>
+
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+            <input 
+              type="text"
+              placeholder="Search contacts..."
+              className="w-full bg-slate-100 border-none rounded-2xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-accent/20"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          <button className="bg-slate-100 p-3 rounded-2xl text-slate-600 active:scale-95 transition-transform">
+            <Filter size={20} />
+          </button>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-hidden relative">
+        {loading ? (
+          <div className="p-6 space-y-4">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="h-32 w-full bg-slate-200 animate-pulse rounded-2xl" />
+            ))}
+          </div>
+        ) : viewMode === 'kanban' ? (
+          <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x">
+            {STAGES.map((stage) => {
+              const stageContacts = filteredContacts.filter(c => c.status === stage.id);
+              return (
+                <div key={stage.id} className="min-w-[280px] flex flex-col gap-4 snap-center">
+                  <div className="flex items-center justify-between px-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`h-2 w-2 rounded-full ${stage.color}`} />
+                      <h3 className="font-bold text-sm text-primary uppercase tracking-wider">{stage.label}</h3>
+                    </div>
+                    <span className="bg-slate-200 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      {stageContacts.length}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pb-10">
+                    {stageContacts.map((contact) => (
+                      <motion.div
+                        key={contact.id}
+                        layoutId={contact.id}
+                        onClick={() => navigate(`/contacts/${contact.id}`)}
+                        className="card p-4 space-y-3 active:scale-[0.98] transition-transform cursor-pointer"
+                      >
+                        <div className="flex justify-between items-start">
+                          <h4 className="font-bold text-primary leading-tight">
+                            {contact.first_name} {contact.last_name}
+                          </h4>
+                          <span className="text-[10px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-md">
+                            {contact.project_type || 'Roofing'}
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2 text-slate-500">
+                            <MapPin size={12} />
+                            <span className="text-[11px] truncate">{contact.address || 'No address'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-slate-500">
+                            <DollarSign size={12} />
+                            <span className="text-[11px] font-bold text-slate-700">
+                              {formatCurrency(contact.project_value)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-slate-50 flex justify-between items-center">
+                          <div className="flex items-center gap-1.5">
+                            <div className="h-5 w-5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden">
+                              <User size={10} className="text-slate-400" />
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-medium">Assigned to Rep</span>
+                          </div>
+                          <span className="text-[10px] text-slate-300 font-medium">2d ago</span>
+                        </div>
+                      </motion.div>
+                    ))}
+                    {stageContacts.length === 0 && (
+                      <div className="h-32 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center text-slate-300 text-xs italic">
+                        No contacts in this stage
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : viewMode === 'list' ? (
+          <div className="p-6 space-y-3 overflow-y-auto h-full pb-20">
+            {filteredContacts.map((contact) => (
+              <div 
+                key={contact.id}
+                onClick={() => navigate(`/contacts/${contact.id}`)}
+                className="card p-4 flex items-center gap-4 active:bg-slate-50 transition-colors"
+              >
+                <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-primary font-bold">
+                  {contact.first_name[0]}{contact.last_name[0]}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-primary truncate">{contact.first_name} {contact.last_name}</h4>
+                  <p className="text-xs text-slate-500 truncate">{contact.address}</p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.id === contact.status)?.color || 'bg-slate-400'} text-white`}>
+                    {contact.status.replace('_', ' ')}
+                  </span>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.address)}`, '_blank');
+                    }}
+                    className="p-1.5 bg-slate-100 rounded-lg text-slate-400 hover:text-accent"
+                  >
+                    <MapPin size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-6 space-y-4 h-full overflow-y-auto pb-20">
+            <div className="bg-blue-50 border border-blue-100 rounded-2xl p-4 mb-4 flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-blue-500 flex items-center justify-center text-white">
+                <MapPin size={20} />
+              </div>
+              <p className="text-xs text-blue-800 font-medium">
+                Map view shows leads near your current location. Tap a lead to navigate.
+              </p>
+            </div>
+            {filteredContacts.map((contact) => (
+              <div 
+                key={contact.id}
+                className="card p-4 space-y-4"
+              >
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center text-primary font-bold">
+                      {contact.first_name[0]}{contact.last_name[0]}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-primary">{contact.first_name} {contact.last_name}</h4>
+                      <p className="text-xs text-slate-500">{contact.address}</p>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.id === contact.status)?.color || 'bg-slate-400'} text-white`}>
+                    {contact.status.replace('_', ' ')}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => navigate(`/contacts/${contact.id}`)}
+                    className="flex-1 bg-slate-100 text-primary py-3 rounded-xl text-xs font-bold active:scale-95 transition-transform"
+                  >
+                    View Details
+                  </button>
+                  <button 
+                    onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.address)}`, '_blank')}
+                    className="flex-1 bg-accent text-white py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                  >
+                    <MapPin size={14} />
+                    Navigate
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* FAB */}
+        <button 
+          onClick={() => setIsModalOpen(true)}
+          className="absolute bottom-6 right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10"
+        >
+          <Plus size={28} />
+        </button>
+
+        <NewContactModal 
+          isOpen={isModalOpen} 
+          onClose={() => setIsModalOpen(false)} 
+          onSuccess={fetchContacts} 
+        />
+      </div>
+    </div>
+  );
+}
