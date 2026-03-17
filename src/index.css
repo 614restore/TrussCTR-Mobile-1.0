@@ -12,7 +12,6 @@
   html, body {
     height: 100%;
     width: 100%;
-    overflow: hidden;
     @apply bg-slate-50 text-slate-900 font-sans;
     -webkit-tap-highlight-color: transparent;
     -webkit-overflow-scrolling: touch;
@@ -20,7 +19,6 @@
 
   #root {
     height: 100%;
-    overflow: hidden;
   }
 }
 
