@@ -245,16 +245,29 @@ function OverviewTab({ contact }: { contact: any }) {
 }
 
 function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
-  const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageType: '', leaks: false, steepness: 'standard' });
+  const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false, steepness: 'standard' });
   const [saving, setSaving] = useState(false);
   const [pitch, setPitch] = useState({ rise: 4, run: 12 });
   const calculatePitch = () => (Math.atan(pitch.rise / pitch.run) * 180 / Math.PI).toFixed(1);
+
+  const toggleDamage = (type: string) => {
+    setChecklist((prev) => {
+      const isNone = type === 'None';
+      if (isNone) {
+        return { ...prev, damageTypes: prev.damageTypes.includes('None') ? [] : ['None'] };
+      }
+      const next = prev.damageTypes.filter((d) => d !== 'None');
+      return next.includes(type)
+        ? { ...prev, damageTypes: next.filter((d) => d !== type) }
+        : { ...prev, damageTypes: [...next, type] };
+    });
+  };
 
   const saveInspection = async () => {
     if (!userId) { alert('Not authenticated. Please sign in again.'); return; }
     setSaving(true);
     try {
-      const content = `ROOF INSPECTION REPORT:\nAge: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageType}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}\nSteepness: ${checklist.steepness}\nPitch: ${pitch.rise}/12 (${calculatePitch()}\u00b0)`;
+      const content = `ROOF INSPECTION REPORT:\nAge: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}\nSteepness: ${checklist.steepness}\nPitch: ${pitch.rise}/12 (${calculatePitch()}\u00b0)`;
       const { error } = await supabase.from('communications').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
@@ -265,7 +278,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
       } as any);
       if (error) throw error;
       alert('Inspection report saved to timeline!');
-      setChecklist({ roofAge: '', material: '', damageType: '', leaks: false, steepness: 'standard' });
+      setChecklist({ roofAge: '', material: '', damageTypes: [], leaks: false, steepness: 'standard' });
     } catch (err) {
       console.error('Error saving inspection:', err);
       alert('Failed to save inspection. Please try again.');
@@ -328,7 +341,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
             <label className="text-[10px] font-bold text-slate-400 uppercase">Damage Observed</label>
             <div className="grid grid-cols-2 gap-2 mt-1">
               {['Hail', 'Wind', 'Wear', 'None'].map(d => (
-                <button key={d} onClick={() => setChecklist({...checklist, damageType: d})} className={`p-3 rounded-xl text-xs font-bold border transition-all ${checklist.damageType === d ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-100 text-slate-600'}`}>{d}</button>
+                <button key={d} onClick={() => toggleDamage(d)} className={`p-3 rounded-xl text-xs font-bold border transition-all ${checklist.damageTypes.includes(d) ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-100 text-slate-600'}`}>{d}</button>
               ))}
             </div>
           </div>
@@ -339,7 +352,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
             </button>
           </div>
         </div>
-        <button onClick={saveInspection} disabled={!checklist.material || !checklist.damageType || saving} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
+        <button onClick={saveInspection} disabled={!checklist.material || checklist.damageTypes.length === 0 || saving} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
           {saving ? 'Saving...' : 'Save Inspection Report'}
         </button>
       </div>
