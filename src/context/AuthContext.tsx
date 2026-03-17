@@ -67,11 +67,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const cleanEmail = email?.trim();
       console.log('Fetching profile for:', { userId, cleanEmail });
 
-      let { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+      const fetchById = async () => {
+        return await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+      };
+
+      let { data, error } = await fetchById();
+      if (error?.message?.includes('Lock was stolen')) {
+        await new Promise((r) => setTimeout(r, 250));
+        ({ data, error } = await fetchById());
+      }
 
       if (error) {
         console.error('Error fetching from profiles by id:', error);
@@ -79,11 +87,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (!data && cleanEmail) {
         console.log('Profile not found by id, trying email in profiles...');
-        const { data: emailData, error: emailError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
+        const fetchByEmail = async () => {
+          return await supabase
+            .from('profiles')
+            .select('*')
+            .eq('email', cleanEmail)
+            .maybeSingle();
+        };
+
+        let { data: emailData, error: emailError } = await fetchByEmail();
+        if (emailError?.message?.includes('Lock was stolen')) {
+          await new Promise((r) => setTimeout(r, 250));
+          ({ data: emailData, error: emailError } = await fetchByEmail());
+        }
 
         if (!emailError && emailData) {
           data = emailData;
