@@ -13,7 +13,7 @@ public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
     private var cameraController: MultiShotCameraViewController?
     private var savedCall: CAPPluginCall?
 
-    @objc func open(_ call: CAPPluginCall) {
+    @objc public func open(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
             self.savedCall = call
             let controller = MultiShotCameraViewController()

@@ -10,7 +10,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 
 const MultiShotCamera = registerPlugin<{ open: () => Promise<{ photos: string[] }> }>('MultiShotCamera');
 
@@ -37,7 +37,11 @@ export default function ContactDetail() {
   const [contact, setContact] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState<any[]>([]);
+  const [documentsWithUrls, setDocumentsWithUrls] = useState<any[]>([]);
   const [timeline, setTimeline] = useState<any[]>([]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState<any>(null);
+  const [showActions, setShowActions] = useState(false);
 
   useEffect(() => {
     fetchContact();
@@ -71,7 +75,23 @@ export default function ContactDetail() {
     try {
       const { data, error } = await supabase.from('documents').select('*').eq('contact_id', id).order('created_at', { ascending: false });
       if (error) throw error;
-      setDocuments(data || []);
+      const docs = data || [];
+      setDocuments(docs);
+
+      const withUrls = await Promise.all(docs.map(async (doc: any) => {
+        if (doc.type === 'photo' && typeof doc.url === 'string') {
+          const bucket = 'projectceo-photos';
+          const marker = `/${bucket}/`;
+          const idx = doc.url.indexOf(marker);
+          if (idx !== -1) {
+            const path = decodeURIComponent(doc.url.substring(idx + marker.length));
+            const { data: signedData } = await supabase.storage.from(bucket).createSignedUrl(path, 60 * 60);
+            return { ...doc, displayUrl: signedData?.signedUrl || doc.url };
+          }
+        }
+        return { ...doc, displayUrl: doc.url };
+      }));
+      setDocumentsWithUrls(withUrls);
     } catch (err) {
       console.error('Error fetching documents:', err);
     }
@@ -84,6 +104,33 @@ export default function ContactDetail() {
       setTimeline(data || []);
     } catch (err) {
       console.error('Error fetching timeline:', err);
+    }
+  };
+
+  const openEdit = () => {
+    setEditForm({ ...contact });
+    setIsEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!editForm?.id) return;
+    try {
+      const updates = { ...editForm };
+      const numericFields = ['project_value', 'deposit_amount', 'final_payment_amount', 'deductible'];
+      numericFields.forEach((f) => {
+        if (updates[f] === '') updates[f] = null;
+        if (updates[f] !== null && updates[f] !== undefined) {
+          const n = Number(updates[f]);
+          updates[f] = Number.isNaN(n) ? null : n;
+        }
+      });
+      const { error } = await supabase.from('contacts').update(updates).eq('id', editForm.id);
+      if (error) throw error;
+      setIsEditing(false);
+      fetchContact();
+    } catch (err) {
+      console.error('Error saving contact:', err);
+      alert('Failed to save contact changes.');
     }
   };
 
@@ -116,6 +163,37 @@ export default function ContactDetail() {
     }
   };
 
+  const handleLegalUpload = async (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id) return;
+    try {
+      const isImage = file.type.startsWith('image/');
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `${id}/${fileName}`;
+      const bucket = isImage ? 'projectceo-photos' : 'documents';
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      const { error: dbError } = await supabase.from('documents').insert({
+        contact_id: id,
+        company_id: contact.company_id,
+        name: label,
+        type: docType as any,
+        url: publicUrl,
+        size: file.size,
+        uploaded_by: user?.id ?? 'unknown',
+      } as any);
+      if (dbError) throw dbError;
+      fetchDocuments();
+    } catch (err) {
+      console.error('Error uploading legal doc:', err);
+      alert('Legal document upload failed.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   if (loading) return (
     <div className="h-full flex items-center justify-center">
       <div className="animate-spin rounded-full h-8 w-8 border-4 border-accent border-t-transparent"></div>
@@ -130,8 +208,8 @@ export default function ContactDetail() {
             <ChevronLeft size={24} />
           </button>
           <div className="flex gap-2">
-            <button className="p-2 hover:bg-white/10 rounded-full transition-colors"><Edit2 size={20} /></button>
-            <button className="p-2 hover:bg-white/10 rounded-full transition-colors"><MoreVertical size={20} /></button>
+            <button onClick={openEdit} className="p-2 hover:bg-white/10 rounded-full transition-colors"><Edit2 size={20} /></button>
+            <button onClick={() => setShowActions(true)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><MoreVertical size={20} /></button>
           </div>
         </div>
         <div className="space-y-1">
@@ -174,12 +252,104 @@ export default function ContactDetail() {
             {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} />}
             {activeTab === 'status' && <StatusTab contact={contact} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} />}
-            {activeTab === 'documents' && <DocumentsTab documents={documents} onUpload={handleUpload} />}
-            {activeTab === 'financial' && <FinancialTab contact={contact} />}
+            {activeTab === 'documents' && <DocumentsTab documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} />}
+            {activeTab === 'financial' && <FinancialTab contact={contact} onEdit={openEdit} />}
             {activeTab === 'insurance' && <InsuranceTab contact={contact} />}
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {isEditing && editForm && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
+          <div className="bg-white w-full max-h-[85vh] rounded-t-3xl p-6 overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Edit Customer</h3>
+              <button onClick={() => setIsEditing(false)} className="text-sm font-bold text-slate-500">Close</button>
+            </div>
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="First name" value={editForm.first_name || ''} onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Last name" value={editForm.last_name || ''} onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })} />
+              </div>
+              <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Primary phone" value={editForm.phone1 || ''} onChange={(e) => setEditForm({ ...editForm, phone1: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Secondary phone" value={editForm.phone2 || ''} onChange={(e) => setEditForm({ ...editForm, phone2: e.target.value })} />
+              </div>
+              <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Address" value={editForm.address || ''} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
+              <div className="grid grid-cols-3 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="City" value={editForm.city || ''} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="State" value={editForm.state || ''} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Zip" value={editForm.zip || ''} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Lead source" value={editForm.lead_source || ''} onChange={(e) => setEditForm({ ...editForm, lead_source: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Project type" value={editForm.project_type || ''} onChange={(e) => setEditForm({ ...editForm, project_type: e.target.value })} />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-400 uppercase">Status</label>
+                <select className="w-full bg-slate-50 rounded-xl p-3 text-sm mt-1" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+                  {STAGES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Project value" value={editForm.project_value ?? ''} onChange={(e) => setEditForm({ ...editForm, project_value: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Deposit amount" value={editForm.deposit_amount ?? ''} onChange={(e) => setEditForm({ ...editForm, deposit_amount: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Final payment amount" value={editForm.final_payment_amount ?? ''} onChange={(e) => setEditForm({ ...editForm, final_payment_amount: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Deductible" value={editForm.deductible ?? ''} onChange={(e) => setEditForm({ ...editForm, deductible: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!!editForm.deposit_paid} onChange={(e) => setEditForm({ ...editForm, deposit_paid: e.target.checked })} />
+                  Deposit Paid
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={!!editForm.final_payment_paid} onChange={(e) => setEditForm({ ...editForm, final_payment_paid: e.target.checked })} />
+                  Final Paid
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Insurance company" value={editForm.insurance_company || ''} onChange={(e) => setEditForm({ ...editForm, insurance_company: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Policy number" value={editForm.policy_number || ''} onChange={(e) => setEditForm({ ...editForm, policy_number: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Claim number" value={editForm.claim_number || ''} onChange={(e) => setEditForm({ ...editForm, claim_number: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Adjuster name" value={editForm.adjuster_name || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_name: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Adjuster phone" value={editForm.adjuster_phone || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_phone: e.target.value })} />
+                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Adjuster email" value={editForm.adjuster_email || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_email: e.target.value })} />
+              </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!editForm.is_retail} onChange={(e) => setEditForm({ ...editForm, is_retail: e.target.checked })} />
+                Retail Job
+              </label>
+              <textarea className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Retail notes" value={editForm.retail_notes || ''} onChange={(e) => setEditForm({ ...editForm, retail_notes: e.target.value })} />
+              <textarea className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Notes" value={editForm.notes || ''} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
+
+              <button onClick={saveEdit} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold">Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showActions && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
+          <div className="bg-white w-full rounded-t-3xl p-6 space-y-3">
+            <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
+            <button onClick={() => { setShowActions(false); setActiveTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
+            <button onClick={() => setShowActions(false)} className="w-full bg-white border border-slate-200 py-3 rounded-xl text-sm font-bold">Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -262,12 +432,39 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
+  const [completedInspection, setCompletedInspection] = useState<any>(null);
 
   const pitchDecimal = pitch.run ? pitch.rise / pitch.run : 0;
   const angle = pitch.run ? (Math.atan(pitchDecimal) * 180 / Math.PI) : 0;
   const rafterLength = pitch.run ? Math.sqrt(pitch.rise ** 2 + pitch.run ** 2) : 0;
   const pitchMultiplier = pitch.run ? rafterLength / pitch.run : 0;
   const roofSurfaceArea = footprintArea ? (Number(footprintArea) * pitchMultiplier) : 0;
+
+  const loadInspectionData = (data: any) => {
+    if (!data) return;
+    if (data.pitch) setPitch(data.pitch);
+    if (typeof data.footprintArea !== 'undefined') setFootprintArea(data.footprintArea);
+    if (data.checklist) setChecklist(data.checklist);
+    if (data.photos) setPhotos(data.photos);
+  };
+
+  useEffect(() => {
+    const fetchInspection = async () => {
+      try {
+        const { data } = await supabase
+          .from('inspections')
+          .select('*')
+          .eq('contact_id', contact.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (data) setCompletedInspection(data);
+      } catch {
+        // table may not exist yet
+      }
+    };
+    if (contact?.id) fetchInspection();
+  }, [contact?.id]);
 
   const toggleDamage = (type: string) => {
     setChecklist((prev) => {
@@ -286,6 +483,15 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     if (!userId) { alert('Not authenticated. Please sign in again.'); return; }
     setSaving(true);
     try {
+      const inspectionData = {
+        pitch,
+        angle: angle.toFixed(1),
+        rafterLength: rafterLength.toFixed(2),
+        pitchMultiplier: pitchMultiplier.toFixed(3),
+        footprintArea,
+        roofSurfaceArea: roofSurfaceArea ? roofSurfaceArea.toFixed(1) : null,
+        checklist,
+      };
       const content = `ROOF INSPECTION REPORT:\nPitch: ${pitch.rise}/${pitch.run} (${angle.toFixed(1)}°)\nRafter: ${rafterLength.toFixed(2)}\nPitch Multiplier: ${pitchMultiplier.toFixed(3)}\n${footprintArea ? `Footprint: ${footprintArea} sq ft\nRoof Surface: ${roofSurfaceArea.toFixed(1)} sq ft\n` : ''}Age: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}`;
       const { error } = await supabase.from('communications').insert({
         contact_id: contact.id,
@@ -296,6 +502,18 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         direction: 'outbound',
       } as any);
       if (error) throw error;
+      try {
+        const { data } = await supabase.from('inspections').upsert({
+          contact_id: contact.id,
+          company_id: contact.company_id,
+          user_id: userId,
+          status: 'in_progress',
+          data: inspectionData,
+        }, { onConflict: 'contact_id' }).select('*').maybeSingle();
+        if (data) setCompletedInspection(data);
+      } catch {
+        // ignore if inspections table missing
+      }
       alert('Inspection report saved! Continue to photos.');
       setStep('photos');
     } catch (err) {
@@ -358,6 +576,10 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
 
   const capturePhoto = async () => {
     if (!contact?.id || !userId) return;
+    if (!Capacitor.isPluginAvailable('MultiShotCamera')) {
+      alert('Multi-shot camera is not available on this build. Please rebuild the iOS app.');
+      return;
+    }
     setUploading(true);
     try {
       const result = await MultiShotCamera.open();
@@ -463,6 +685,28 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         direction: 'outbound',
       } as any);
       if (error) throw error;
+      await supabase.from('contacts').update({ status: 'inspected' }).eq('id', contact.id);
+      try {
+        const { data } = await supabase.from('inspections').upsert({
+          contact_id: contact.id,
+          company_id: contact.company_id,
+          user_id: userId,
+          status: 'completed',
+          data: {
+            pitch,
+            angle: angle.toFixed(1),
+            rafterLength: rafterLength.toFixed(2),
+            pitchMultiplier: pitchMultiplier.toFixed(3),
+            footprintArea,
+            roofSurfaceArea: roofSurfaceArea ? roofSurfaceArea.toFixed(1) : null,
+            checklist,
+            photos,
+          },
+        }, { onConflict: 'contact_id' }).select('*').maybeSingle();
+        if (data) setCompletedInspection(data);
+      } catch {
+        // ignore if inspections table missing
+      }
       alert('Inspection completed and saved to timeline!');
       setStep('report');
     } catch (err) {
@@ -475,6 +719,20 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
 
   return (
     <div className="space-y-6">
+      {completedInspection?.status === 'completed' && (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-bold text-emerald-700 uppercase">Inspection Completed</p>
+            <p className="text-[10px] text-emerald-600">Tap to view the completed inspection.</p>
+          </div>
+          <button
+            onClick={() => { loadInspectionData(completedInspection.data); setStep('report'); }}
+            className="text-xs font-bold text-emerald-700"
+          >
+            View
+          </button>
+        </div>
+      )}
       <div className="card p-5 bg-slate-900 text-white space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pitch Calculator</h3>
@@ -734,9 +992,47 @@ function TimelineTab({ timeline, onRefresh, contact, userId }: { timeline: any[]
   );
 }
 
-function DocumentsTab({ documents, onUpload }: { documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void }) {
+function DocumentsTab({ documents, onUpload, onLegalUpload }: { documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void }) {
+  const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
+  const LEGAL_DOCS = [
+    { label: 'Contingency Agreement', type: 'other' },
+    { label: 'Retail Contract', type: 'contract' },
+    { label: '3 Day Right to Rescind', type: 'other' },
+    { label: 'Completion Certificate', type: 'other' },
+    { label: 'Change Order', type: 'other' },
+  ];
+  const legalLabels = new Set(LEGAL_DOCS.map((d) => d.label));
+  const filteredDocs = documents.filter((doc) => {
+    if (filter === 'photos') return doc.type === 'photo';
+    if (filter === 'docs') return doc.type !== 'photo' && !legalLabels.has(doc.name);
+    if (filter === 'legal') return legalLabels.has(doc.name);
+    return true;
+  });
   return (
     <div className="space-y-6">
+      <div className="flex gap-2">
+        {['all','photos','docs','legal'].map((f) => (
+          <button key={f} onClick={() => setFilter(f as any)} className={`px-3 py-2 rounded-lg text-xs font-bold ${filter === f ? 'bg-accent text-white' : 'bg-slate-100 text-slate-600'}`}>
+            {f === 'all' ? 'All' : f === 'photos' ? 'Photos' : f === 'docs' ? 'Docs' : 'Legal'}
+          </button>
+        ))}
+      </div>
+
+      <div className="bg-primary/5 border border-primary/10 rounded-2xl p-5 space-y-3">
+        <div className="flex justify-between items-center">
+          <h4 className="text-xs font-bold text-primary uppercase tracking-wider">Legal Documents</h4>
+          <span className="text-[10px] font-bold text-slate-400 uppercase">Templates / Uploads</span>
+        </div>
+        <div className="space-y-2">
+          {LEGAL_DOCS.map((doc) => (
+            <label key={doc.label} className="flex items-center justify-between bg-white rounded-xl p-3 border border-slate-100 cursor-pointer">
+              <span className="text-xs font-bold text-slate-600">{doc.label}</span>
+              <span className="text-[10px] text-accent font-bold">Upload</span>
+              <input type="file" className="hidden" onChange={(e) => onLegalUpload(doc.label, doc.type, e)} />
+            </label>
+          ))}
+        </div>
+      </div>
       <div className="bg-primary/5 border border-primary/10 rounded-2xl p-5 space-y-3">
         <div className="flex justify-between items-center">
           <h4 className="text-xs font-bold text-primary uppercase tracking-wider">EagleView Report</h4>
@@ -752,10 +1048,10 @@ function DocumentsTab({ documents, onUpload }: { documents: any[]; onUpload: (e:
         </label>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        {documents.length > 0 ? documents.map((doc, i) => (
+        {filteredDocs.length > 0 ? filteredDocs.map((doc, i) => (
           <div key={i} className="card p-3 space-y-2">
             <div className="h-24 bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center text-slate-300">
-              {doc.type === 'photo' ? <img src={doc.url} alt={doc.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <FileText size={32} />}
+              {doc.type === 'photo' ? <img src={doc.displayUrl || doc.url} alt={doc.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <FileText size={32} />}
             </div>
             <div>
               <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
@@ -773,7 +1069,7 @@ function DocumentsTab({ documents, onUpload }: { documents: any[]; onUpload: (e:
   );
 }
 
-function FinancialTab({ contact }: { contact: any }) {
+function FinancialTab({ contact, onEdit }: { contact: any; onEdit: () => void }) {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4">
@@ -781,7 +1077,7 @@ function FinancialTab({ contact }: { contact: any }) {
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Project Value</h3>
           <div className="flex items-center justify-between">
             <span className="text-2xl font-bold text-primary">{formatCurrency(contact.project_value)}</span>
-            <button className="text-accent text-xs font-bold">Edit</button>
+            <button onClick={onEdit} className="text-accent text-xs font-bold">Edit</button>
           </div>
         </div>
         <div className="card p-5 space-y-4">
