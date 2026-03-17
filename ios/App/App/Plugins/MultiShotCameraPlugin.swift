@@ -3,7 +3,7 @@ import Capacitor
 import AVFoundation
 import UIKit
 
-@objc(MultiShotCamera)
+@objc(MultiShotCameraPlugin)
 public class MultiShotCameraPlugin: CAPPlugin {
     private var cameraController: MultiShotCameraViewController?
     private var savedCall: CAPPluginCall?
