@@ -1,10 +1,19 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
+import { Database } from '../types/supabase';
+
+type ProfileRow = Database['public']['Tables']['profiles']['Row'];
+type CompanyRow = Database['public']['Tables']['companies']['Row'];
+
+export interface AppProfile extends ProfileRow {
+  companies?: CompanyRow | null;
+}
 
 interface AuthContextType {
-  session: any;
-  user: any;
-  profile: any;
+  session: Session | null;
+  user: User | null;
+  profile: AppProfile | null;
   loading: boolean;
   refreshProfile: () => Promise<void>;
 }
@@ -18,9 +27,9 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [session, setSession] = useState<any>(null);
-  const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<AppProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const isFetchingProfile = useRef(false);
   const hasInitialized = useRef(false);
@@ -35,13 +44,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (error) console.error('Error getting session:', error);
         if (!isMounted) return;
 
-        const session = data?.session ?? null;
-        setSession(session);
-        setUser(session?.user ?? null);
+        const currentSession = data?.session ?? null;
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
 
-        if (session?.user) {
-          lastUserId.current = session.user.id;
-          await fetchProfile(session.user.id, session.user.email);
+        if (currentSession?.user) {
+          lastUserId.current = currentSession.user.id;
+          await fetchProfile(currentSession.user.id, currentSession.user.email);
         } else {
           setProfile(null);
           setLoading(false);
@@ -54,16 +63,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     init().finally(() => { hasInitialized.current = true; });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, currentSession) => {
       if (event === 'INITIAL_SESSION' && hasInitialized.current) return;
 
-      setSession(session);
-      setUser(session?.user ?? null);
+      setSession(currentSession);
+      setUser(currentSession?.user ?? null);
 
-      if (session?.user) {
-        if (lastUserId.current === session.user.id && isFetchingProfile.current) return;
-        lastUserId.current = session.user.id;
-        await fetchProfile(session.user.id, session.user.email);
+      if (currentSession?.user) {
+        if (lastUserId.current === currentSession.user.id && isFetchingProfile.current) return;
+        lastUserId.current = currentSession.user.id;
+        await fetchProfile(currentSession.user.id, currentSession.user.email);
       } else {
         setProfile(null);
         setLoading(false);
@@ -77,21 +86,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const fetchProfile = async (userId: string, email?: string) => {
-    // Prevent duplicate simultaneous fetches
     if (isFetchingProfile.current) return;
     isFetchingProfile.current = true;
 
     try {
       const cleanEmail = email?.trim();
-      console.log('Fetching profile for:', { userId, cleanEmail });
 
-      const fetchById = async () => {
-        return await supabase
+      const fetchById = async () =>
+        supabase
           .from('profiles')
           .select('*')
           .eq('id', userId)
           .maybeSingle();
-      };
 
       let { data, error } = await fetchById();
       if (error?.message?.includes('Lock was stolen')) {
@@ -99,19 +105,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         ({ data, error } = await fetchById());
       }
 
-      if (error) {
-        console.error('Error fetching from profiles by id:', error);
-      }
+      if (error) console.error('Error fetching profile by id:', error);
 
       if (!data && cleanEmail) {
-        console.log('Profile not found by id, trying email in profiles...');
-        const fetchByEmail = async () => {
-          return await supabase
+        const fetchByEmail = async () =>
+          supabase
             .from('profiles')
             .select('*')
             .eq('email', cleanEmail)
             .maybeSingle();
-        };
 
         let { data: emailData, error: emailError } = await fetchByEmail();
         if (emailError?.message?.includes('Lock was stolen')) {
@@ -119,20 +121,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           ({ data: emailData, error: emailError } = await fetchByEmail());
         }
 
-        if (!emailError && emailData) {
-          data = emailData;
-        }
+        if (!emailError && emailData) data = emailData;
       }
 
       if (data) {
-        const profileData = data as any;
-        const { data: companyData } = await supabase
-          .from('companies')
-          .select('*')
-          .eq('id', profileData.company_id)
-          .maybeSingle();
+        const profileData = data as ProfileRow;
+        if (profileData.company_id) {
+          const { data: companyData } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('id', profileData.company_id)
+            .maybeSingle();
 
-        setProfile(companyData ? { ...profileData, companies: companyData } : profileData);
+          setProfile(companyData ? { ...profileData, companies: companyData } : profileData);
+        } else {
+          setProfile(profileData);
+        }
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
@@ -145,8 +149,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const refreshProfile = async () => {
     if (user?.id) {
       setLoading(true);
-      isFetchingProfile.current = false; // allow refresh to bypass guard
-      await fetchProfile(user.id, user.email);
+      isFetchingProfile.current = false;
+      await fetchProfile(user.id, user.email ?? undefined);
     }
   };
 
