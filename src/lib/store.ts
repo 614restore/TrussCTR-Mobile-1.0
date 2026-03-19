@@ -18,8 +18,8 @@ export async function handleAutoMove(contactId: string, action: string) {
   const newStatus = statusMap[action];
   if (!newStatus) return;
 
-  const { error } = await supabase
-    .from('contacts')
+  const { error } = await (supabase
+    .from('contacts') as any)
     .update({ status: newStatus })
     .eq('id', contactId);
 

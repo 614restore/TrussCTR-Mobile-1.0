@@ -16,6 +16,7 @@ export default function DocumentManager() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [signedDocs, setSignedDocs] = useState<string[]>([]);
+  const [signedDocDetails, setSignedDocDetails] = useState<Record<string, { pdfCount: number; signatureCount: number }>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,14 +27,38 @@ export default function DocumentManager() {
     try {
       const { data, error } = await supabase
         .from('documents')
-        .select('name')
-        .eq('contact_id', id)
-        .eq('type', 'contract');
+        .select('name,type')
+        .eq('contact_id', id);
 
       if (error) throw error;
-      // Store doc type IDs that already have a signed file
-      const signed = (data || []).map((d) => d.name.split('_')[0]);
+      const signed = (data || []).flatMap((d) => {
+        const name = String(d.name || '').toLowerCase();
+        const matches: string[] = [];
+        if (name.includes('contingency')) matches.push('contingency');
+        if (name.includes('customer service agreement')) matches.push('csa');
+        if (name.includes('notice of cancellation') || name.includes('3-day')) matches.push('rescind');
+        if (name.includes('completion')) matches.push('completion');
+        if (name.includes('change order')) matches.push('change-order');
+        return matches;
+      });
+      const details: Record<string, { pdfCount: number; signatureCount: number }> = {};
+      for (const doc of DOCUMENT_TYPES) {
+        const related = (data || []).filter((entry) => {
+          const name = String(entry.name || '').toLowerCase();
+          if (doc.id === 'contingency') return name.includes('contingency');
+          if (doc.id === 'csa') return name.includes('customer service agreement');
+          if (doc.id === 'rescind') return name.includes('notice of cancellation') || name.includes('3-day');
+          if (doc.id === 'completion') return name.includes('completion');
+          if (doc.id === 'change-order') return name.includes('change order');
+          return false;
+        });
+        details[doc.id] = {
+          pdfCount: related.filter((entry) => entry.type === 'contract').length,
+          signatureCount: related.filter((entry) => String(entry.name || '').toLowerCase().includes('signature')).length,
+        };
+      }
       setSignedDocs(signed);
+      setSignedDocDetails(details);
     } catch (err) {
       console.error('Error fetching signed docs:', err);
     } finally {
@@ -58,6 +83,7 @@ export default function DocumentManager() {
         ) : (
           DOCUMENT_TYPES.map((doc) => {
             const isSigned = signedDocs.includes(doc.id);
+            const detail = signedDocDetails[doc.id];
             return (
               <button
                 key={doc.id}
@@ -76,6 +102,11 @@ export default function DocumentManager() {
                   <div className="text-left">
                     <p className="font-bold text-primary text-sm">{doc.title}</p>
                     <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">{doc.description}</p>
+                    {isSigned && detail && (
+                      <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-tight mt-1">
+                        {detail.pdfCount} PDF{detail.pdfCount === 1 ? '' : 's'} • {detail.signatureCount} signature{detail.signatureCount === 1 ? '' : 's'}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

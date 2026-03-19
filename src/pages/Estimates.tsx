@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calculator, Plus, Search, ChevronLeft, Filter, FileText, DollarSign } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
@@ -8,20 +8,22 @@ import { formatCurrency } from '../lib/utils';
 
 export default function Estimates() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const [estimates, setEstimates] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const contactId = searchParams.get('contactId');
 
   useEffect(() => {
     if (profile?.company_id) {
       fetchEstimates();
     }
-  }, [profile?.company_id]);
+  }, [profile?.company_id, contactId]);
 
   const fetchEstimates = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('estimates')
         .select(`
           *,
@@ -33,6 +35,12 @@ export default function Estimates() {
         `)
         .eq('company_id', profile.company_id)
         .order('created_at', { ascending: false });
+
+      if (contactId) {
+        query = query.eq('contact_id', contactId);
+      }
+
+      const { data, error } = await query;
       
       if (error) throw error;
       setEstimates(data || []);
@@ -67,7 +75,10 @@ export default function Estimates() {
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
             <ChevronLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-primary">Estimates</h1>
+          <div>
+            <h1 className="text-xl font-bold text-primary">{contactId ? 'Customer Estimates' : 'Estimates'}</h1>
+            {contactId && <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Filtered to this contact</p>}
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -150,7 +161,10 @@ export default function Estimates() {
       </div>
 
       {/* FAB */}
-      <button className="fixed bottom-24 right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10">
+      <button
+        onClick={() => contactId ? navigate(`/contacts/${contactId}/estimate`) : null}
+        className="fixed bottom-24 right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10"
+      >
         <Plus size={28} />
       </button>
     </div>

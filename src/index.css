@@ -9,6 +9,10 @@
 }
 
 @layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
   html, body {
     height: 100%;
     width: 100%;
@@ -20,6 +24,7 @@
 
   #root {
     height: 100%;
+    width: 100%;
     overflow-x: hidden;
   }
 }
@@ -55,7 +60,7 @@
 
 .scrollable {
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;
+  touch-action: pan-x pan-y;
 }
 
 /* iOS safe area support */

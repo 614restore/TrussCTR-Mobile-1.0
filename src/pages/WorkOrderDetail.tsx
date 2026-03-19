@@ -67,13 +67,38 @@ export default function WorkOrderDetail() {
     try {
       const { error } = await (supabase
         .from('work_orders') as any)
-        .update({ status: newStatus })
+        .update({
+          status: newStatus,
+          completed_date: newStatus === 'completed' ? new Date().toISOString() : null,
+        })
         .eq('id', id);
       
       if (error) throw error;
+      const contactStatusMap: Record<string, string> = {
+        scheduled: 'scheduled',
+        in_progress: 'in_progress',
+        completed: 'completed',
+      };
+      if (order?.contact_id && contactStatusMap[newStatus]) {
+        await (supabase.from('contacts') as any)
+          .update({ status: contactStatusMap[newStatus] })
+          .eq('id', order.contact_id);
+      }
+      if (profile?.id && order?.contact_id) {
+        await (supabase.from('communications') as any).insert({
+          contact_id: order.contact_id,
+          company_id: order.company_id,
+          type: 'note',
+          content: `Work order updated in mobile app: ${order.title} -> ${newStatus.replace('_', ' ')}`,
+          user_id: profile.id,
+          direction: 'outbound',
+        });
+      }
       setOrder({ ...order, status: newStatus });
+      showToast(`Work order marked ${newStatus.replace('_', ' ')}`);
     } catch (err) {
       console.error('Error updating status:', err);
+      showToast('Unable to update work order');
     }
   };
 

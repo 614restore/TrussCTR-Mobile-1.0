@@ -5,6 +5,8 @@ import { PageTransition } from '../components/PageTransition';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
+import { buildStoredDocumentUrl } from '../lib/documentAccess';
+import { handleAutoMove } from '../lib/store';
 
 type Elevation = 'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached';
 
@@ -47,7 +49,7 @@ export default function SmartInspection() {
         company_id: profile.company_id,
         name: `${activeElevation} Slope Photo`,
         type: 'photo',
-        url: publicUrl,
+        url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
         size: file.size,
         uploaded_by: profile.id,
       } as any);
@@ -92,6 +94,22 @@ export default function SmartInspection() {
         user_id: profile.id,
         direction: 'outbound',
       } as any);
+      try {
+        await (supabase.from('inspections') as any).upsert({
+          contact_id: id,
+          company_id: profile.company_id,
+          user_id: profile.id,
+          status: 'completed',
+          data: {
+            photoCounts,
+            checklist,
+            completedAt: new Date().toISOString(),
+          },
+        }, { onConflict: 'contact_id' });
+      } catch {
+        // ignore if inspections table is unavailable
+      }
+      await handleAutoMove(id, 'submit_inspection');
       alert('Inspection saved to timeline!');
       navigate(-1);
     } catch (err) {

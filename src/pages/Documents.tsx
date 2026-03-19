@@ -1,26 +1,36 @@
 import React, { useState, useEffect } from 'react';
 import { FileText, Search, ChevronLeft, Filter, Download, File, FileImage, FileCode } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
+import { buildDocumentDisplayUrl } from '../lib/documentAccess';
+
+function getSignatureParentName(name: string) {
+  if (name.includes(' Customer Signature - ')) return name.replace(' Customer Signature - ', ' - ');
+  if (name.includes(' Contractor Signature - ')) return name.replace(' Contractor Signature - ', ' - ');
+  if (name.includes(' Signature - ')) return name.replace(' Signature - ', ' - ');
+  return null;
+}
 
 export default function Documents() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const contactId = searchParams.get('contactId');
 
   useEffect(() => {
     if (profile?.company_id) {
       fetchDocuments();
     }
-  }, [profile?.company_id]);
+  }, [profile?.company_id, contactId]);
 
   const fetchDocuments = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('documents')
         .select(`
           *,
@@ -31,9 +41,22 @@ export default function Documents() {
         `)
         .eq('company_id', profile.company_id)
         .order('created_at', { ascending: false });
+
+      if (contactId) {
+        query = query.eq('contact_id', contactId);
+      }
+
+      const { data, error } = await query;
       
       if (error) throw error;
-      setDocuments(data || []);
+      const docs = data || [];
+      const withUrls = await Promise.all(docs.map(async (doc: any) => {
+        if (typeof doc.url === 'string') {
+          return { ...doc, displayUrl: await buildDocumentDisplayUrl(doc.url) };
+        }
+        return { ...doc, displayUrl: doc.url };
+      }));
+      setDocuments(withUrls);
     } catch (err) {
       console.error('Error fetching documents:', err);
     } finally {
@@ -47,11 +70,23 @@ export default function Documents() {
     doc.contacts?.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const signatureDocsByParent = new Map<string, any[]>();
+  for (const doc of filteredDocs) {
+    const parentName = getSignatureParentName(String(doc.name || ''));
+    if (!parentName) continue;
+    const current = signatureDocsByParent.get(parentName) || [];
+    current.push(doc);
+    signatureDocsByParent.set(parentName, current);
+  }
+
+  const visibleDocs = filteredDocs.filter((doc) => !getSignatureParentName(String(doc.name || '')));
+
   const getFileIcon = (type: string) => {
     switch (type) {
       case 'photo': return <FileImage className="text-rose-500" size={20} />;
       case 'contract': return <FileText className="text-blue-500" size={20} />;
       case 'estimate': return <FileCode className="text-emerald-500" size={20} />;
+      case 'insurance': return <FileText className="text-amber-500" size={20} />;
       default: return <File className="text-slate-400" size={20} />;
     }
   };
@@ -64,7 +99,10 @@ export default function Documents() {
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
             <ChevronLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-primary">Documents</h1>
+          <div>
+            <h1 className="text-xl font-bold text-primary">{contactId ? 'Customer Documents' : 'Documents'}</h1>
+            {contactId && <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Filtered to this contact</p>}
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -89,29 +127,55 @@ export default function Documents() {
           [1, 2, 3, 4].map(i => (
             <div key={i} className="h-20 bg-white rounded-2xl animate-pulse border border-slate-100" />
           ))
-        ) : filteredDocs.length > 0 ? (
-          filteredDocs.map((doc, i) => (
+        ) : visibleDocs.length > 0 ? (
+          visibleDocs.map((doc, i) => (
             <motion.div
               key={doc.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.05 }}
-              className="card p-4 flex items-center justify-between active:bg-slate-50 transition-colors"
+              className="card p-4 space-y-3 active:bg-slate-50 transition-colors"
             >
-              <div className="flex items-center gap-4">
-                <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
-                  {getFileIcon(doc.type)}
+              <button
+                onClick={() => navigate(`/documents/view/${doc.id}`)}
+                className="w-full flex items-center justify-between text-left"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center">
+                    {getFileIcon(doc.type)}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-primary text-sm truncate max-w-[180px]">{doc.name}</h3>
+                    <p className="text-[10px] text-slate-500">
+                      {doc.contacts?.first_name} {doc.contacts?.last_name} • {(doc.size / 1024).toFixed(1)} KB
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-bold text-primary text-sm truncate max-w-[180px]">{doc.name}</h3>
-                  <p className="text-[10px] text-slate-500">
-                    {doc.contacts?.first_name} {doc.contacts?.last_name} • {(doc.size / 1024).toFixed(1)} KB
-                  </p>
-                </div>
-              </div>
-              <button className="p-2 text-slate-300 hover:text-accent transition-colors">
-                <Download size={18} />
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    navigate(`/documents/view/${doc.id}`);
+                  }}
+                  className="p-2 text-slate-300 hover:text-accent transition-colors"
+                >
+                  <Download size={18} />
+                </button>
               </button>
+
+              {(signatureDocsByParent.get(String(doc.name || '')) || []).map((signatureDoc) => (
+                <div key={signatureDoc.id} className="ml-14 rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between">
+                  <div>
+                    <p className="text-[11px] font-bold text-slate-700">Attached signature</p>
+                    <p className="text-[10px] text-slate-500">{(signatureDoc.size / 1024).toFixed(1)} KB PNG</p>
+                  </div>
+                  <button
+                    onClick={() => navigate(`/documents/view/${signatureDoc.id}`)}
+                    className="text-[11px] font-bold text-accent"
+                  >
+                    View
+                  </button>
+                </div>
+              ))}
             </motion.div>
           ))
         ) : (

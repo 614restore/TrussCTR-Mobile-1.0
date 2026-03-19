@@ -20,17 +20,17 @@ export default function Layout() {
   ];
 
   return (
-    <div className="flex flex-col fixed inset-0 max-w-md mx-auto bg-slate-50 shadow-2xl relative">
+    <div className="fixed inset-0 relative mx-auto flex w-full max-w-md flex-col overflow-hidden bg-slate-50 shadow-2xl">
       {/* Safe area top spacer — pushes content below iOS status bar */}
       <div style={{ height: 'env(safe-area-inset-top)' }} className="bg-slate-50 shrink-0" />
       {/* Main Content */}
-      <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar scrollable" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
+      <main className="flex-1 min-h-0 w-full max-w-full overflow-y-auto overflow-x-hidden no-scrollbar scrollable" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
         <Outlet />
       </main>
 
       {/* Bottom Navigation — locked to viewport */}
       <nav
-        className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-slate-100 px-6 pt-3 flex justify-between items-center z-50"
+        className="fixed bottom-0 left-0 right-0 mx-auto flex w-full max-w-md items-center justify-between border-t border-slate-100 bg-white px-6 pt-3 z-50"
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))' }}
       >
         {navItems.map((item) => {

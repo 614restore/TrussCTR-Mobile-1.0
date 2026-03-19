@@ -2,6 +2,7 @@ import Foundation
 import Capacitor
 import AVFoundation
 import UIKit
+import Photos
 
 @objc(MultiShotCameraPlugin)
 public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
@@ -17,6 +18,7 @@ public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async {
             self.savedCall = call
             let controller = MultiShotCameraViewController()
+            controller.saveMode = call.getString("saveMode") ?? "app_files"
             controller.onDone = { urls in
                 self.savedCall?.resolve(["photos": urls])
                 self.savedCall = nil
@@ -42,6 +44,7 @@ public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
 final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptureDelegate {
     var onDone: (([String]) -> Void)?
     var onCancel: (() -> Void)?
+    var saveMode: String = "app_files"
 
     private let session = AVCaptureSession()
     private let output = AVCapturePhotoOutput()
@@ -160,13 +163,40 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         guard error == nil, let data = photo.fileDataRepresentation() else { return }
         let fileName = "capture_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
+        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let storedURL = (documentsURL ?? FileManager.default.temporaryDirectory).appendingPathComponent(fileName)
         do {
-            try data.write(to: tempURL)
-            capturedURLs.append(tempURL.absoluteString)
+            try data.write(to: storedURL, options: .atomic)
+            capturedURLs.append(storedURL.absoluteString)
             countLabel.text = "\(capturedURLs.count)"
+            if saveMode == "photo_library" {
+                saveToPhotoLibrary(data: data)
+            }
         } catch {
             // ignore write failures
+        }
+    }
+
+    private func saveToPhotoLibrary(data: Data) {
+        let saveBlock = {
+            PHPhotoLibrary.shared().performChanges({
+                let request = PHAssetCreationRequest.forAsset()
+                request.addResource(with: .photo, data: data, options: nil)
+            })
+        }
+
+        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        switch status {
+        case .authorized, .limited:
+            saveBlock()
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { newStatus in
+                if newStatus == .authorized || newStatus == .limited {
+                    saveBlock()
+                }
+            }
+        default:
+            break
         }
     }
 }

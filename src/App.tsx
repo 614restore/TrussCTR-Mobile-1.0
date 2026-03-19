@@ -15,6 +15,7 @@ import CrewSchedule from './pages/CrewSchedule';
 import MaterialOrders from './pages/MaterialOrders';
 import WorkOrderDetail from './pages/WorkOrderDetail';
 import EstimateDetail from './pages/EstimateDetail';
+import EstimateSigner from './pages/EstimateSigner';
 import Documents from './pages/Documents';
 import PhotoChecklist from './pages/PhotoChecklist';
 import Settings from './pages/Settings';
@@ -23,6 +24,7 @@ import Notifications from './pages/Notifications';
 import Login from './pages/Login';
 import DocumentManager from './pages/DocumentManager';
 import DocumentSigner from './pages/DocumentSigner';
+import DocumentViewer from './pages/DocumentViewer';
 import ReportBuilder from './pages/ReportBuilder';
 import RetailEstimator from './pages/RetailEstimator';
 import SmartInspection from './pages/SmartInspection';
@@ -62,6 +64,7 @@ function AppRoutes() {
           {/* Contact sub-routes */}
           <Route path="/contacts/:id/documents" element={<DocumentManager />} />
           <Route path="/contacts/:id/documents/:docType" element={<DocumentSigner />} />
+          <Route path="/documents/view/:documentId" element={<DocumentViewer />} />
           <Route path="/contacts/:id/report" element={<ReportBuilder />} />
           <Route path="/contacts/:id/estimate" element={<RetailEstimator />} />
           <Route path="/contacts/:id/inspection" element={<SmartInspection />} />
@@ -78,6 +81,7 @@ function AppRoutes() {
           <Route path="/material-orders" element={<MaterialOrders />} />
           <Route path="/work-orders/:id" element={<WorkOrderDetail />} />
           <Route path="/estimates/:id" element={<EstimateDetail />} />
+          <Route path="/estimates/:id/sign" element={<EstimateSigner />} />
           <Route path="/documents" element={<Documents />} />
           <Route path="/photo-checklist" element={<PhotoChecklist />} />
           <Route path="/settings" element={<Settings />} />

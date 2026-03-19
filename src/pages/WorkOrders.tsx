@@ -1,16 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { ClipboardList, Plus, Search, ChevronLeft, Filter, Truck, Calendar } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function WorkOrders() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const contactId = searchParams.get('contactId');
 
   const [toast, setToast] = useState<string | null>(null);
 
@@ -27,11 +29,11 @@ export default function WorkOrders() {
     if (profile?.company_id) {
       fetchWorkOrders();
     }
-  }, [profile?.company_id]);
+  }, [profile?.company_id, contactId]);
 
   const fetchWorkOrders = async () => {
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('work_orders')
         .select(`
           *,
@@ -43,6 +45,12 @@ export default function WorkOrders() {
         `)
         .eq('company_id', profile.company_id)
         .order('created_at', { ascending: false });
+
+      if (contactId) {
+        query = query.eq('contact_id', contactId);
+      }
+
+      const { data, error } = await query;
       
       if (error) throw error;
       setWorkOrders(data || []);
@@ -50,6 +58,65 @@ export default function WorkOrders() {
       console.error('Error fetching work orders:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createWorkOrder = async () => {
+    if (!contactId || !profile?.company_id) {
+      showToast('Open a customer first to create a work order');
+      return;
+    }
+
+    try {
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('id, first_name, last_name, company_id')
+        .eq('id', contactId)
+        .maybeSingle();
+      const contactRecord: any = contact;
+      const customerName = [contactRecord?.first_name ?? '', contactRecord?.last_name ?? '']
+        .filter(Boolean)
+        .join(' ');
+
+      const { data, error } = await (supabase.from('work_orders') as any)
+        .insert({
+          contact_id: contactId,
+          company_id: profile.company_id,
+          project_id: null,
+          title: `Work Order - ${customerName || 'Customer'}`,
+          description: 'Created from mobile work orders screen.',
+          status: 'scheduled',
+          assigned_to: null,
+          scheduled_date: null,
+          materials: {},
+          labor_cost: null,
+          material_cost: null,
+        })
+        .select('*')
+        .single();
+
+      if (error) throw error;
+
+      if (profile?.id) {
+        await (supabase.from('communications') as any).insert({
+          contact_id: contactId,
+          company_id: profile.company_id,
+          type: 'note',
+          content: `Work order created from mobile list screen: ${data.title}`,
+          user_id: profile.id,
+          direction: 'outbound',
+        });
+      }
+
+      await (supabase.from('contacts') as any)
+        .update({ status: 'scheduled' })
+        .eq('id', contactId);
+
+      showToast('Work order created');
+      navigate(`/work-orders/${data.id}`);
+    } catch (err) {
+      console.error('Error creating work order:', err);
+      showToast('Unable to create work order');
     }
   };
 
@@ -75,7 +142,10 @@ export default function WorkOrders() {
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
             <ChevronLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-primary">Work Orders</h1>
+          <div>
+            <h1 className="text-xl font-bold text-primary">{contactId ? 'Customer Work Orders' : 'Work Orders'}</h1>
+            {contactId && <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Filtered to this contact</p>}
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -158,7 +228,7 @@ export default function WorkOrders() {
 
       {/* FAB */}
       <button 
-        onClick={() => showToast('New Work Order feature coming soon')}
+        onClick={createWorkOrder}
         className="fixed bottom-24 right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10"
       >
         <Plus size={28} />

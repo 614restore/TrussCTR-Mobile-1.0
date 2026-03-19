@@ -14,11 +14,5 @@ public class BridgeViewController: CAPBridgeViewController {
 
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if bridge == nil {
-            NSLog("MultiShotCamera: bridge is nil in viewDidAppear")
-        } else {
-            NSLog("MultiShotCamera: registering in viewDidAppear")
-            bridge?.registerPluginType(MultiShotCameraPlugin.self)
-        }
     }
 }

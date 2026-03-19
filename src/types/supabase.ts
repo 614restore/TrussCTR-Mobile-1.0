@@ -147,6 +147,20 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['work_orders']['Row'], 'id' | 'created_at'>
         Update: Partial<Database['public']['Tables']['work_orders']['Row']>
       }
+      inspections: {
+        Row: {
+          id: string
+          company_id: string
+          contact_id: string
+          user_id: string
+          status: string
+          data: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: Omit<Database['public']['Tables']['inspections']['Row'], 'id' | 'created_at' | 'updated_at'>
+        Update: Partial<Database['public']['Tables']['inspections']['Row']>
+      }
       team_members: {
         Row: {
           id: string

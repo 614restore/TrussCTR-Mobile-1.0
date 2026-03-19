@@ -1,198 +1,624 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-  ArrowLeft, CheckCircle2, Share2,
-  MessageSquare, User, ShieldCheck, Check
-} from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, CheckCircle2, Download, Loader2, Share2 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { cn } from '../lib/utils';
+import { buildDocumentDisplayUrl, buildStoredDocumentUrl, fetchDocumentObjectUrl, resolveDocumentSignedUrl } from '../lib/documentAccess';
+import { uploadToAvailableBucket } from '../lib/pdfService';
+
+type PhotoDocument = {
+  id: string;
+  name: string;
+  url: string;
+  displayUrl?: string;
+  created_at?: string;
+};
+
+async function blobToDataUrl(blob: Blob) {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Unable to prepare image for PDF'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function loadPhotoForPdf(documentUrl: string) {
+  const loaded = await fetchDocumentObjectUrl(documentUrl);
+  try {
+    return await blobToDataUrl(loaded.blob);
+  } finally {
+    URL.revokeObjectURL(loaded.objectUrl);
+  }
+}
+
+function formatPropertyAddress(contact: any) {
+  return [contact?.address, contact?.city, contact?.state, contact?.zip].filter(Boolean).join(', ');
+}
+
+async function buildBeforeAfterReportPdf({
+  companyName,
+  companyAddress,
+  companyPhone,
+  companyEmail,
+  contactName,
+  propertyAddress,
+  reportTitle,
+  reportAudience,
+  progressSummary,
+  completionSummary,
+  projectStatus,
+  beforePhotos,
+  afterPhotos,
+}: {
+  companyName: string;
+  companyAddress: string;
+  companyPhone: string;
+  companyEmail: string;
+  contactName: string;
+  propertyAddress: string;
+  reportTitle: string;
+  reportAudience: string;
+  progressSummary: string;
+  completionSummary: string;
+  projectStatus: string;
+  beforePhotos: Array<{ name: string; dataUrl: string }>;
+  afterPhotos: Array<{ name: string; dataUrl: string }>;
+}) {
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const left = 14;
+  const right = pageWidth - 14;
+  const width = right - left;
+  let y = 16;
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageHeight - 16) {
+      pdf.addPage();
+      y = 16;
+    }
+  };
+
+  const sectionTitle = (title: string, subtitle?: string) => {
+    ensureSpace(14);
+    pdf.setFillColor(15, 23, 42);
+    pdf.roundedRect(left, y, width, 10, 3, 3, 'F');
+    pdf.setTextColor(255, 255, 255);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(11);
+    pdf.text(title, left + 4, y + 6.4);
+    y += 14;
+    if (subtitle) {
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8.5);
+      pdf.text(subtitle, left, y);
+      y += 6;
+    }
+  };
+
+  const paragraphBlock = (heading: string, body: string) => {
+    const lines = pdf.splitTextToSize(body || 'None provided.', width - 8);
+    const blockHeight = Math.max(18, lines.length * 4.2 + 10);
+    ensureSpace(blockHeight);
+    pdf.setFillColor(248, 250, 252);
+    pdf.roundedRect(left, y, width, blockHeight, 3, 3, 'F');
+    pdf.setTextColor(51, 65, 85);
+    pdf.setFont('helvetica', 'bold');
+    pdf.setFontSize(9);
+    pdf.text(heading, left + 4, y + 5);
+    pdf.setFont('helvetica', 'normal');
+    pdf.setFontSize(9);
+    pdf.text(lines, left + 4, y + 10);
+    y += blockHeight + 6;
+  };
+
+  const photoSection = (title: string, photos: Array<{ name: string; dataUrl: string }>) => {
+    sectionTitle(title, `${photos.length} photo${photos.length === 1 ? '' : 's'} included`);
+    if (!photos.length) {
+      paragraphBlock('Photo Log', 'No photos were selected for this section.');
+      return;
+    }
+
+    const cardWidth = (width - 6) / 2;
+    const imageHeight = 50;
+
+    photos.forEach((photo, index) => {
+      const x = index % 2 === 0 ? left : left + cardWidth + 6;
+      if (index % 2 === 0) {
+        ensureSpace(66);
+      }
+      if (index % 2 === 0 && index > 0) {
+        y += 4;
+      }
+
+      pdf.setDrawColor(226, 232, 240);
+      pdf.setFillColor(255, 255, 255);
+      pdf.roundedRect(x, y, cardWidth, 62, 3, 3, 'FD');
+      pdf.addImage(photo.dataUrl, photo.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG', x + 2, y + 2, cardWidth - 4, imageHeight, undefined, 'FAST');
+      pdf.setTextColor(51, 65, 85);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(8);
+      const photoLabel = pdf.splitTextToSize(photo.name, cardWidth - 6);
+      pdf.text(photoLabel, x + 3, y + 56);
+
+      if (index % 2 === 1 || index === photos.length - 1) {
+        y += 66;
+      }
+    });
+
+    y += 2;
+  };
+
+  pdf.setFillColor(30, 64, 175);
+  pdf.roundedRect(left, y, width, 28, 4, 4, 'F');
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(18);
+  pdf.text(companyName, left + 5, y + 10);
+  pdf.setFontSize(9);
+  pdf.text(reportTitle, left + 5, y + 17);
+  pdf.setFontSize(8);
+  pdf.text(`Prepared for ${reportAudience}`, left + 5, y + 23);
+  y += 34;
+
+  pdf.setTextColor(15, 23, 42);
+  pdf.setFontSize(10);
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('Customer', left, y);
+  pdf.text('Project Location', left + 92, y);
+  y += 5;
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(9.5);
+  pdf.text(pdf.splitTextToSize(contactName || 'Customer', 84), left, y);
+  pdf.text(pdf.splitTextToSize(propertyAddress || 'Project address pending', 84), left + 92, y);
+  y += 16;
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.text('Contractor Contact', left, y);
+  pdf.text('Current Pipeline Stage', left + 92, y);
+  y += 5;
+  pdf.setFont('helvetica', 'normal');
+  pdf.text(pdf.splitTextToSize([companyAddress, companyPhone, companyEmail].filter(Boolean).join('\n') || 'Company details pending', 84), left, y);
+  pdf.text(String(projectStatus || 'Unknown').replaceAll('_', ' '), left + 92, y);
+  y += 18;
+
+  paragraphBlock('Progress Summary', progressSummary);
+  paragraphBlock('Completion / Next-Step Summary', completionSummary);
+
+  photoSection('Before Conditions', beforePhotos);
+  photoSection('After / Current Conditions', afterPhotos);
+
+  ensureSpace(16);
+  pdf.setDrawColor(226, 232, 240);
+  pdf.line(left, y, right, y);
+  y += 6;
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(8);
+  pdf.text(`Generated ${new Date().toLocaleString()} • Saved from TrussCTR Mobile`, left, y);
+
+  return pdf.output('blob');
+}
+
+function PhotoCard({
+  photo,
+  selected,
+  onClick,
+  tone,
+}: {
+  photo: PhotoDocument;
+  selected: boolean;
+  onClick: () => void;
+  tone: 'before' | 'after';
+}) {
+  const activeClasses = tone === 'before'
+    ? 'border-amber-400 ring-2 ring-amber-200'
+    : 'border-emerald-400 ring-2 ring-emerald-200';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`overflow-hidden rounded-2xl border bg-white text-left shadow-sm transition ${selected ? activeClasses : 'border-slate-200'}`}
+    >
+      <div className="aspect-[4/3] bg-slate-100">
+        <img
+          src={photo.displayUrl || photo.url}
+          alt={photo.name}
+          className="h-full w-full object-cover"
+          referrerPolicy="no-referrer"
+        />
+      </div>
+      <div className="space-y-1 p-3">
+        <p className="truncate text-xs font-bold text-primary">{photo.name}</p>
+        <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400">
+          {selected ? (tone === 'before' ? 'Before selected' : 'After selected') : 'Tap to add'}
+        </p>
+      </div>
+    </button>
+  );
+}
 
 export default function ReportBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { profile } = useAuth();
-  const [photos, setPhotos] = useState<any[]>([]);
-  const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
-  const [reportNote, setReportNote] = useState('');
-  const [isShared, setIsShared] = useState(false);
   const [contact, setContact] = useState<any>(null);
+  const [company, setCompany] = useState<any>(null);
+  const [photos, setPhotos] = useState<PhotoDocument[]>([]);
+  const [beforeSelection, setBeforeSelection] = useState<string[]>([]);
+  const [afterSelection, setAfterSelection] = useState<string[]>([]);
+  const [reportTitle, setReportTitle] = useState('Before & After Project Report');
+  const [reportAudience, setReportAudience] = useState('Homeowner and insurance adjuster');
+  const [progressSummary, setProgressSummary] = useState('');
+  const [completionSummary, setCompletionSummary] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
+  const [savedDocumentUrl, setSavedDocumentUrl] = useState<string | null>(null);
+  const [savedBlob, setSavedBlob] = useState<Blob | null>(null);
 
   useEffect(() => {
-    if (id) {
-      fetchPhotos();
-      fetchContact();
-    }
-  }, [id]);
+    const fetchData = async () => {
+      if (!id || !profile?.company_id) return;
+      setLoading(true);
+      try {
+        const [{ data: contactData, error: contactError }, { data: photoData, error: photoError }, { data: companyData, error: companyError }] = await Promise.all([
+          supabase.from('contacts').select('*').eq('id', id).single(),
+          supabase.from('documents').select('*').eq('contact_id', id).eq('type', 'photo').order('created_at', { ascending: true }),
+          supabase.from('companies').select('*').eq('id', profile.company_id).single(),
+        ]);
 
-  const fetchContact = async () => {
-    const { data } = await supabase
-      .from('contacts')
-      .select('first_name, last_name, address, city, state')
-      .eq('id', id)
-      .single();
-    if (data) setContact(data);
-  };
+        if (contactError) throw contactError;
+        if (photoError) throw photoError;
+        setContact(contactData);
+        setCompany(companyError ? null : companyData);
 
-  const fetchPhotos = async () => {
-    const { data, error } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('contact_id', id)
-      .eq('type', 'photo');
-    if (!error) setPhotos(data || []);
-  };
+        const preparedPhotos = await Promise.all((photoData || []).map(async (photo: any) => ({
+          ...photo,
+          displayUrl: typeof photo.url === 'string' ? await buildDocumentDisplayUrl(photo.url) : photo.url,
+        })));
 
-  const togglePhoto = (photoId: string) => {
-    setSelectedPhotos((prev) =>
-      prev.includes(photoId) ? prev.filter((p) => p !== photoId) : [...prev, photoId]
-    );
-  };
-
-  const handleShare = async () => {
-    if (!contact || !profile) return;
-
-    // Log the report share to communications timeline
-    await supabase.from('communications').insert({
-      contact_id: id,
-      company_id: profile.company_id,
-      type: 'note',
-      content: `📋 Insurance Report Generated — ${selectedPhotos.length} photos selected. Notes: ${reportNote || 'None'}`,
-      user_id: profile.id,
-      direction: 'outbound',
-    } as any);
-
-    const shareData = {
-      title: `Inspection Report — ${contact.first_name} ${contact.last_name}`,
-      text: `View roof inspection report for ${contact.address}: ${reportNote}`,
-      url: window.location.href,
+        setPhotos(preparedPhotos);
+      } catch (err) {
+        console.error('Error loading report builder:', err);
+      } finally {
+        setLoading(false);
+      }
     };
 
-    if (navigator.share) {
-      try {
-        await navigator.share(shareData);
-      } catch (err) {
-        console.error(err);
-      }
-    } else {
-      setIsShared(true);
-      setTimeout(() => setIsShared(false), 3000);
+    fetchData();
+  }, [id, profile?.company_id]);
+
+  const beforePhotos = useMemo(
+    () => photos.filter((photo) => beforeSelection.includes(photo.id)),
+    [photos, beforeSelection]
+  );
+  const afterPhotos = useMemo(
+    () => photos.filter((photo) => afterSelection.includes(photo.id)),
+    [photos, afterSelection]
+  );
+
+  const togglePhoto = (photoId: string, bucket: 'before' | 'after') => {
+    if (bucket === 'before') {
+      setBeforeSelection((current) =>
+        current.includes(photoId) ? current.filter((id) => id !== photoId) : [...current, photoId]
+      );
+      setAfterSelection((current) => current.filter((id) => id !== photoId));
+      return;
+    }
+
+    setAfterSelection((current) =>
+      current.includes(photoId) ? current.filter((id) => id !== photoId) : [...current, photoId]
+    );
+    setBeforeSelection((current) => current.filter((id) => id !== photoId));
+  };
+
+  const saveReport = async () => {
+    if (!id || !profile || !contact) return;
+    if (!beforeSelection.length && !afterSelection.length) {
+      alert('Select at least one before or after photo before saving the report.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const preparedBefore = await Promise.all(beforePhotos.map(async (photo) => ({
+        name: photo.name,
+        dataUrl: await loadPhotoForPdf(photo.url),
+      })));
+
+      const preparedAfter = await Promise.all(afterPhotos.map(async (photo) => ({
+        name: photo.name,
+        dataUrl: await loadPhotoForPdf(photo.url),
+      })));
+
+      const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Customer';
+      const propertyAddress = formatPropertyAddress(contact);
+      const pdfBlob = await buildBeforeAfterReportPdf({
+        companyName: company?.name || 'TrussCTR',
+        companyAddress: company?.address || 'Company address pending',
+        companyPhone: company?.phone || '',
+        companyEmail: company?.email || '',
+        contactName,
+        propertyAddress,
+        reportTitle,
+        reportAudience,
+        progressSummary,
+        completionSummary,
+        projectStatus: contact.status,
+        beforePhotos: preparedBefore,
+        afterPhotos: preparedAfter,
+      });
+
+      const fileName = `${reportTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${Date.now()}.pdf`;
+      const uploaded = await uploadToAvailableBucket(`${id}/reports/${fileName}`, pdfBlob, 'application/pdf');
+      const savedUrl = buildStoredDocumentUrl(uploaded.publicUrl, uploaded.bucket, uploaded.path);
+
+      const { data: savedDocument, error: saveError } = await (supabase.from('documents') as any)
+        .insert({
+          contact_id: id,
+          company_id: profile.company_id,
+          name: `${reportTitle} - ${contactName}`,
+          type: 'insurance',
+          url: savedUrl,
+          size: pdfBlob.size,
+          uploaded_by: profile.id,
+        })
+        .select('id')
+        .single();
+
+      if (saveError) throw saveError;
+
+      await (supabase.from('communications') as any).insert({
+        contact_id: id,
+        company_id: profile.company_id,
+        type: 'note',
+        content: `Before & after report saved. Before photos: ${beforeSelection.length}. After photos: ${afterSelection.length}. Audience: ${reportAudience}.`,
+        user_id: profile.id,
+        direction: 'outbound',
+      });
+
+      setSavedBlob(pdfBlob);
+      setSavedDocumentId(savedDocument?.id || null);
+      setSavedDocumentUrl(uploaded.signedUrl);
+    } catch (err) {
+      console.error('Error saving before/after report:', err);
+      alert(`Unable to save the report. ${(err as Error)?.message || ''}`);
+    } finally {
+      setSaving(false);
     }
   };
 
-  return (
-    <div className="min-h-screen bg-slate-50 pb-28">
-      <nav className="p-4 bg-white border-b border-slate-100 flex items-center gap-4 sticky top-0 z-10 shadow-sm">
-        <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
-          <ArrowLeft size={24} />
-        </button>
-        <h1 className="font-bold text-primary">Build Insurance Report</h1>
-      </nav>
+  const shareSavedReport = async () => {
+    if (!savedDocumentId || !savedDocumentUrl || !savedBlob) {
+      alert('Save the report first before sharing it.');
+      return;
+    }
 
-      <div className="p-6 space-y-8">
-        {/* Photo Selection */}
-        <section>
-          <div className="flex justify-between items-end mb-3">
-            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Select Key Evidence</h2>
-            <span className="text-xs font-bold text-accent">{selectedPhotos.length} Selected</span>
+    const contactName = `${contact?.first_name || ''} ${contact?.last_name || ''}`.trim() || 'Customer';
+    const propertyAddress = formatPropertyAddress(contact);
+    setSharing(true);
+    try {
+      const file = new File([savedBlob], `${reportTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.pdf`, { type: 'application/pdf' });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: `${reportTitle} - ${contactName}`,
+          text: `Project progress report for ${contactName}${propertyAddress ? ` at ${propertyAddress}` : ''}`,
+          files: [file],
+        });
+      } else if (navigator.share) {
+        await navigator.share({
+          title: `${reportTitle} - ${contactName}`,
+          text: `Project progress report for ${contactName}${propertyAddress ? ` at ${propertyAddress}` : ''}`,
+          url: savedDocumentUrl,
+        });
+      } else {
+        window.open(savedDocumentUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      console.error('Error sharing before/after report:', err);
+    } finally {
+      setSharing(false);
+    }
+  };
+
+  const reopenSavedReport = async () => {
+    if (savedDocumentId) {
+      navigate(`/documents/view/${savedDocumentId}`);
+      return;
+    }
+
+    if (savedDocumentUrl) {
+      try {
+        const { signedUrl } = await resolveDocumentSignedUrl(savedDocumentUrl);
+        window.open(signedUrl, '_blank', 'noopener,noreferrer');
+      } catch {
+        window.open(savedDocumentUrl, '_blank', 'noopener,noreferrer');
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <Loader2 className="h-8 w-8 animate-spin text-accent" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-100">
+      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-slate-100">
+        <nav className="sticky top-0 z-20 flex items-center gap-4 border-b border-slate-100 bg-white p-4 shadow-sm">
+          <button onClick={() => navigate(-1)} className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-100">
+            <ArrowLeft size={20} />
+          </button>
+          <div className="min-w-0">
+            <h1 className="truncate text-sm font-bold text-primary">Before & After Report</h1>
+            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Saved PDF for homeowners and adjusters</p>
+          </div>
+        </nav>
+
+        <div className="flex-1 space-y-4 overflow-y-auto p-4 pb-32">
+          <div className="rounded-3xl bg-primary p-5 text-white shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-blue-100">Project Report</p>
+            <h2 className="mt-2 text-2xl font-black">{contact?.first_name} {contact?.last_name}</h2>
+            <p className="mt-2 text-sm text-blue-100">{formatPropertyAddress(contact) || 'Property address pending'}</p>
+            <p className="mt-4 inline-flex rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em]">
+              Current stage: {String(contact?.status || 'unknown').replaceAll('_', ' ')}
+            </p>
           </div>
 
-          {photos.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-2xl border-2 border-dashed border-slate-200">
-              <p className="text-slate-400 text-sm">No photos uploaded for this contact yet.</p>
-              <p className="text-slate-300 text-xs mt-1">Upload photos from the Docs tab first.</p>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Report title</label>
+                <input
+                  value={reportTitle}
+                  onChange={(event) => setReportTitle(event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-primary outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Audience</label>
+                <input
+                  value={reportAudience}
+                  onChange={(event) => setReportAudience(event.target.value)}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-primary outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Progress summary</label>
+                <textarea
+                  value={progressSummary}
+                  onChange={(event) => setProgressSummary(event.target.value)}
+                  placeholder="Summarize where the project started, what damage or conditions were documented, and what changed during the job."
+                  className="mt-2 h-28 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-primary outline-none focus:border-accent"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Completion / next-step summary</label>
+                <textarea
+                  value={completionSummary}
+                  onChange={(event) => setCompletionSummary(event.target.value)}
+                  placeholder="Summarize completed work, open items, pick-up-check notes, or what the homeowner / adjuster should review next."
+                  className="mt-2 h-28 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm text-primary outline-none focus:border-accent"
+                />
+              </div>
             </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              {photos.map((photo) => {
-                const active = selectedPhotos.includes(photo.id);
-                return (
-                  <button
-                    key={photo.id}
-                    onClick={() => togglePhoto(photo.id)}
-                    className={cn(
-                      'relative aspect-square rounded-2xl overflow-hidden border-4 transition-all',
-                      active ? 'border-accent scale-95' : 'border-transparent'
-                    )}
-                  >
-                    <img src={photo.url} className="w-full h-full object-cover" />
-                    <div
-                      className={cn(
-                        'absolute inset-0 flex items-center justify-center transition-colors',
-                        active ? 'bg-accent/20' : 'bg-transparent'
-                      )}
-                    >
-                      {active && <CheckCircle2 className="text-white fill-accent" size={32} />}
-                    </div>
-                    <div className="absolute bottom-0 inset-x-0 bg-black/50 p-2">
-                      <p className="text-[10px] text-white font-bold truncate">{photo.name}</p>
-                    </div>
-                  </button>
-                );
-              })}
+          </div>
+
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-amber-900">Before Photos</h3>
+                <p className="text-[11px] text-amber-700">Select evidence of pre-job conditions, storm damage, or starting scope.</p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">
+                {beforeSelection.length} selected
+              </span>
+            </div>
+            {photos.length ? (
+              <div className="grid grid-cols-2 gap-3">
+                {photos.map((photo) => (
+                  <PhotoCard
+                    key={`before-${photo.id}`}
+                    photo={photo}
+                    selected={beforeSelection.includes(photo.id)}
+                    onClick={() => togglePhoto(photo.id, 'before')}
+                    tone="before"
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-amber-800">No customer photos are available yet. Upload project photos from the Docs tab first.</p>
+            )}
+          </div>
+
+          <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-emerald-900">After / Current Photos</h3>
+                <p className="text-[11px] text-emerald-700">Select progress or completion images to show results and current job condition.</p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-emerald-700">
+                {afterSelection.length} selected
+              </span>
+            </div>
+            {photos.length ? (
+              <div className="grid grid-cols-2 gap-3">
+                {photos.map((photo) => (
+                  <PhotoCard
+                    key={`after-${photo.id}`}
+                    photo={photo}
+                    selected={afterSelection.includes(photo.id)}
+                    onClick={() => togglePhoto(photo.id, 'after')}
+                    tone="after"
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-emerald-800">No customer photos are available yet. Upload project photos from the Docs tab first.</p>
+            )}
+          </div>
+
+          {(savedDocumentId || savedDocumentUrl) && (
+            <div className="rounded-3xl border border-emerald-200 bg-white p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                  <CheckCircle2 size={22} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold text-emerald-700">Report saved to Documents</p>
+                  <p className="mt-1 text-[11px] text-slate-500">You can reopen it later from the customer Docs tab or the Documents screen.</p>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={reopenSavedReport}
+                  className="rounded-2xl bg-primary py-3 text-sm font-bold text-white"
+                >
+                  View PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={shareSavedReport}
+                  disabled={sharing}
+                  className="rounded-2xl bg-slate-100 py-3 text-sm font-bold text-primary disabled:opacity-50"
+                >
+                  {sharing ? 'Sharing...' : 'Share'}
+                </button>
+              </div>
             </div>
           )}
-        </section>
-
-        {/* Field Notes */}
-        <section className="space-y-3">
-          <div className="flex items-center gap-2 text-slate-400">
-            <MessageSquare size={16} />
-            <h2 className="text-xs font-bold uppercase tracking-widest">Adjuster Observations</h2>
-          </div>
-          <textarea
-            className="w-full p-4 bg-white border border-slate-100 rounded-2xl h-32 text-sm outline-none focus:ring-2 focus:ring-accent/20 shadow-sm"
-            placeholder="Summarize storm evidence for the claim handler..."
-            value={reportNote}
-            onChange={(e) => setReportNote(e.target.value)}
-          />
-        </section>
-
-        {/* Share Actions */}
-        <section className="space-y-3">
-          <h2 className="text-center text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">
-            Send Report To
-          </h2>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              onClick={handleShare}
-              className="flex flex-col items-center gap-3 p-6 bg-white border border-slate-100 rounded-2xl shadow-sm active:bg-slate-100"
-            >
-              <div className="p-3 bg-blue-50 rounded-full text-blue-600">
-                <ShieldCheck size={24} />
-              </div>
-              <span className="text-sm font-bold">Adjuster</span>
-            </button>
-            <button
-              onClick={handleShare}
-              className="flex flex-col items-center gap-3 p-6 bg-white border border-slate-100 rounded-2xl shadow-sm active:bg-slate-100"
-            >
-              <div className="p-3 bg-amber-50 rounded-full text-amber-600">
-                <User size={24} />
-              </div>
-              <span className="text-sm font-bold">Homeowner</span>
-            </button>
-          </div>
-        </section>
-      </div>
-
-      {/* Copied Toast */}
-      {isShared && (
-        <div className="fixed bottom-28 inset-x-6 bg-slate-900 text-white p-4 rounded-xl flex items-center justify-between shadow-2xl">
-          <span className="text-sm font-bold">Report Link Copied!</span>
-          <Check size={18} className="text-emerald-400" />
         </div>
-      )}
 
-      {/* Bottom CTA */}
-      <div className="fixed bottom-0 w-full max-w-[480px] p-4 bg-white border-t border-slate-100">
-        <button
-          onClick={handleShare}
-          className="w-full bg-accent text-white font-black py-4 rounded-xl flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-transform"
-        >
-          <Share2 size={20} />
-          SHARE FINAL REPORT
-        </button>
+        <div className="fixed bottom-0 w-full max-w-md border-t border-slate-100 bg-white p-4 shadow-[0_-8px_24px_rgba(15,23,42,0.08)]">
+          <div className="grid grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={saveReport}
+              disabled={saving}
+              className="col-span-2 rounded-2xl bg-primary py-4 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {saving ? 'Saving Report...' : 'Save Report PDF'}
+            </button>
+            <button
+              type="button"
+              onClick={savedDocumentId ? reopenSavedReport : shareSavedReport}
+              disabled={!savedDocumentId || saving}
+              className="rounded-2xl bg-slate-100 py-4 text-sm font-bold text-primary disabled:opacity-50"
+            >
+              {savedDocumentId ? <Download className="mx-auto h-5 w-5" /> : <Share2 className="mx-auto h-5 w-5" />}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

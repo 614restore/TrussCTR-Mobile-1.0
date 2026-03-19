@@ -13,7 +13,7 @@ export default function HelpSupport() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 pb-20">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10">
         <div className="flex items-center gap-4 mb-6">
@@ -33,7 +33,7 @@ export default function HelpSupport() {
         </div>
       </div>
 
-      <div className="p-6 space-y-8">
+      <div className="w-full max-w-full p-6 space-y-8 overflow-x-hidden">
         {/* Contact Support */}
         <div className="space-y-3">
           <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Contact Support</h2>

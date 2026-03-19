@@ -60,6 +60,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(session);
       setUser(session?.user ?? null);
 
+      if (event === 'TOKEN_REFRESHED' && session?.user) {
+        // After dormancy: token refreshed but profile may be null — re-fetch if needed
+        setProfile(prev => {
+          if (!prev) {
+            isFetchingProfile.current = false; // allow re-fetch
+            fetchProfile(session.user.id, session.user.email);
+          }
+          return prev;
+        });
+        return;
+      }
+
       if (session?.user) {
         if (lastUserId.current === session.user.id && isFetchingProfile.current) return;
         lastUserId.current = session.user.id;
@@ -70,11 +82,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
+    // Re-check profile when app returns from background / tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (!session?.user) return;
+        setSession(session);
+        setUser(session.user);
+        setProfile(prev => {
+          if (!prev) {
+            isFetchingProfile.current = false; // clear stale guard
+            fetchProfile(session.user.id, session.user.email);
+          }
+          return prev;
+        });
+      });
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       isMounted = false;
       subscription.unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
+
 
   const fetchProfile = async (userId: string, email?: string) => {
     // Prevent duplicate simultaneous fetches
@@ -142,6 +174,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // Safety-net: if user is present but profile is null after loading,
+  // schedule a recovery re-fetch. This covers any edge case the event handlers miss.
+  useEffect(() => {
+    if (loading || !user || profile) return;
+    const timer = window.setTimeout(() => {
+      console.warn('[Auth] User present but profile missing — attempting recovery fetch.');
+      isFetchingProfile.current = false; // bypass guard
+      fetchProfile(user.id, user.email);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user, profile]);
+
   const refreshProfile = async () => {
     if (user?.id) {
       setLoading(true);
@@ -149,6 +194,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       await fetchProfile(user.id, user.email);
     }
   };
+
 
   return (
     <AuthContext.Provider value={{ session, user, profile, loading, refreshProfile }}>

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User, ChevronLeft, ChevronRight, Shield, FileText, Briefcase, Calendar, ClipboardList } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -29,6 +29,19 @@ export default function Pipeline() {
   const [searchQuery, setSearchQuery] = useState('');
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const sectionScrollerRef = useRef<HTMLDivElement | null>(null);
+  const [canScrollSectionsLeft, setCanScrollSectionsLeft] = useState(false);
+  const [canScrollSectionsRight, setCanScrollSectionsRight] = useState(false);
+
+  const pipelineSections = [
+    { id: 'pipeline', label: 'Pipeline', icon: LayoutGrid, action: () => setViewMode('kanban') },
+    { id: 'inspection', label: 'Inspection', icon: Shield, action: () => navigate('/tools') },
+    { id: 'documents', label: 'Documents', icon: FileText, action: () => navigate('/documents') },
+    { id: 'financial', label: 'Financial', icon: DollarSign, action: () => navigate('/estimates-list') },
+    { id: 'work-orders', label: 'Work Orders', icon: ClipboardList, action: () => navigate('/work-orders') },
+    { id: 'calendar', label: 'Calendar', icon: Calendar, action: () => navigate('/calendar') },
+    { id: 'reports', label: 'Reports', icon: Briefcase, action: () => navigate('/reports') },
+  ];
 
   useEffect(() => {
     if (!profile?.company_id) {
@@ -66,6 +79,19 @@ export default function Pipeline() {
     };
   }, [profile?.company_id, loadingAuth]);
 
+  useEffect(() => {
+    const updateSectionOverflow = () => {
+      const node = sectionScrollerRef.current;
+      if (!node) return;
+      setCanScrollSectionsLeft(node.scrollLeft > 8);
+      setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
+    };
+
+    updateSectionOverflow();
+    window.addEventListener('resize', updateSectionOverflow);
+    return () => window.removeEventListener('resize', updateSectionOverflow);
+  }, []);
+
   const fetchContacts = async () => {
     try {
       const { data, error } = await supabase
@@ -97,6 +123,16 @@ export default function Pipeline() {
     `${c.first_name} ${c.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
     c.address?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const scrollSections = (direction: 'left' | 'right') => {
+    const node = sectionScrollerRef.current;
+    if (!node) return;
+    node.scrollBy({ left: direction === 'left' ? -180 : 180, behavior: 'smooth' });
+    window.setTimeout(() => {
+      setCanScrollSectionsLeft(node.scrollLeft > 8);
+      setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
+    }, 220);
+  };
 
   return (
     <div className="h-full flex flex-col bg-slate-50">
@@ -140,6 +176,63 @@ export default function Pipeline() {
           <button className="bg-slate-100 p-3 rounded-2xl text-slate-600 active:scale-95 transition-transform">
             <Filter size={20} />
           </button>
+        </div>
+      </div>
+
+      <div className="relative border-b border-slate-100 bg-white">
+        <div className="px-6 pt-3 flex items-center justify-between">
+          <p className="text-[10px] font-black uppercase tracking-[0.24em] text-slate-400">Sections</p>
+          {(canScrollSectionsLeft || canScrollSectionsRight) && (
+            <p className="text-[10px] font-bold uppercase tracking-wider text-accent">Swipe for more</p>
+          )}
+        </div>
+        {canScrollSectionsLeft && (
+          <button
+            type="button"
+            onClick={() => scrollSections('left')}
+            className="absolute left-2 top-[calc(50%+8px)] z-10 -translate-y-1/2 rounded-full bg-accent p-2 text-white shadow-lg shadow-accent/30"
+          >
+            <ChevronLeft size={16} />
+          </button>
+        )}
+        {canScrollSectionsRight && (
+          <button
+            type="button"
+            onClick={() => scrollSections('right')}
+            className="absolute right-2 top-[calc(50%+8px)] z-10 -translate-y-1/2 rounded-full bg-accent p-2 text-white shadow-lg shadow-accent/30"
+          >
+            <ChevronRight size={16} />
+          </button>
+        )}
+        {canScrollSectionsLeft && <div className="pointer-events-none absolute inset-y-0 left-0 w-14 bg-gradient-to-r from-white via-white/90 to-transparent" />}
+        {canScrollSectionsRight && <div className="pointer-events-none absolute inset-y-0 right-0 w-14 bg-gradient-to-l from-white via-white/90 to-transparent" />}
+        <div
+          ref={sectionScrollerRef}
+          onScroll={() => {
+            const node = sectionScrollerRef.current;
+            if (!node) return;
+            setCanScrollSectionsLeft(node.scrollLeft > 8);
+            setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
+          }}
+          className="px-12 pb-1 overflow-x-auto no-scrollbar"
+        >
+          <div className="flex gap-4 min-w-max">
+            {pipelineSections.map((section) => {
+              const Icon = section.icon;
+              const isActive = section.id === 'pipeline' && viewMode === 'kanban';
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  onClick={section.action}
+                  className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}
+                >
+                  <Icon size={18} />
+                  <span className="text-sm font-bold whitespace-nowrap">{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

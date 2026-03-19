@@ -7,6 +7,8 @@ import { formatCurrency } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
+import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
+import { getPipelineStageLabel } from '../lib/pipelineStages';
 
 const STAGE_COLORS: Record<string, string> = {
   lead: 'bg-blue-500',
@@ -41,6 +43,7 @@ export default function Dashboard() {
   });
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,12 +77,20 @@ export default function Dashboard() {
 
   const fetchDashboardData = async () => {
     try {
-      const { data: contacts, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('company_id', profile.company_id);
+      const [{ data: contacts, error }, { data: workOrders, error: workOrderError }] = await Promise.all([
+        supabase
+          .from('contacts')
+          .select('*')
+          .eq('company_id', profile.company_id),
+        supabase
+          .from('work_orders')
+          .select('*')
+          .eq('company_id', profile.company_id)
+          .order('scheduled_date', { ascending: true }),
+      ]);
 
       if (error) throw error;
+      if (workOrderError) throw workOrderError;
       if (!contacts) return;
 
       const now = new Date();
@@ -113,6 +124,20 @@ export default function Dashboard() {
         }));
       
       setRecentActivity(activity);
+
+      const workOrdersByContact = new Map<string, any[]>();
+      for (const order of workOrders || []) {
+        const current = workOrdersByContact.get(order.contact_id) || [];
+        current.push(order);
+        workOrdersByContact.set(order.contact_id, current);
+      }
+
+      const nextEvents = (contacts as any[])
+        .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
+        .filter((event) => new Date(event.date).getTime() >= Date.now())
+        .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime())
+        .slice(0, 4);
+      setUpcomingEvents(nextEvents);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -242,6 +267,43 @@ export default function Dashboard() {
                 <p className="text-[10px] text-slate-400">{activity.time}</p>
               </div>
             </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex justify-between items-center px-1">
+          <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Upcoming</h2>
+          <button
+            onClick={() => navigate('/calendar')}
+            className="text-accent text-xs font-bold"
+          >
+            Open Calendar
+          </button>
+        </div>
+        <div className="space-y-3">
+          {upcomingEvents.length === 0 ? (
+            <div className="card p-6 text-center text-slate-400 text-sm">No upcoming scheduled events</div>
+          ) : upcomingEvents.map((event) => (
+            <button
+              key={event.id}
+              onClick={() => navigate(`/contacts/${event.contactId}`)}
+              className="card w-full p-4 text-left active:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-bold text-primary">{event.title}</p>
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                    {new Date(event.date).toLocaleString()}
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-slate-300" />
+              </div>
+              <p className="mt-2 text-sm font-bold text-slate-700">{event.contactName}</p>
+              <p className="mt-1 text-xs text-slate-500">
+                {event.location || 'Location pending'}{event.crew ? ` • Crew: ${event.crew}` : ''}
+              </p>
+            </button>
           ))}
         </div>
       </div>

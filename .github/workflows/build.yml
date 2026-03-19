@@ -1,0 +1,57 @@
+name: TrussCTR Mobile — Build & Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build Web + Sync iOS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: npm run build
+
+      - name: Sync Capacitor iOS
+        run: npx cap sync ios --no-build
+
+      - name: Upload iOS folder as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-capacitor-sync-${{ github.sha }}
+          path: ios/
+          retention-days: 7
+
+  # Optional: trigger Vercel deploy on main push
+  # Vercel auto-deploys from GitHub if connected — this is a no-op placeholder.
+  # Remove this job if you're using Vercel's native GitHub integration.
+  notify-success:
+    name: Notify Build Success
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Success
+        run: echo "✅ Build passed on main. Ready for Xcode archive."
