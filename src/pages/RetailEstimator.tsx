@@ -53,6 +53,7 @@ export default function RetailEstimator() {
   const [items, setItems] = useState<LineItem[]>(buildPresetItems('roof_replacement'));
   const [showLineItems, setShowLineItems] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadContact = async () => {
@@ -118,11 +119,30 @@ export default function RetailEstimator() {
   };
 
   const saveEstimate = async () => {
-    if (!id || !profile) return;
+    setSaveError(null);
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const session = sessionData?.session;
+
+    if (!id) {
+      setSaveError('No contact ID. Open this estimator from a contact.');
+      return;
+    }
+    if (!session) {
+      setSaveError('Not logged in. Restart the app and try again.');
+      return;
+    }
+    if (!profile) {
+      setSaveError('Profile not loaded yet. Wait a moment and try again.');
+      return;
+    }
+
     setSaving(true);
     try {
       const estimateNumber = `EST-${Date.now().toString().slice(-6)}`;
-      const estimatePayload = {
+
+      // Only include columns that exist in your estimates table
+      const estimatePayload: any = {
         contact_id: id,
         company_id: profile.company_id,
         title: estimateTitle,
@@ -137,8 +157,6 @@ export default function RetailEstimator() {
           ...activeItems,
         ],
         subtotal: grandTotal,
-        tax_rate: 0,
-        tax_amount: 0,
         total: grandTotal,
         notes: serializeEstimateNotes(
           {
@@ -149,10 +167,13 @@ export default function RetailEstimator() {
           },
           `${customerMessage}\n\nEstimate #: ${estimateNumber}\n${additionalNotes.trim()}`
         ),
-        status: 'draft' as const,
+        status: 'draft',
       };
 
-      const { data, error } = await (supabase.from('estimates') as any).insert(estimatePayload).select('*').single();
+      const { data, error } = await (supabase.from('estimates') as any)
+        .insert(estimatePayload)
+        .select('*')
+        .single();
       if (error) throw error;
 
       await (supabase.from('contacts') as any)
@@ -172,33 +193,75 @@ export default function RetailEstimator() {
         direction: 'outbound',
       });
 
-      if (!data?.id) {
-        throw new Error('Estimate created without a returned id.');
-      }
-
+      if (!data?.id) throw new Error('Estimate created without a returned id.');
       navigate(`/estimates/${data.id}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving estimate:', err);
-      alert('Failed to save estimate.');
+      setSaveError(err?.message || 'Failed to save. Check connection and try again.');
     } finally {
       setSaving(false);
     }
   };
 
+  const SaveButton = () => (
+    <button
+      onClick={saveEstimate}
+      disabled={saving}
+      className="flex w-full items-center justify-center gap-2 rounded-2xl bg-accent py-4 font-black text-white shadow-xl transition-transform active:scale-[0.98] disabled:opacity-60"
+    >
+      <Save size={20} />
+      {saving ? 'Saving Quote...' : 'Create Quote'}
+    </button>
+  );
+
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50">
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col overflow-x-hidden bg-slate-50 pb-28">
-      <nav className="sticky top-0 z-10 flex items-center gap-4 border-b border-slate-100 bg-white p-4 shadow-sm">
+    <div
+      className="flex flex-col bg-slate-50"
+      style={{
+        minHeight: '100dvh',
+        width: '100%',
+        maxWidth: '100vw',
+        overflowX: 'hidden',
+        position: 'relative',
+      }}
+    >
+      {/* Nav */}
+      <nav
+        className="sticky top-0 z-10 flex items-center gap-4 border-b border-slate-100 bg-white px-4 pb-3 shadow-sm"
+        style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}
+      >
         <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
           <ArrowLeft size={24} />
         </button>
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="font-bold text-primary">Retail Estimator</h1>
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Quote Builder</p>
         </div>
+        <button
+          onClick={saveEstimate}
+          disabled={saving}
+          className="shrink-0 flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 text-xs font-black text-white shadow transition-transform active:scale-95 disabled:opacity-60"
+        >
+          <Save size={14} />
+          {saving ? 'Saving…' : 'Save'}
+        </button>
       </nav>
 
-      <div className="w-full max-w-full space-y-6 overflow-x-hidden p-6">
+      {/* Scrollable content */}
+      <div
+        className="flex-1 w-full space-y-6 p-6"
+        style={{
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          paddingBottom: 'calc(8rem + env(safe-area-inset-bottom))',
+        }}
+      >
+        {saveError && (
+          <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 font-medium">
+            ⚠️ {saveError}
+          </div>
+        )}
+
         <section className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400">Project Basis</h2>
@@ -402,18 +465,17 @@ export default function RetailEstimator() {
             <p>Balance due: {formatCurrency(contact?.final_payment_amount || quoteMeta.finalPaymentAmount)}</p>
           </div>
         </div>
+
+        {/* Inline save button at bottom of scroll */}
+        <SaveButton />
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 mx-auto w-full max-w-md border-t border-slate-100 bg-white p-4">
-        <button
-          onClick={saveEstimate}
-          disabled={saving}
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-4 font-black text-white shadow-lg transition-transform active:scale-[0.98] disabled:opacity-60"
-        >
-          <Save size={20} />
-          {saving ? 'Saving Quote...' : 'Create Quote'}
-        </button>
-      </div>
+      {/* Fixed save bar */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-20 mx-auto w-full max-w-md bg-white px-4 pt-3 shadow-lg border-t border-slate-100"
+        style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
+      >
+        <SaveButton />
       </div>
     </div>
   );
