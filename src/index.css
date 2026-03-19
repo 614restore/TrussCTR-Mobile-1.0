@@ -17,7 +17,10 @@
     height: 100%;
     width: 100%;
     overflow-x: hidden;
+    overflow-y: hidden;
     overscroll-behavior-x: none;
+    overscroll-behavior-y: none;
+    touch-action: pan-y;
     @apply bg-slate-50 text-slate-900 font-sans;
     -webkit-tap-highlight-color: transparent;
     -webkit-overflow-scrolling: touch;
@@ -27,6 +30,8 @@
     height: 100%;
     width: 100%;
     overflow-x: hidden;
+    overflow-y: hidden;
+    touch-action: pan-y;
   }
 }
 

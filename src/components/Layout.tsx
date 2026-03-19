@@ -20,11 +20,11 @@ export default function Layout() {
   ];
 
   return (
-    <div className="fixed inset-0 relative mx-auto flex w-full max-w-md flex-col overflow-hidden bg-slate-50 shadow-2xl">
+    <div className="fixed inset-0 relative mx-auto flex w-full max-w-md touch-pan-y flex-col overflow-hidden bg-slate-50 shadow-2xl">
       {/* Safe area top spacer — pushes content below iOS status bar */}
       <div style={{ height: 'env(safe-area-inset-top)' }} className="bg-slate-50 shrink-0" />
       {/* Main Content */}
-      <main className="flex-1 min-h-0 w-full max-w-full overflow-y-auto overflow-x-hidden no-scrollbar scrollable" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
+      <main className="flex-1 min-h-0 w-full max-w-full touch-pan-y overflow-y-auto overflow-x-hidden no-scrollbar scrollable" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
         <Outlet />
       </main>
 

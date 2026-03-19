@@ -334,7 +334,7 @@ export default function CalendarPage() {
 
       {/* Add Event Bottom Sheet */}
       {sheetOpen && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="fixed inset-0 z-[70] flex flex-col justify-end">
           {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/40"
@@ -396,8 +396,8 @@ export default function CalendarPage() {
             </div>
 
             <div
-              className="border-t border-slate-100 bg-white px-6 py-4"
-              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+              className="sticky bottom-0 border-t border-slate-100 bg-white px-6 py-4"
+              style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
             >
               <button
                 onClick={handleSaveEvent}
