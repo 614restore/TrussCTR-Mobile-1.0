@@ -18,10 +18,12 @@ export default function CalendarPage() {
   const actionParam = searchParams.get('action');
   const nextStepParam = searchParams.get('nextStep') || 'inspection';
   const labelParam = searchParams.get('label') || 'Event';
+  const decodedLabel = decodeURIComponent(labelParam);
 
   // When scheduling a next step, show ALL events on the calendar so you
-  // can spot conflicts — but keep contactId for saving and "Back" link.
-  const contactFilter = actionParam === 'schedule' ? null : contactId;
+  // can spot conflicts. Keep the original contactId for saving and return nav.
+  const displayContactFilter = actionParam === 'schedule' ? null : contactId;
+  const saveContactId = contactId;
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -38,10 +40,10 @@ export default function CalendarPage() {
 
   // Auto-open the sheet when navigated here with action=schedule
   useEffect(() => {
-    if (actionParam === 'schedule' && contactFilter) {
+    if (actionParam === 'schedule' && saveContactId) {
       setSheetOpen(true);
     }
-  }, [actionParam, contactFilter]);
+  }, [actionParam, saveContactId]);
 
   // Keep selected date in sync with the date picker in the sheet
   useEffect(() => {
@@ -73,7 +75,7 @@ export default function CalendarPage() {
 
       const nextEvents = (contacts || [])
         .flatMap((contact: any) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
-        .filter((event) => (contactFilter ? event.contactId === contactFilter : true))
+        .filter((event) => (displayContactFilter ? event.contactId === displayContactFilter : true))
         .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
 
       setEvents(nextEvents);
@@ -100,10 +102,10 @@ export default function CalendarPage() {
     }
     fetchEvents();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.company_id, loadingAuth, contactFilter]);
+  }, [profile?.company_id, loadingAuth, displayContactFilter]);
 
   const handleSaveEvent = async () => {
-    if (!contactFilter || !profile?.company_id) return;
+    if (!saveContactId || !profile?.company_id) return;
     setSaving(true);
 
     try {
@@ -115,7 +117,7 @@ export default function CalendarPage() {
         const { data: contactData, error: fetchErr } = await supabase
           .from('contacts')
           .select('notes')
-          .eq('id', contactFilter)
+          .eq('id', saveContactId)
           .single();
 
         if (fetchErr) throw fetchErr;
@@ -127,7 +129,7 @@ export default function CalendarPage() {
         const { error: updateErr } = await supabase
           .from('contacts')
           .update({ notes: newNotes })
-          .eq('id', contactFilter);
+          .eq('id', saveContactId);
 
         if (updateErr) throw updateErr;
       } else {
@@ -135,9 +137,9 @@ export default function CalendarPage() {
         const { error: insertErr } = await supabase
           .from('work_orders')
           .insert({
-            contact_id: contactFilter,
+            contact_id: saveContactId,
             company_id: profile.company_id,
-            title: decodeURIComponent(labelParam),
+            title: decodedLabel,
             scheduled_date: isoDateTime,
             notes: eventNotes || null,
             status: 'scheduled',
@@ -153,7 +155,7 @@ export default function CalendarPage() {
       setTimeout(() => {
         setSavedOk(false);
         setSheetOpen(false);
-        navigate(`/contacts/${contactFilter}`);
+        navigate(`/contacts/${saveContactId}`);
       }, 1200);
     } catch (err) {
       console.error('Failed to save event:', err);
@@ -174,7 +176,7 @@ export default function CalendarPage() {
       <div>
         <h1 className="text-2xl font-bold text-primary">{format(currentMonth, 'MMMM yyyy')}</h1>
         <p className="text-slate-500 text-sm">
-          {contactFilter ? 'Customer schedule' : `${upcomingEvents.length} upcoming scheduled item${upcomingEvents.length === 1 ? '' : 's'}`}
+          {saveContactId ? 'Customer schedule' : `${upcomingEvents.length} upcoming scheduled item${upcomingEvents.length === 1 ? '' : 's'}`}
         </p>
       </div>
       <div className="flex gap-2">
@@ -267,9 +269,9 @@ export default function CalendarPage() {
             {isSameDay(selectedDate, new Date()) ? "Today's Schedule" : format(selectedDate, 'MMM d, yyyy')}
           </h2>
           <div className="flex items-center gap-3">
-            {contactFilter && (
+            {saveContactId && (
               <button
-                onClick={() => navigate(`/contacts/${contactFilter}`)}
+                onClick={() => navigate(`/contacts/${saveContactId}`)}
                 className="text-accent text-xs font-bold"
               >
                 Back To Customer
@@ -340,76 +342,81 @@ export default function CalendarPage() {
           />
 
           {/* Sheet */}
-          <div className="relative bg-white rounded-t-3xl p-6 space-y-5 shadow-2xl">
+          <div className="relative flex max-h-[85vh] flex-col rounded-t-3xl bg-white shadow-2xl">
             {/* Handle */}
             <div className="absolute top-3 left-1/2 -translate-x-1/2 w-10 h-1 bg-slate-200 rounded-full" />
-
-            {/* Header */}
-            <div className="flex items-center justify-between pt-2">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Schedule Next Step</p>
-                <h2 className="text-xl font-black text-primary">{decodeURIComponent(labelParam)}</h2>
+            <div className="overflow-y-auto px-6 pb-4 pt-6">
+              {/* Header */}
+              <div className="flex items-center justify-between pt-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Schedule Next Step</p>
+                  <h2 className="text-xl font-black text-primary">{decodedLabel}</h2>
+                </div>
+                <button
+                  onClick={() => setSheetOpen(false)}
+                  className="p-2 rounded-xl bg-slate-100 active:scale-95 transition-transform"
+                >
+                  <X size={18} className="text-slate-500" />
+                </button>
               </div>
+
+              {/* Date */}
+              <div className="mt-5 space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Date</label>
+                <input
+                  type="date"
+                  value={eventDate}
+                  onChange={(e) => setEventDate(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+
+              {/* Time */}
+              <div className="mt-5 space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Time</label>
+                <input
+                  type="time"
+                  value={eventTime}
+                  onChange={(e) => setEventTime(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+
+              {/* Notes / Crew */}
+              <div className="mt-5 space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Notes / Crew (optional)</label>
+                <textarea
+                  value={eventNotes}
+                  onChange={(e) => setEventNotes(e.target.value)}
+                  placeholder="Add crew name, address notes, or instructions…"
+                  rows={3}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+                />
+              </div>
+            </div>
+
+            <div
+              className="border-t border-slate-100 bg-white px-6 py-4"
+              style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}
+            >
               <button
-                onClick={() => setSheetOpen(false)}
-                className="p-2 rounded-xl bg-slate-100 active:scale-95 transition-transform"
+                onClick={handleSaveEvent}
+                disabled={saving || savedOk || !eventDate}
+                className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${
+                  savedOk
+                    ? 'bg-green-500 text-white'
+                    : 'bg-accent text-white disabled:opacity-50'
+                }`}
               >
-                <X size={18} className="text-slate-500" />
+                {savedOk ? (
+                  <><Check size={16} /> Saved - taking you back</>
+                ) : saving ? (
+                  <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                ) : (
+                  `Add ${decodedLabel} to Calendar`
+                )}
               </button>
             </div>
-
-            {/* Date */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Date</label>
-              <input
-                type="date"
-                value={eventDate}
-                onChange={(e) => setEventDate(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-              />
-            </div>
-
-            {/* Time */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Time</label>
-              <input
-                type="time"
-                value={eventTime}
-                onChange={(e) => setEventTime(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-              />
-            </div>
-
-            {/* Notes / Crew */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Notes / Crew (optional)</label>
-              <textarea
-                value={eventNotes}
-                onChange={(e) => setEventNotes(e.target.value)}
-                placeholder="Add crew name, address notes, or instructions…"
-                rows={3}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
-              />
-            </div>
-
-            {/* Save Button */}
-            <button
-              onClick={handleSaveEvent}
-              disabled={saving || savedOk || !eventDate}
-              className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${
-                savedOk
-                  ? 'bg-green-500 text-white'
-                  : 'bg-accent text-white disabled:opacity-50'
-              }`}
-            >
-              {savedOk ? (
-                <><Check size={16} /> Saved — taking you back</>
-              ) : saving ? (
-                <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-              ) : (
-                `Add ${decodeURIComponent(labelParam)} to Calendar`
-              )}
-            </button>
           </div>
         </div>
       )}
