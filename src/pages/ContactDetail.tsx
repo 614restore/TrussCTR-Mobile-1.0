@@ -69,6 +69,12 @@ export default function ContactDetail() {
   }, [id]);
 
   useEffect(() => {
+    if (activeTab === 'documents') {
+      fetchDocuments();
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     const updateTabOverflow = () => {
       const node = tabScrollerRef.current;
       if (!node) return;
@@ -76,10 +82,13 @@ export default function ContactDetail() {
       setCanScrollTabsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
     };
 
-    updateTabOverflow();
+    const frame = window.requestAnimationFrame(updateTabOverflow);
     window.addEventListener('resize', updateTabOverflow);
-    return () => window.removeEventListener('resize', updateTabOverflow);
-  }, []);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateTabOverflow);
+    };
+  }, [contact?.status, activeTab]);
 
   const fetchContact = async () => {
     try {
@@ -295,6 +304,7 @@ export default function ContactDetail() {
             setCanScrollTabsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
+          style={{ touchAction: 'pan-x pan-y' }}
         >
         <div className="flex gap-6 min-w-max">
           {TABS.map((tab) => {
@@ -304,8 +314,7 @@ export default function ContactDetail() {
             return (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
                 <Icon size={18} />
-                <span className="text-sm font-bold whitespace-nowrap">{tab.label}</span>
-                {inspectionDone && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-700">Done</span>}
+                <span className={`text-sm font-bold whitespace-nowrap ${tab.id === 'inspection' ? (inspectionDone ? 'text-emerald-600' : 'text-rose-500') : ''}`}>{tab.label}</span>
               </button>
             );
           })}
@@ -317,7 +326,7 @@ export default function ContactDetail() {
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
             {activeTab === 'overview' && <OverviewTab contact={contact} onRefresh={fetchContact} />}
-            {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} />}
+            {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
             {activeTab === 'status' && <StatusTab contact={contact} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
             {activeTab === 'documents' && <DocumentsTab contactId={contact.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} />}
@@ -410,11 +419,26 @@ export default function ContactDetail() {
       )}
 
       {showActions && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
-          <div className="bg-white w-full rounded-t-3xl p-6 space-y-3">
-            <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
-            <button onClick={() => { setShowActions(false); setActiveTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
-            <button onClick={() => setShowActions(false)} className="w-full bg-white border border-slate-200 py-3 rounded-xl text-sm font-bold">Close</button>
+        <div className="fixed inset-0 z-[70] flex items-end bg-black/50">
+          <div
+            className="flex max-h-[80vh] min-h-0 w-full flex-col overflow-hidden rounded-t-3xl bg-white"
+            style={{ maxHeight: 'min(80vh, calc(100dvh - env(safe-area-inset-top) - 1rem))' }}
+          >
+            <div className="shrink-0 px-6 pt-4">
+              <div className="mx-auto h-1 w-10 rounded-full bg-slate-200" />
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-5">
+              <div className="space-y-3">
+                <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
+                <button onClick={() => { setShowActions(false); setActiveTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
+              </div>
+            </div>
+            <div
+              className="shrink-0 border-t border-slate-100 bg-white px-6 py-4"
+              style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+            >
+              <button onClick={() => setShowActions(false)} className="w-full bg-white border border-slate-200 py-3 rounded-xl text-sm font-bold">Close</button>
+            </div>
           </div>
         </div>
       )}
@@ -799,7 +823,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   );
 }
 
-function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
+function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
@@ -936,6 +960,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
     } as any);
     if (dbError) throw dbError;
     setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: blob.size }, ...prev]);
+    onDocumentsChanged?.();
   };
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1041,6 +1066,7 @@ function InspectionTab({ contact, userId }: { contact: any; userId?: string }) {
         next[markupIndex] = { ...next[markupIndex], url: publicUrl, displayUrl };
         return next;
       });
+      onDocumentsChanged?.();
       setMarkupIndex(null);
     } catch (err) {
       console.error('Markup upload error:', err);
@@ -1480,7 +1506,7 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
         <div className="relative">
           <textarea
             ref={noteInputRef}
-            className="w-full bg-slate-50 border-none rounded-xl p-3 text-sm focus:ring-2 focus:ring-accent/20 min-h-[80px]"
+            className="w-full bg-slate-50 border-none rounded-xl p-3 text-base focus:ring-2 focus:ring-accent/20 min-h-[80px]"
             placeholder="Add a note... Use @handle to tag team members"
             value={note}
             onChange={(e) => handleNoteChange(e.target.value, e.target.selectionStart || e.target.value.length)}
@@ -1488,6 +1514,20 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
             onKeyUp={(e) => handleNoteChange((e.target as HTMLTextAreaElement).value, (e.target as HTMLTextAreaElement).selectionStart || 0)}
             onKeyDown={handleNoteKeyDown}
           />
+          {mentionTargets.length > 0 && (
+            <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+              {mentionTargets.slice(0, 8).map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => insertMention(member)}
+                  className="shrink-0 rounded-full bg-slate-100 px-3 py-2 text-[11px] font-bold text-slate-600"
+                >
+                  @{member.handle}
+                </button>
+              ))}
+            </div>
+          )}
           {filteredMentions.length > 0 && (
             <div className="absolute left-0 right-0 top-full z-10 mt-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl">
               {filteredMentions.map((member, index) => (
@@ -1561,7 +1601,18 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
     { id: 'completion', label: 'Completion Certificate', type: 'other' },
     { id: 'change-order', label: 'Change Order', type: 'other' },
   ];
-  const legalLabels = new Set(LEGAL_DOCS.map((d) => d.label));
+  const getLegalTemplateId = (doc: any) => {
+    const name = String(doc?.name || '').toLowerCase();
+    if (name.includes('contingency agreement')) return 'contingency';
+    if (name.includes('customer service agreement')) return 'csa';
+    if (name.includes('notice of cancellation') || name.includes('3 day right to rescind') || name.includes('3-day right to rescind')) return 'rescind';
+    if (name.includes('completion certificate')) return 'completion';
+    if (name.includes('change order')) return 'change-order';
+    return null;
+  };
+  const isLegalDocument = (doc: any) => {
+    return !!getLegalTemplateId(doc);
+  };
   const getSignatureParentName = (name: string) => {
     if (name.includes(' Customer Signature - ')) return name.replace(' Customer Signature - ', ' - ');
     if (name.includes(' Contractor Signature - ')) return name.replace(' Contractor Signature - ', ' - ');
@@ -1570,19 +1621,22 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
   };
   const filteredDocs = documents.filter((doc) => {
     if (filter === 'photos') return doc.type === 'photo';
-    if (filter === 'docs') return doc.type !== 'photo' && !legalLabels.has(doc.name);
-    if (filter === 'legal') return legalLabels.has(doc.name);
+    if (filter === 'docs') return doc.type !== 'photo' && !isLegalDocument(doc);
+    if (filter === 'legal') return isLegalDocument(doc);
     return true;
   });
-  const signatureDocsByParent = new Map<string, any[]>();
-  for (const doc of filteredDocs) {
-    const parentName = getSignatureParentName(String(doc.name || ''));
-    if (!parentName) continue;
-    const current = signatureDocsByParent.get(parentName) || [];
-    current.push(doc);
-    signatureDocsByParent.set(parentName, current);
-  }
   const visibleDocs = filteredDocs.filter((doc) => !getSignatureParentName(String(doc.name || '')));
+  const signedLegalDocs = LEGAL_DOCS.map((legalDoc) => {
+    const matchingPdfs = visibleDocs
+      .filter((doc) => getLegalTemplateId(doc) === legalDoc.id && doc.type === 'contract')
+      .sort((left, right) => new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime());
+
+    return {
+      ...legalDoc,
+      signedPdf: matchingPdfs[0] || null,
+    };
+  }).filter((entry) => entry.signedPdf);
+  const gridDocs = visibleDocs.filter((doc) => !(filter === 'legal' && doc.type === 'contract' && isLegalDocument(doc)));
   return (
     <div className="space-y-6">
       <div className="flex gap-2">
@@ -1627,6 +1681,39 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
           ))}
         </div>
       </div>
+      {(filter === 'all' || filter === 'legal') && (
+        <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-3">
+          <div className="flex justify-between items-center">
+            <h4 className="text-xs font-bold text-primary uppercase tracking-wider">Signed Legal PDFs</h4>
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Customer View</span>
+          </div>
+          {signedLegalDocs.length > 0 ? (
+            <div className="space-y-3">
+              {signedLegalDocs.map(({ id, label, signedPdf }) => (
+                <div key={id} className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-emerald-900">{label}</p>
+                      <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Signed and ready to view</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/documents/view/${signedPdf.id}`)}
+                      className="rounded-xl bg-emerald-600 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white"
+                    >
+                      View Signed PDF
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
+              Signed legal documents will appear here after they are completed in the app.
+            </div>
+          )}
+        </div>
+      )}
       <div className="bg-primary/5 border border-primary/10 rounded-2xl p-5 space-y-3">
         <div className="flex justify-between items-center">
           <h4 className="text-xs font-bold text-primary uppercase tracking-wider">EagleView Report</h4>
@@ -1667,7 +1754,7 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
         </label>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        {visibleDocs.length > 0 ? visibleDocs.map((doc, i) => (
+        {gridDocs.length > 0 ? gridDocs.map((doc, i) => (
           <button
             key={i}
             type="button"
@@ -1683,29 +1770,11 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
                 <p className="text-[10px] text-slate-400">{(doc.size / 1024 / 1024).toFixed(1)} MB</p>
               </div>
             </div>
-            {(signatureDocsByParent.get(String(doc.name || '')) || []).map((signatureDoc) => (
-              <div key={signatureDoc.id} className="rounded-xl bg-slate-50 px-3 py-2 flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-bold text-slate-700">Attached signature</p>
-                  <p className="text-[10px] text-slate-500">{(signatureDoc.size / 1024 / 1024).toFixed(2)} MB PNG</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    navigate(`/documents/view/${signatureDoc.id}`);
-                  }}
-                  className="text-[11px] font-bold text-accent"
-                >
-                  View
-                </button>
-              </div>
-            ))}
           </button>
         )) : (
           <div className="col-span-2 text-center py-12 text-slate-400">
             <FileText size={48} className="mx-auto mb-4 opacity-20" />
-            <p className="text-sm">No documents uploaded yet</p>
+            <p className="text-sm">{filter === 'legal' ? 'No signed legal PDFs yet' : 'No documents uploaded yet'}</p>
           </div>
         )}
       </div>

@@ -111,7 +111,7 @@ export default function Documents() {
             <input 
               type="text"
               placeholder="Search documents..."
-              className="w-full bg-slate-100 border-none rounded-2xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-accent/20"
+              className="w-full bg-slate-100 border-none rounded-2xl py-3 pl-11 pr-4 text-base focus:ring-2 focus:ring-accent/20"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />

@@ -342,22 +342,38 @@ export default function CalendarPage() {
           />
 
           {/* Sheet */}
-          <div className="relative flex max-h-[85vh] flex-col rounded-t-3xl bg-white shadow-2xl">
+          <div
+            className="relative flex max-h-[85vh] min-h-0 flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl"
+            style={{ maxHeight: 'min(85vh, calc(100dvh - env(safe-area-inset-top) - 1rem))' }}
+          >
             {/* Handle */}
             <div className="absolute top-3 left-1/2 -translate-x-1/2 w-10 h-1 bg-slate-200 rounded-full" />
-            <div className="overflow-y-auto px-6 pb-4 pt-6">
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-24 pt-6">
               {/* Header */}
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex items-start justify-between gap-3 pt-2">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Schedule Next Step</p>
                   <h2 className="text-xl font-black text-primary">{decodedLabel}</h2>
                 </div>
-                <button
-                  onClick={() => setSheetOpen(false)}
-                  className="p-2 rounded-xl bg-slate-100 active:scale-95 transition-transform"
-                >
-                  <X size={18} className="text-slate-500" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSaveEvent}
+                    disabled={saving || savedOk || !eventDate}
+                    className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest transition-all active:scale-95 ${
+                      savedOk
+                        ? 'bg-green-500 text-white'
+                        : 'bg-accent text-white disabled:opacity-50'
+                    }`}
+                  >
+                    {savedOk ? 'Saved' : saving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => setSheetOpen(false)}
+                    className="p-2 rounded-xl bg-slate-100 active:scale-95 transition-transform"
+                  >
+                    <X size={18} className="text-slate-500" />
+                  </button>
+                </div>
               </div>
 
               {/* Date */}
@@ -367,7 +383,7 @@ export default function CalendarPage() {
                   type="date"
                   value={eventDate}
                   onChange={(e) => setEventDate(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
 
@@ -378,7 +394,7 @@ export default function CalendarPage() {
                   type="time"
                   value={eventTime}
                   onChange={(e) => setEventTime(e.target.value)}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
 
@@ -390,13 +406,13 @@ export default function CalendarPage() {
                   onChange={(e) => setEventNotes(e.target.value)}
                   placeholder="Add crew name, address notes, or instructions…"
                   rows={3}
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
                 />
               </div>
             </div>
 
             <div
-              className="sticky bottom-0 border-t border-slate-100 bg-white px-6 py-4"
+              className="shrink-0 border-t border-slate-100 bg-white px-6 py-4"
               style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
             >
               <button

@@ -674,19 +674,28 @@ export default function DocumentSigner() {
             </p>
           )}
           {signed && pdfUrl && (
-            <button
-              type="button"
-              onClick={() => {
-                if (savedDocumentId) {
-                  navigate(`/documents/view/${savedDocumentId}`);
-                  return;
-                }
-                window.open(pdfUrl, '_blank', 'noopener,noreferrer');
-              }}
-              className="w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-primary"
-            >
-              View Signed PDF
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  if (savedDocumentId) {
+                    navigate(`/documents/view/${savedDocumentId}`);
+                    return;
+                  }
+                  window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+                }}
+                className="w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-primary"
+              >
+                View Signed PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/contacts/${id}`)}
+                className="w-full rounded-2xl bg-primary/10 py-3 text-sm font-bold text-primary"
+              >
+                Back To Customer
+              </button>
+            </div>
           )}
         </div>
       </div>

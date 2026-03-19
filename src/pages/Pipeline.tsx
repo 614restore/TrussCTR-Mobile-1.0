@@ -119,10 +119,32 @@ export default function Pipeline() {
     return <NoProfileState />;
   }
 
-  const filteredContacts = contacts.filter(c => 
-    `${c.first_name} ${c.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.address?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+
+  const filteredContacts = contacts.filter((contact) => {
+    if (!normalizedQuery) return true;
+
+    const haystack = [
+      contact.first_name,
+      contact.last_name,
+      `${contact.first_name || ''} ${contact.last_name || ''}`.trim(),
+      contact.address,
+      contact.city,
+      contact.state,
+      contact.zip,
+      contact.email,
+      contact.phone1,
+      contact.phone2,
+      contact.project_type,
+      contact.lead_source,
+      contact.status,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return haystack.includes(normalizedQuery);
+  });
 
   const scrollSections = (direction: 'left' | 'right') => {
     const node = sectionScrollerRef.current;
@@ -168,9 +190,15 @@ export default function Pipeline() {
             <input 
               type="text"
               placeholder="Search contacts..."
-              className="w-full bg-slate-100 border-none rounded-2xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-accent/20"
+              className="w-full bg-slate-100 border-none rounded-2xl py-3 pl-11 pr-4 text-base focus:ring-2 focus:ring-accent/20"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                const nextQuery = e.target.value;
+                setSearchQuery(nextQuery);
+                if (nextQuery.trim()) {
+                  setViewMode('list');
+                }
+              }}
             />
           </div>
           <button className="bg-slate-100 p-3 rounded-2xl text-slate-600 active:scale-95 transition-transform">
@@ -215,6 +243,7 @@ export default function Pipeline() {
             setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
+          style={{ touchAction: 'pan-y' }}
         >
           <div className="flex gap-4 min-w-max">
             {pipelineSections.map((section) => {
