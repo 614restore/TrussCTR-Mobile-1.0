@@ -1,15 +1,69 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Users, Calendar, Wrench, MoreHorizontal } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { supabase } from '../lib/supabase';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+async function registerPushToken() {
+  if (!Capacitor.isNativePlatform()) return;
+
+  try {
+    const permission = await PushNotifications.requestPermissions();
+    if (permission.receive !== 'granted') return;
+
+    await PushNotifications.register();
+
+    PushNotifications.addListener('registration', async ({ value: token }) => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('company_id')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const companyId = profileRow ? (profileRow as any).company_id : null;
+
+        // Cast to any: device_tokens is not yet in the generated types —
+        // it will be added after the 002_create_device_tokens migration is run.
+        await (supabase.from('device_tokens') as any).upsert(
+          {
+            user_id:    user.id,
+            company_id: companyId,
+            token,
+            platform:   Capacitor.getPlatform(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id,token' }
+        );
+      } catch (err) {
+        console.warn('[Push] Token registration failed:', err);
+      }
+    });
+
+    PushNotifications.addListener('registrationError', (err) => {
+      console.warn('[Push] Registration error:', err);
+    });
+  } catch (err) {
+    console.warn('[Push] Push notification setup failed:', err);
+  }
+}
+
 export default function Layout() {
   const location = useLocation();
+
+  useEffect(() => {
+    registerPushToken();
+  }, []);
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },

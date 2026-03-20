@@ -31,7 +31,11 @@ export default function SmartInspection() {
     if (!file || !id || !profile) return;
 
     try {
-      const ext = file.name.split('.').pop();
+      const rawExt = (file.name.split('.').pop() || 'jpg').toLowerCase();
+      // HEIC/HEIF from iOS camera roll cannot be rendered by browsers — normalise to jpg.
+      // The accept attribute on the input below already asks iOS to convert, but this
+      // guards against any edge-case where a HEIC still slips through.
+      const ext = rawExt === 'heic' || rawExt === 'heif' ? 'jpg' : rawExt;
       const filePath = `${id}/${activeElevation}_${Date.now()}.${ext}`;
 
       const { error: uploadError } = await supabase.storage
@@ -196,7 +200,7 @@ export default function SmartInspection() {
           <label className="block w-full cursor-pointer">
             <input
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
               capture="environment"
               className="hidden"
               onChange={handleCapture}

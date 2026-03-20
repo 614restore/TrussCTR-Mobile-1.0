@@ -133,33 +133,63 @@ export default function More() {
     </div>
 
     {/* Subscription Plan Modal */}
-    {showPlanModal && (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowPlanModal(false)}>
-        <div className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-6" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-primary">Your Plan</h2>
-            <button onClick={() => setShowPlanModal(false)} className="p-2 text-slate-400 active:scale-90 transition-transform">
-              <X size={22} />
-            </button>
-          </div>
-          <div className="rounded-2xl border-2 border-primary bg-primary/5 p-6 space-y-4">
+    {showPlanModal && (() => {
+      const rawPlan: string = profile?.companies?.subscription_plan ?? 'trial';
+      const status: string  = profile?.companies?.subscription_status ?? 'trialing';
+
+      const PLAN_META: Record<string, { label: string; features: string[]; userLimit: string }> = {
+        starter:      { label: 'Starter',      userLimit: '2 users',        features: ['Up to 2 users', 'Unlimited contacts', 'Core CRM features', 'Pipeline board', 'Invoicing', 'Email support'] },
+        professional: { label: 'Pro',           userLimit: '5 users',        features: ['Up to 5 users', 'Unlimited contacts', 'Full pipeline visibility', 'Insurance claim tracking', 'Supplement tracking', 'Team reporting'] },
+        business:     { label: 'Business',      userLimit: '10 users',       features: ['Up to 10 users', 'Unlimited contacts', 'AI Smart Inspection', 'Advanced analytics', 'Material order templates', 'Priority support'] },
+        enterprise:   { label: 'Enterprise',    userLimit: 'Unlimited users', features: ['Unlimited users', 'Unlimited contacts', 'All features included', 'Custom onboarding', 'Dedicated support', 'QuickBooks sync'] },
+        trial:        { label: 'Free Trial',    userLimit: '2 users',        features: ['Up to 2 users', 'Core CRM features', 'Pipeline board', 'Invoicing'] },
+      };
+      const meta = PLAN_META[rawPlan] ?? PLAN_META.trial;
+
+      const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+        active:   { label: 'Active',    cls: 'bg-emerald-500' },
+        trialing: { label: 'Trial',     cls: 'bg-amber-500' },
+        past_due: { label: 'Past Due',  cls: 'bg-red-500' },
+        canceled: { label: 'Canceled',  cls: 'bg-slate-400' },
+      };
+      const badge = STATUS_BADGE[status] ?? { label: status, cls: 'bg-slate-400' };
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowPlanModal(false)}>
+          <div className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-6" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <span className="text-lg font-bold text-primary">TrussCTR Pro</span>
-              <span className="rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white">Active</span>
+              <h2 className="text-xl font-bold text-primary">Your Plan</h2>
+              <button onClick={() => setShowPlanModal(false)} className="p-2 text-slate-400 active:scale-90 transition-transform">
+                <X size={22} />
+              </button>
             </div>
-            <div className="space-y-2">
-              {['Unlimited contacts & pipeline', 'AI Smart Inspection', 'Retail Estimator', 'Document signing', 'Team member access', 'Priority support'].map(feature => (
-                <div key={feature} className="flex items-center gap-3">
-                  <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-                  <span className="text-sm text-slate-600">{feature}</span>
+            <div className="rounded-2xl border-2 border-primary bg-primary/5 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-lg font-bold text-primary">TrussCTR {meta.label}</span>
+                  <p className="text-xs text-slate-400 mt-0.5">{meta.userLimit}</p>
                 </div>
-              ))}
+                <span className={`rounded-full ${badge.cls} px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white`}>{badge.label}</span>
+              </div>
+              <div className="space-y-2">
+                {meta.features.map(feature => (
+                  <div key={feature} className="flex items-center gap-3">
+                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                    <span className="text-sm text-slate-600">{feature}</span>
+                  </div>
+                ))}
+              </div>
             </div>
+            <p className="text-xs text-slate-400 text-center">
+              To upgrade or manage billing, visit{' '}
+              <span className="text-accent font-bold">trussctr.com</span>
+              {' '}or contact{' '}
+              <span className="text-accent font-bold">support@trussctr.com</span>
+            </p>
           </div>
-          <p className="text-xs text-slate-400 text-center">To upgrade or manage billing, contact <span className="text-accent font-bold">support@trussctr.com</span></p>
         </div>
-      </div>
-    )}
+      );
+    })()}
     </>
   );
 }

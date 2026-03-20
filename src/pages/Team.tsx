@@ -1,9 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Mail, Shield, ChevronLeft, Plus, Search } from 'lucide-react';
+import { Users, Mail, Shield, ChevronLeft, Plus, Search, X, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
+
+const USER_LIMITS: Record<string, number> = {
+  starter:      2,
+  professional: 5,
+  business:     10,
+  enterprise:   Infinity,
+  trial:        2,
+};
 
 export default function Team() {
   const navigate = useNavigate();
@@ -11,6 +19,11 @@ export default function Team() {
   const [members, setMembers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [showLimitModal, setShowLimitModal] = useState(false);
+
+  const subscriptionPlan: string = profile?.companies?.subscription_plan ?? 'trial';
+  const planLimit = USER_LIMITS[subscriptionPlan] ?? 2;
+  const atSeatLimit = planLimit !== Infinity && members.length >= planLimit;
 
   useEffect(() => {
     if (profile?.company_id) {
@@ -41,6 +54,56 @@ export default function Team() {
   );
 
   return (
+    <>
+    {/* Seat limit / invite modal */}
+    {showLimitModal && (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowLimitModal(false)}>
+        <div className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-5" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-primary">Add Team Member</h2>
+            <button onClick={() => setShowLimitModal(false)} className="p-2 text-slate-400 active:scale-90 transition-transform">
+              <X size={22} />
+            </button>
+          </div>
+
+          {atSeatLimit ? (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 rounded-2xl bg-amber-50 border border-amber-100 p-4">
+                <AlertCircle size={20} className="text-amber-500 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-amber-800">Seat limit reached</p>
+                  <p className="text-xs text-amber-700 mt-1">
+                    Your <span className="font-semibold capitalize">{subscriptionPlan}</span> plan allows up to {planLimit} team member{planLimit !== 1 ? 's' : ''}.
+                    You currently have {members.length} active member{members.length !== 1 ? 's' : ''}.
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-500 text-center">
+                To add more members, upgrade your plan from the{' '}
+                <span className="font-bold text-accent">TrussCTR web app</span> under Settings → My Plan.
+              </p>
+              <button onClick={() => setShowLimitModal(false)} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
+                Got it
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-500">
+                You have <span className="font-bold text-primary">{members.length} / {planLimit === Infinity ? '∞' : planLimit}</span> seats used on your <span className="font-semibold capitalize">{subscriptionPlan}</span> plan.
+              </p>
+              <p className="text-sm text-slate-500">
+                To invite a new team member, send the invitation from the{' '}
+                <span className="font-bold text-accent">TrussCTR web app</span> under Team.
+              </p>
+              <button onClick={() => setShowLimitModal(false)} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
+                OK
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )}
+
     <div className="min-h-screen bg-slate-50 pb-20">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10">
@@ -62,7 +125,10 @@ export default function Team() {
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
-          <button className="bg-accent text-white p-3 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-transform">
+          <button
+            onClick={() => setShowLimitModal(true)}
+            className="bg-accent text-white p-3 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-transform"
+          >
             <Plus size={20} />
           </button>
         </div>
@@ -110,5 +176,6 @@ export default function Team() {
         )}
       </div>
     </div>
+    </>
   );
 }
