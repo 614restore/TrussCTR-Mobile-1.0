@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, FileText, CheckCircle2, Clock, ChevronRight } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import type { Database } from '../types/supabase';
 import { cn } from '../lib/utils';
 
 const DOCUMENT_TYPES = [
@@ -31,7 +32,8 @@ export default function DocumentManager() {
         .eq('contact_id', id);
 
       if (error) throw error;
-      const signed = (data || []).flatMap((d) => {
+      const documentRows = ((data || []) as Array<Pick<Database['public']['Tables']['documents']['Row'], 'name' | 'type'>>);
+      const signed = documentRows.flatMap((d) => {
         const name = String(d.name || '').toLowerCase();
         const matches: string[] = [];
         if (name.includes('contingency')) matches.push('contingency');
@@ -43,7 +45,7 @@ export default function DocumentManager() {
       });
       const details: Record<string, { pdfCount: number; signatureCount: number }> = {};
       for (const doc of DOCUMENT_TYPES) {
-        const related = (data || []).filter((entry) => {
+        const related = documentRows.filter((entry) => {
           const name = String(entry.name || '').toLowerCase();
           if (doc.id === 'contingency') return name.includes('contingency');
           if (doc.id === 'csa') return name.includes('customer service agreement');

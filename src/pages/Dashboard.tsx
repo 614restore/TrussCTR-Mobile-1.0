@@ -9,6 +9,7 @@ import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
 import { getPipelineStageLabel } from '../lib/pipelineStages';
+import type { Database } from '../types/supabase';
 
 const STAGE_COLORS: Record<string, string> = {
   lead: 'bg-blue-500',
@@ -30,6 +31,8 @@ const PIPELINE_STAGES = [
   { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
   { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
 ];
+type ContactRow = Database['public']['Tables']['contacts']['Row'];
+type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -125,14 +128,16 @@ export default function Dashboard() {
       
       setRecentActivity(activity);
 
-      const workOrdersByContact = new Map<string, any[]>();
-      for (const order of workOrders || []) {
+      const workOrderRows = (workOrders || []) as WorkOrderRow[];
+      const contactRows = (contacts || []) as ContactRow[];
+      const workOrdersByContact = new Map<string, WorkOrderRow[]>();
+      for (const order of workOrderRows) {
         const current = workOrdersByContact.get(order.contact_id) || [];
         current.push(order);
         workOrdersByContact.set(order.contact_id, current);
       }
 
-      const nextEvents = (contacts as any[])
+      const nextEvents = contactRows
         .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
         .filter((event) => new Date(event.date).getTime() >= Date.now())
         .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime())

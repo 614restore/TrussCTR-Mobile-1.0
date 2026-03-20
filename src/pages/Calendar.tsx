@@ -7,8 +7,11 @@ import { useAuth } from '../context/AuthContext';
 import NoProfileState from '../components/NoProfileState';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents, type PipelineEvent } from '../lib/scheduleEvents';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
+import type { Database } from '../types/supabase';
 
 const MILESTONE_TYPES: ContactMilestoneId[] = ['inspection', 'build', 'cleanup', 'pick_up_check', 'coc'];
+type ContactRow = Database['public']['Tables']['contacts']['Row'];
+type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
 
 export default function CalendarPage() {
   const navigate = useNavigate();
@@ -66,15 +69,17 @@ export default function CalendarPage() {
       if (contactError) throw contactError;
       if (workOrderError) throw workOrderError;
 
-      const workOrdersByContact = new Map<string, any[]>();
-      for (const order of workOrders || []) {
+      const workOrderRows = (workOrders || []) as WorkOrderRow[];
+      const contactRows = (contacts || []) as ContactRow[];
+      const workOrdersByContact = new Map<string, WorkOrderRow[]>();
+      for (const order of workOrderRows) {
         const current = workOrdersByContact.get(order.contact_id) || [];
         current.push(order);
         workOrdersByContact.set(order.contact_id, current);
       }
 
-      const nextEvents = (contacts || [])
-        .flatMap((contact: any) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
+      const nextEvents = contactRows
+        .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
         .filter((event) => (displayContactFilter ? event.contactId === displayContactFilter : true))
         .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
 
