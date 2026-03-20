@@ -24,6 +24,7 @@ export default defineConfig(({mode}) => {
           '@capacitor/camera',
           '@capacitor/haptics',
           '@capacitor/push-notifications',
+          '@capacitor/splash-screen',
           '@capacitor/status-bar',
         ],
       },
