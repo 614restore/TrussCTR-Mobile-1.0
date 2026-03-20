@@ -6,11 +6,11 @@ import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 
 const USER_LIMITS: Record<string, number> = {
-  starter:      2,
-  professional: 5,
-  business:     10,
-  enterprise:   Infinity,
-  trial:        2,
+  starter:  2,
+  pro:      5,
+  business: 15,
+  scale:    Infinity,
+  trial:    2,
 };
 
 export default function Team() {

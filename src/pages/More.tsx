@@ -138,11 +138,11 @@ export default function More() {
       const status: string  = profile?.companies?.subscription_status ?? 'trialing';
 
       const PLAN_META: Record<string, { label: string; features: string[]; userLimit: string }> = {
-        starter:      { label: 'Starter',      userLimit: '2 users',        features: ['Up to 2 users', 'Unlimited contacts', 'Core CRM features', 'Pipeline board', 'Invoicing', 'Email support'] },
-        professional: { label: 'Pro',           userLimit: '5 users',        features: ['Up to 5 users', 'Unlimited contacts', 'Full pipeline visibility', 'Insurance claim tracking', 'Supplement tracking', 'Team reporting'] },
-        business:     { label: 'Business',      userLimit: '10 users',       features: ['Up to 10 users', 'Unlimited contacts', 'AI Smart Inspection', 'Advanced analytics', 'Material order templates', 'Priority support'] },
-        enterprise:   { label: 'Enterprise',    userLimit: 'Unlimited users', features: ['Unlimited users', 'Unlimited contacts', 'All features included', 'Custom onboarding', 'Dedicated support', 'QuickBooks sync'] },
-        trial:        { label: 'Free Trial',    userLimit: '2 users',        features: ['Up to 2 users', 'Core CRM features', 'Pipeline board', 'Invoicing'] },
+        starter:  { label: 'Starter',    userLimit: '1–2 users',       features: ['Up to 2 users', 'Unlimited contacts', 'Core CRM features', 'Pipeline board', 'Invoicing', 'Email support'] },
+        pro:      { label: 'Pro',         userLimit: 'Up to 5 users',   features: ['Up to 5 users', 'Unlimited contacts', 'Full pipeline visibility', 'Insurance claim tracking', 'Supplement tracking', 'Team reporting'] },
+        business: { label: 'Business',    userLimit: 'Up to 15 users',  features: ['Up to 15 users', 'Unlimited contacts', 'AI Smart Inspection', 'Advanced analytics', 'Material order templates', 'Priority support'] },
+        scale:    { label: 'Scale',       userLimit: 'Unlimited users', features: ['Unlimited users', 'Unlimited contacts', 'All features included', 'Custom onboarding', 'Dedicated support', 'QuickBooks sync'] },
+        trial:    { label: 'Free Trial',  userLimit: '1–2 users',       features: ['Up to 2 users', 'Core CRM features', 'Pipeline board', 'Invoicing'] },
       };
       const meta = PLAN_META[rawPlan] ?? PLAN_META.trial;
 
