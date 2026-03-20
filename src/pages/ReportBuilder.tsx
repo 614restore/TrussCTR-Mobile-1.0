@@ -531,7 +531,7 @@ export default function ReportBuilder() {
             </div>
             {photos.length ? (
               <div className="grid grid-cols-2 gap-3">
-                {photos.map((photo) => (
+                {photos.map((photo: PhotoDocument) => (
                   <PhotoCard
                     key={`before-${photo.id}`}
                     photo={photo}
@@ -558,7 +558,7 @@ export default function ReportBuilder() {
             </div>
             {photos.length ? (
               <div className="grid grid-cols-2 gap-3">
-                {photos.map((photo) => (
+                {photos.map((photo: PhotoDocument) => (
                   <PhotoCard
                     key={`after-${photo.id}`}
                     photo={photo}

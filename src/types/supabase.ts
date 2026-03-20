@@ -93,6 +93,8 @@ export interface Database {
           uploaded_by: string
           created_at: string
         }
+        Insert: Omit<Database['public']['Tables']['documents']['Row'], 'id' | 'created_at'>
+        Update: Partial<Database['public']['Tables']['documents']['Row']>
       }
       projects: {
         Row: {
