@@ -845,12 +845,16 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
 }
 
 function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
+  const navigate = useNavigate();
   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
   const [pitch, setPitch] = useState({ rise: 4, run: 12 });
   const [footprintArea, setFootprintArea] = useState<number | ''>('');
+  const [roofLength, setRoofLength] = useState<number | ''>('');
+  const [roofWidth, setRoofWidth] = useState<number | ''>('');
+  const [overhangFt, setOverhangFt] = useState<number | ''>('');
   const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
   const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -864,12 +868,25 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const angle = pitch.run ? (Math.atan(pitchDecimal) * 180 / Math.PI) : 0;
   const rafterLength = pitch.run ? Math.sqrt(pitch.rise ** 2 + pitch.run ** 2) : 0;
   const pitchMultiplier = pitch.run ? rafterLength / pitch.run : 0;
-  const roofSurfaceArea = footprintArea ? (Number(footprintArea) * pitchMultiplier) : 0;
+  // Auto-compute footprint from L × W + overhang; fall back to manual entry
+  const adjLength = (roofLength !== '' && roofWidth !== '')
+    ? Number(roofLength) + 2 * (overhangFt !== '' ? Number(overhangFt) : 0)
+    : 0;
+  const adjWidth = (roofLength !== '' && roofWidth !== '')
+    ? Number(roofWidth) + 2 * (overhangFt !== '' ? Number(overhangFt) : 0)
+    : 0;
+  const computedFootprint = adjLength && adjWidth ? adjLength * adjWidth : 0;
+  const effectiveFootprint = computedFootprint || (footprintArea ? Number(footprintArea) : 0);
+  const roofSurfaceArea = effectiveFootprint ? effectiveFootprint * pitchMultiplier : 0;
 
   const loadInspectionData = (data: any) => {
     if (!data) return;
     if (data.pitch) setPitch(data.pitch);
-    if (typeof data.footprintArea !== 'undefined') setFootprintArea(data.footprintArea);
+    if (typeof data.roofLength !== 'undefined') setRoofLength(data.roofLength);
+    if (typeof data.roofWidth !== 'undefined') setRoofWidth(data.roofWidth);
+    if (typeof data.overhangFt !== 'undefined') setOverhangFt(data.overhangFt);
+    // Legacy: if only manual footprintArea was saved (no L/W), restore it
+    if (typeof data.footprintArea !== 'undefined' && !data.roofLength) setFootprintArea(data.footprintArea);
     if (data.checklist) setChecklist(data.checklist);
     if (data.photos) setPhotos(data.photos);
   };
@@ -911,14 +928,13 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     try {
       const inspectionData = {
         pitch,
-        angle: angle.toFixed(1),
-        rafterLength: rafterLength.toFixed(2),
         pitchMultiplier: pitchMultiplier.toFixed(3),
-        footprintArea,
+        roofLength, roofWidth, overhangFt,
+        footprintArea: effectiveFootprint || null,
         roofSurfaceArea: roofSurfaceArea ? roofSurfaceArea.toFixed(1) : null,
         checklist,
       };
-      const content = `ROOF INSPECTION REPORT:\nPitch: ${pitch.rise}/${pitch.run} (${angle.toFixed(1)}°)\nRafter: ${rafterLength.toFixed(2)}\nPitch Multiplier: ${pitchMultiplier.toFixed(3)}\n${footprintArea ? `Footprint: ${footprintArea} sq ft\nRoof Surface: ${roofSurfaceArea.toFixed(1)} sq ft\n` : ''}Age: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}`;
+      const content = `ROOF INSPECTION REPORT:\nPitch: ${pitch.rise}/${pitch.run}\nPitch Multiplier: ${pitchMultiplier.toFixed(3)}\n${effectiveFootprint ? `Footprint: ${effectiveFootprint.toFixed(1)} sq ft\nRoof Surface: ${roofSurfaceArea.toFixed(1)} sq ft\n` : ''}Age: ${checklist.roofAge}\nMaterial: ${checklist.material}\nDamage: ${checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None'}\nLeaks: ${checklist.leaks ? 'Yes' : 'No'}`;
       const { error } = await supabase.from('communications').insert({
         contact_id: contact.id,
         company_id: contact.company_id,
@@ -1131,10 +1147,9 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
           status: 'completed',
           data: {
             pitch,
-            angle: angle.toFixed(1),
-            rafterLength: rafterLength.toFixed(2),
             pitchMultiplier: pitchMultiplier.toFixed(3),
-            footprintArea,
+            roofLength, roofWidth, overhangFt,
+            footprintArea: effectiveFootprint || null,
             roofSurfaceArea: roofSurfaceArea ? roofSurfaceArea.toFixed(1) : null,
             checklist,
             photos,
@@ -1171,39 +1186,76 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         </div>
       )}
       <div className="card p-5 bg-slate-900 text-white space-y-4">
+        {/* Header */}
         <div className="flex justify-between items-center">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pitch Calculator</h3>
-          <div className="bg-accent px-2 py-1 rounded text-[10px] font-bold">FIELD TOOL</div>
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pitch Multiplier</h3>
+          <button
+            onClick={() => navigate('/pitch-gauge')}
+            className="flex items-center gap-1.5 bg-accent/20 border border-accent/40 text-accent px-3 py-1.5 rounded-lg text-[10px] font-bold active:scale-95 transition-transform"
+          >
+            📐 Pitch Gauge
+          </button>
         </div>
-        <div className="flex items-center justify-around py-4">
+
+        {/* Rise / Run inputs */}
+        <div className="flex items-center justify-around py-2">
           <div className="text-center">
             <p className="text-[10px] text-slate-400 uppercase mb-1">Rise</p>
-            <input type="number" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2" value={pitch.rise} onChange={(e) => setPitch({...pitch, rise: parseFloat(e.target.value) || 0})} />
+            <input type="number" inputMode="decimal" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2 text-white" value={pitch.rise} onChange={(e) => setPitch({...pitch, rise: parseFloat(e.target.value) || 0})} />
           </div>
           <div className="text-2xl font-light text-slate-600">/</div>
           <div className="text-center">
             <p className="text-[10px] text-slate-400 uppercase mb-1">Run</p>
-            <input type="number" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2" value={pitch.run} onChange={(e) => setPitch({...pitch, run: parseFloat(e.target.value) || 0})} />
+            <input type="number" inputMode="decimal" className="w-16 bg-white/10 border-none rounded-lg text-center font-bold text-xl p-2 text-white" value={pitch.run} onChange={(e) => setPitch({...pitch, run: parseFloat(e.target.value) || 0})} />
           </div>
           <div className="h-12 w-px bg-white/10" />
           <div className="text-center">
-            <p className="text-[10px] text-slate-400 uppercase mb-1">Angle</p>
-            <p className="text-2xl font-bold text-accent">{angle.toFixed(1)}\u00b0</p>
+            <p className="text-[10px] text-slate-400 uppercase mb-1">Multiplier</p>
+            <p className="text-2xl font-black text-accent">{pitchMultiplier.toFixed(3)}</p>
           </div>
         </div>
-        <div className="flex gap-2">
-          {[4, 6, 8, 10, 12].map(r => (
-            <button key={r} onClick={() => setPitch({...pitch, rise: r})} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-colors ${pitch.rise === r ? 'bg-accent text-white' : 'bg-white/5 text-slate-400'}`}>{r}/12</button>
+
+        {/* Quick-select pitch buttons */}
+        <div className="flex gap-1.5">
+          {[3, 4, 5, 6, 7, 8, 10, 12].map(r => (
+            <button key={r} onClick={() => setPitch({...pitch, rise: r})} className={`flex-1 py-2 rounded-lg text-[10px] font-bold transition-colors ${pitch.rise === r ? 'bg-accent text-white' : 'bg-white/5 text-slate-400'}`}>{r}/12</button>
           ))}
         </div>
-        <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
-          <div>Rafter: <span className="text-white font-bold">{rafterLength.toFixed(2)}</span></div>
-          <div>Multiplier: <span className="text-white font-bold">{pitchMultiplier.toFixed(3)}</span></div>
-        </div>
-        <div>
-          <label className="text-[10px] font-bold text-slate-400 uppercase">Footprint Area (sq ft)</label>
-          <input type="number" className="w-full bg-white/10 border-none rounded-lg text-sm p-2 mt-1" value={footprintArea} onChange={(e) => setFootprintArea(e.target.value === '' ? '' : Number(e.target.value))} />
-          {!!footprintArea && <p className="text-[10px] text-slate-400 mt-1">Roof Surface: <span className="text-white font-bold">{roofSurfaceArea.toFixed(1)} sq ft</span></p>}
+
+        {/* Area Calculator */}
+        <div className="border-t border-white/10 pt-4 space-y-3">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Area Calculator</p>
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label className="text-[10px] text-slate-400 uppercase block mb-1">Length (ft)</label>
+              <input type="number" inputMode="decimal" className="w-full bg-white/10 border-none rounded-lg text-center text-sm font-bold p-2 text-white" placeholder="0" value={roofLength} onChange={(e) => setRoofLength(e.target.value === '' ? '' : Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-400 uppercase block mb-1">Width (ft)</label>
+              <input type="number" inputMode="decimal" className="w-full bg-white/10 border-none rounded-lg text-center text-sm font-bold p-2 text-white" placeholder="0" value={roofWidth} onChange={(e) => setRoofWidth(e.target.value === '' ? '' : Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="text-[10px] text-slate-400 uppercase block mb-1">Overhang (ft)</label>
+              <input type="number" inputMode="decimal" className="w-full bg-white/10 border-none rounded-lg text-center text-sm font-bold p-2 text-white" placeholder="0" value={overhangFt} onChange={(e) => setOverhangFt(e.target.value === '' ? '' : Number(e.target.value))} />
+            </div>
+          </div>
+          {computedFootprint > 0 && (
+            <div className="bg-white/5 rounded-xl p-3 space-y-1.5">
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Adj. dimensions</span>
+                <span className="text-white font-bold">{adjLength.toFixed(1)} × {adjWidth.toFixed(1)} ft</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Footprint</span>
+                <span className="text-white font-bold">{computedFootprint.toFixed(1)} sq ft</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-300 border-t border-white/10 pt-1.5">
+                <span className="font-bold">Roof Surface Area</span>
+                <span className="text-accent text-sm font-black">{roofSurfaceArea.toFixed(1)} sq ft</span>
+              </div>
+              <p className="text-[9px] text-slate-500 text-center">Length × Width × {pitchMultiplier.toFixed(3)} (pitch multiplier)</p>
+            </div>
+          )}
         </div>
       </div>
       {step === 'questions' && (

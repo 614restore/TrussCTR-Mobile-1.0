@@ -31,6 +31,7 @@ import DocumentViewer from './pages/DocumentViewer';
 import ReportBuilder from './pages/ReportBuilder';
 import RetailEstimator from './pages/RetailEstimator';
 import SmartInspection from './pages/SmartInspection';
+import PitchGauge from './pages/PitchGauge';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
@@ -92,6 +93,7 @@ function AppRoutes() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/help" element={<HelpSupport />} />
           <Route path="/notifications" element={<Notifications />} />
+          <Route path="/pitch-gauge" element={<PitchGauge />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       )}
