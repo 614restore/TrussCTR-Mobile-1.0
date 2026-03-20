@@ -52,7 +52,6 @@ export default function ContactDetail() {
   const tabScrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollTabsLeft, setCanScrollTabsLeft] = useState(false);
   const [canScrollTabsRight, setCanScrollTabsRight] = useState(false);
-
   useEffect(() => {
     fetchContact();
     fetchDocuments();
@@ -846,6 +845,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
 }
 
 function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
+  const usesNativeInspectionCamera = Capacitor.isNativePlatform();
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
@@ -1003,10 +1003,6 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
 
   const capturePhoto = async () => {
     if (!contact?.id || !userId) return;
-    if (!Capacitor.isPluginAvailable('MultiShotCamera')) {
-      alert('Multi-shot camera is not available on this build. Please rebuild the iOS app.');
-      return;
-    }
     setUploading(true);
     try {
       const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
@@ -1268,12 +1264,26 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               </button>
             ))}
           </div>
-          <label className="block w-full cursor-pointer">
-            <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-            <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-              <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
-            </div>
-          </label>
+          {usesNativeInspectionCamera ? (
+            <button
+              type="button"
+              onClick={capturePhoto}
+              disabled={uploading}
+              className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
+            >
+              <span className="text-sm font-bold text-slate-500">
+                {uploading ? 'Uploading...' : `Tap to capture ${activeElevation} photos`}
+              </span>
+              <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that elevation is complete.</span>
+            </button>
+          ) : (
+            <label className="block w-full cursor-pointer">
+              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+              <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
+                <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
+              </div>
+            </label>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
             <label className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
