@@ -278,10 +278,15 @@ export default function ReportBuilder() {
         setContact(contactData);
         setCompany(companyError ? null : companyData);
 
-        const preparedPhotos = await Promise.all((photoData || []).map(async (photo: any) => ({
-          ...photo,
-          displayUrl: typeof photo.url === 'string' ? await buildDocumentDisplayUrl(photo.url) : photo.url,
-        })));
+        const preparedPhotos = await Promise.all(
+          (photoData || []).map(async (photo): Promise<PhotoDocument> => ({
+            id: photo.id,
+            name: photo.name,
+            url: photo.url,
+            displayUrl: typeof photo.url === 'string' ? await buildDocumentDisplayUrl(photo.url) : photo.url,
+            created_at: photo.created_at,
+          }))
+        );
 
         setPhotos(preparedPhotos);
       } catch (err) {

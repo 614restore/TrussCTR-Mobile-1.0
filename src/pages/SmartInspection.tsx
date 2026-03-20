@@ -81,7 +81,7 @@ export default function SmartInspection() {
     if (!id || !profile) return;
     setSubmitting(true);
     try {
-      const total = Object.values(photoCounts).reduce((a, b) => a + b, 0);
+      const total = Object.values(photoCounts).reduce((a: number, b: number) => a + b, 0);
       const damage = checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None';
       await supabase.from('communications').insert({
         contact_id: id,

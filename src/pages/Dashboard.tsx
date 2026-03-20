@@ -152,7 +152,7 @@ export default function Dashboard() {
     { label: 'Revenue (MTD)', value: formatCurrency(stats.revenueMTD), icon: TrendingUp, color: 'bg-indigo-500' },
   ];
 
-  const totalContacts = Object.values(stageCounts).reduce((a, b) => a + b, 0);
+  const totalContacts = Object.values(stageCounts).reduce((a: number, b: number) => a + b, 0);
 
   if (loadingAuth) return (
     <div className="h-full flex items-center justify-center">

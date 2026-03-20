@@ -121,19 +121,22 @@ export default function CalendarPage() {
           .single();
 
         if (fetchErr) throw fetchErr;
+        if (!contactData) throw new Error('Contact not found');
 
-        const { schedule, plainNotes } = parseContactSchedule(contactData?.notes);
+        const { schedule, plainNotes } = parseContactSchedule(contactData.notes);
         const updated = updateScheduleMilestone(schedule, nextStepParam as ContactMilestoneId, { date: isoDateTime });
         const newNotes = serializeContactSchedule(updated, eventNotes || plainNotes);
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: updateErr } = await supabase
           .from('contacts')
-          .update({ notes: newNotes })
+          .update({ notes: newNotes } as any)
           .eq('id', saveContactId);
 
         if (updateErr) throw updateErr;
       } else {
         // Save as a work order
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { error: insertErr } = await supabase
           .from('work_orders')
           .insert({
@@ -143,7 +146,7 @@ export default function CalendarPage() {
             scheduled_date: isoDateTime,
             notes: eventNotes || null,
             status: 'scheduled',
-          });
+          } as any);
 
         if (insertErr) throw insertErr;
       }
