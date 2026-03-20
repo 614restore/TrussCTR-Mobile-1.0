@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Mail, Lock, AlertCircle } from 'lucide-react';
+import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
 
 export default function Login() {
@@ -8,6 +8,9 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [forgotMode, setForgotMode] = useState(false);
+  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotLoading, setForgotLoading] = useState(false);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +30,27 @@ export default function Login() {
     }
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email) {
+      setError('Please enter your email address first.');
+      return;
+    }
+    setForgotLoading(true);
+    setError(null);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      setForgotSent(true);
+    } catch (err: any) {
+      setError(err.message || 'Failed to send reset email. Please try again.');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-10">
@@ -40,15 +64,32 @@ export default function Login() {
           </div>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-6">
-          {error && (
-            <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm animate-shake">
-              <AlertCircle size={18} className="shrink-0" />
-              <span className="font-medium">{error}</span>
-            </div>
-          )}
-
-          <div className="space-y-4">
+        {/* Forgot password confirmation */}
+        {forgotSent ? (
+          <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
+            <CheckCircle size={32} className="text-emerald-500" />
+            <p className="font-bold text-sm">Reset link sent!</p>
+            <p className="text-xs text-emerald-600">Check your email for a link to set a new password.</p>
+            <button
+              type="button"
+              onClick={() => { setForgotMode(false); setForgotSent(false); setError(null); }}
+              className="mt-2 text-emerald-700 text-xs font-bold uppercase tracking-widest hover:text-emerald-900 transition-colors"
+            >
+              Back to Sign In
+            </button>
+          </div>
+        ) : forgotMode ? (
+          /* Forgot password form */
+          <form onSubmit={handleForgotPassword} className="space-y-6">
+            {error && (
+              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm">
+                <AlertCircle size={18} className="shrink-0" />
+                <span className="font-medium">{error}</span>
+              </div>
+            )}
+            <p className="text-slate-500 text-sm text-center">
+              Enter your email and we'll send you a link to reset your password.
+            </p>
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
               <div className="relative">
@@ -56,6 +97,7 @@ export default function Login() {
                 <input
                   type="email"
                   required
+                  autoFocus
                   className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
                   placeholder="you@company.com"
                   value={email}
@@ -63,41 +105,92 @@ export default function Login() {
                 />
               </div>
             </div>
+            <button
+              type="submit"
+              disabled={forgotLoading}
+              className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {forgotLoading ? (
+                <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                'Send Reset Link'
+              )}
+            </button>
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => { setForgotMode(false); setError(null); }}
+                className="text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors"
+              >
+                Back to Sign In
+              </button>
+            </div>
+          </form>
+        ) : (
+          /* Sign in form */
+          <form onSubmit={handleLogin} className="space-y-6">
+            {error && (
+              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm animate-shake">
+                <AlertCircle size={18} className="shrink-0" />
+                <span className="font-medium">{error}</span>
+              </div>
+            )}
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                <input
-                  type="password"
-                  required
-                  className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <input
+                    type="email"
+                    required
+                    className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
+                    placeholder="you@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <input
+                    type="password"
+                    required
+                    className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-            ) : (
-              'Sign In to Dashboard'
-            )}
-          </button>
-          
-          <div className="text-center">
-            <button type="button" className="text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors">
-              Forgot Password?
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+              ) : (
+                'Sign In to Dashboard'
+              )}
             </button>
-          </div>
-        </form>
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => { setForgotMode(true); setError(null); }}
+                className="text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

@@ -54,20 +54,18 @@ export default function Notifications() {
           .subscribe()
       : null;
 
-    // Request Capacitor push notification permissions (graceful — no-op in browser)
-    const registerPush = async () => {
+    // Check push notification permission status without re-registering
+    // (Registration is handled once at app startup, not on every page visit)
+    const checkPushStatus = async () => {
       try {
         const { PushNotifications } = await import('@capacitor/push-notifications');
-        const result = await PushNotifications.requestPermissions();
-        if (result.receive === 'granted') {
-          await PushNotifications.register();
-          setPushEnabled(true);
-        }
+        const status = await PushNotifications.checkPermissions();
+        setPushEnabled(status.receive === 'granted');
       } catch {
         // Capacitor not available (browser) — silently skip
       }
     };
-    registerPush();
+    checkPushStatus();
 
     return () => {
       if (channel) supabase.removeChannel(channel);

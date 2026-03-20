@@ -15,6 +15,19 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        // Capacitor plugins are native — injected by the iOS/Android bridge at
+        // runtime. Vite must not try to bundle them or it will fail to resolve.
+        external: [
+          '@capacitor/core',
+          '@capacitor/camera',
+          '@capacitor/haptics',
+          '@capacitor/push-notifications',
+          '@capacitor/status-bar',
+        ],
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify — file watching is disabled to prevent flickering during agent edits.

@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
 import Pipeline from './pages/Pipeline';
 import ContactDetail from './pages/ContactDetail';
@@ -22,6 +23,7 @@ import Settings from './pages/Settings';
 import HelpSupport from './pages/HelpSupport';
 import Notifications from './pages/Notifications';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import DocumentManager from './pages/DocumentManager';
 import DocumentSigner from './pages/DocumentSigner';
 import DocumentViewer from './pages/DocumentViewer';
@@ -50,6 +52,8 @@ function AppRoutes() {
 
   return (
     <Routes>
+      {/* Always-accessible route — must work with or without a session */}
+      <Route path="/reset-password" element={<ResetPassword />} />
       {!session ? (
         <>
           <Route path="/login" element={<Login />} />
@@ -96,10 +100,12 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

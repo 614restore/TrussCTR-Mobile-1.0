@@ -24,12 +24,15 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 const PIPELINE_STAGES = [
-  { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
-  { id: 'inspected', label: 'Inspected', color: 'bg-amber-500' },
-  { id: 'approved', label: 'Approved', color: 'bg-emerald-500' },
-  { id: 'scheduled', label: 'Scheduled', color: 'bg-teal-500' },
-  { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
-  { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
+  { id: 'lead',            label: 'Leads',       color: 'bg-blue-500'   },
+  { id: 'contacted',       label: 'Contacted',   color: 'bg-sky-500'    },
+  { id: 'appointment_set', label: 'Appt Set',    color: 'bg-indigo-500' },
+  { id: 'inspected',       label: 'Inspected',   color: 'bg-amber-500'  },
+  { id: 'estimate_sent',   label: 'Est. Sent',   color: 'bg-orange-500' },
+  { id: 'approved',        label: 'Approved',    color: 'bg-emerald-500'},
+  { id: 'scheduled',       label: 'Scheduled',   color: 'bg-teal-500'   },
+  { id: 'in_progress',     label: 'In Progress', color: 'bg-primary'    },
+  { id: 'completed',       label: 'Completed',   color: 'bg-slate-800'  },
 ];
 type ContactRow = Database['public']['Tables']['contacts']['Row'];
 type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
@@ -183,8 +186,17 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-primary">Dashboard</h1>
           <p className="text-slate-500 text-sm">Welcome back, {profile?.first_name || profile?.name || 'Sales Rep'}</p>
         </div>
-        <div className="h-10 w-10 rounded-full bg-slate-200 border-2 border-white shadow-sm overflow-hidden">
-          <img src={profile?.avatar_url || `https://picsum.photos/seed/${profile?.id}/100/100`} alt="Avatar" referrerPolicy="no-referrer" />
+        <div className="h-10 w-10 rounded-full bg-accent/10 border-2 border-white shadow-sm overflow-hidden flex items-center justify-center">
+          {profile?.avatar_url ? (
+            <img src={profile.avatar_url} alt="Avatar" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-accent text-xs font-bold select-none">
+              {[profile?.first_name, profile?.last_name]
+                .filter(Boolean)
+                .map(n => n![0].toUpperCase())
+                .join('') || profile?.name?.[0]?.toUpperCase() || 'U'}
+            </span>
+          )}
         </div>
       </div>
 
