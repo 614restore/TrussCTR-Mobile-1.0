@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Capacitor } from '@capacitor/core';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -99,12 +100,14 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const Router = Capacitor.isNativePlatform() ? HashRouter : BrowserRouter;
+
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <BrowserRouter>
+        <Router>
           <AppRoutes />
-        </BrowserRouter>
+        </Router>
       </AuthProvider>
     </ErrorBoundary>
   );

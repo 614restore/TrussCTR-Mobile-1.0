@@ -4,7 +4,7 @@ import {
   ChevronLeft, Phone, MessageSquare, Mail, Edit2,
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
-  ClipboardList, PenLine, Wrench
+  ClipboardList, PenLine, Wrench, TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -140,6 +140,9 @@ export default function ContactDetail() {
 
   const saveEdit = async () => {
     if (!editForm?.id) return;
+    const statusChanged = editForm.status !== contact?.status;
+    const prevStatus: string = contact?.status ?? '';
+    const nextStatus: string = editForm.status ?? '';
     try {
       const parsed = parseContactSchedule(contact?.notes);
       const updates = { ...editForm };
@@ -152,8 +155,27 @@ export default function ContactDetail() {
         }
       });
       updates.notes = serializeContactSchedule(parsed.schedule, updates.notes || '');
+      if (statusChanged) {
+        updates.status_changed_at = new Date().toISOString();
+      }
       const { error } = await (supabase.from('contacts') as any).update(updates).eq('id', editForm.id);
       if (error) throw error;
+
+      // Auto-log the stage transition to the timeline
+      if (statusChanged && user?.id) {
+        const from = prevStatus.replace(/_/g, ' ');
+        const to = nextStatus.replace(/_/g, ' ');
+        await (supabase.from('communications') as any).insert({
+          contact_id: editForm.id,
+          company_id: contact?.company_id,
+          type: 'stage_change',
+          content: `Stage updated: ${from} → ${to}`,
+          user_id: user.id,
+          direction: 'outbound',
+        });
+        fetchTimeline();
+      }
+
       setIsEditing(false);
       fetchContact();
     } catch (err) {
@@ -1096,9 +1118,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       } as any);
       if (error) throw error;
       // Try to move pipeline using web-app status; fallback to mobile status if enum blocks it.
-      const { error: statusError } = await (supabase.from('contacts') as any).update({ status: 'inspection_complete' }).eq('id', contact.id);
+      const now = new Date().toISOString();
+      const { error: statusError } = await (supabase.from('contacts') as any)
+        .update({ status: 'inspection_complete', status_changed_at: now })
+        .eq('id', contact.id);
       if (statusError) {
-        await (supabase.from('contacts') as any).update({ status: 'inspected' }).eq('id', contact.id);
+        await (supabase.from('contacts') as any)
+          .update({ status: 'inspected', status_changed_at: now })
+          .eq('id', contact.id);
       }
       try {
         const { data } = await (supabase.from('inspections') as any).upsert({
@@ -1559,12 +1586,15 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
           <div key={i} className="card p-4 space-y-2">
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-2">
-                <div className="h-6 w-6 rounded-md bg-slate-100 flex items-center justify-center text-slate-500">
-                  {item.type === 'call' && <Phone size={12} />}
-                  {item.type === 'note' && <FileText size={12} />}
-                  {item.type === 'sms' && <MessageSquare size={12} />}
+                <div className={`h-6 w-6 rounded-md flex items-center justify-center ${item.type === 'stage_change' ? 'bg-accent/10 text-accent' : 'bg-slate-100 text-slate-500'}`}>
+                  {item.type === 'call'         && <Phone      size={12} />}
+                  {item.type === 'note'         && <FileText   size={12} />}
+                  {item.type === 'sms'          && <MessageSquare size={12} />}
+                  {item.type === 'stage_change' && <TrendingUp size={12} />}
                 </div>
-                <span className="text-[10px] font-bold text-slate-400 uppercase">{item.type}</span>
+                <span className={`text-[10px] font-bold uppercase ${item.type === 'stage_change' ? 'text-accent' : 'text-slate-400'}`}>
+                  {item.type === 'stage_change' ? 'Stage Change' : item.type}
+                </span>
               </div>
               <span className="text-[10px] text-slate-400">{new Date(item.created_at).toLocaleDateString()}</span>
             </div>
@@ -1878,7 +1908,7 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
       if (error) throw error;
 
       await (supabase.from('contacts') as any)
-        .update({ status: 'scheduled' })
+        .update({ status: 'scheduled', status_changed_at: new Date().toISOString() })
         .eq('id', contact.id);
 
       if (userId) {
