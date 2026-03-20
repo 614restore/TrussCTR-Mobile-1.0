@@ -990,7 +990,10 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
       const photosToUpload = result?.photos || [];
       for (const url of photosToUpload) {
-        const resp = await fetch(url);
+        // Convert file:// path → capacitor://localhost/... so WKWebView can fetch it
+        const webUrl = Capacitor.convertFileSrc(url);
+        const resp = await fetch(webUrl);
+        if (!resp.ok) throw new Error(`Failed to read photo (${resp.status})`);
         const blob = await resp.blob();
         await uploadInspectionBlob(blob, url);
       }

@@ -6,6 +6,7 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
+    base: './',
     plugins: [react(), tailwindcss()],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
@@ -13,20 +14,6 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
-      },
-    },
-    build: {
-      rollupOptions: {
-        // Capacitor plugins are native — injected by the iOS/Android bridge at
-        // runtime. Vite must not try to bundle them or it will fail to resolve.
-        external: [
-          '@capacitor/core',
-          '@capacitor/camera',
-          '@capacitor/haptics',
-          '@capacitor/push-notifications',
-          '@capacitor/splash-screen',
-          '@capacitor/status-bar',
-        ],
       },
     },
     server: {
