@@ -278,8 +278,9 @@ export default function ReportBuilder() {
         setContact(contactData);
         setCompany(companyError ? null : companyData);
 
+        type RawPhoto = { id: string; name: string; url: string; created_at: string };
         const preparedPhotos = await Promise.all(
-          (photoData || []).map(async (photo): Promise<PhotoDocument> => ({
+          ((photoData || []) as RawPhoto[]).map(async (photo): Promise<PhotoDocument> => ({
             id: photo.id,
             name: photo.name,
             url: photo.url,

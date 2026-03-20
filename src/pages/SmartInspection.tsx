@@ -81,14 +81,14 @@ export default function SmartInspection() {
     if (!id || !profile) return;
     setSubmitting(true);
     try {
-      const total = Object.values(photoCounts).reduce((a: number, b: number) => a + b, 0);
+      const total = (Object.values(photoCounts) as number[]).reduce((a, b) => a + b, 0);
       const damage = checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None';
       await supabase.from('communications').insert({
         contact_id: id,
         company_id: profile.company_id,
         type: 'note',
         content: `📸 Smart Inspection completed — ${total} photos uploaded across elevations: ${Object.entries(photoCounts)
-          .filter(([, v]) => v > 0)
+          .filter(([, v]) => (v as number) > 0)
           .map(([k, v]) => `${k}(${v})`)
           .join(', ')}\n\nChecklist:\nAge: ${checklist.roofAge || '—'}\nMaterial: ${checklist.material || '—'}\nDamage: ${damage}`,
         user_id: profile.id,

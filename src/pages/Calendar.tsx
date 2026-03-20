@@ -112,9 +112,12 @@ export default function CalendarPage() {
       const isoDateTime = new Date(eventDate + 'T' + eventTime).toISOString();
       const isMilestone = MILESTONE_TYPES.includes(nextStepParam as ContactMilestoneId);
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any;
+
       if (isMilestone) {
         // Save as a contact schedule milestone (stored in notes field)
-        const { data: contactData, error: fetchErr } = await supabase
+        const { data: contactData, error: fetchErr } = await db
           .from('contacts')
           .select('notes')
           .eq('id', saveContactId)
@@ -123,21 +126,21 @@ export default function CalendarPage() {
         if (fetchErr) throw fetchErr;
         if (!contactData) throw new Error('Contact not found');
 
-        const { schedule, plainNotes } = parseContactSchedule(contactData.notes);
+        const { schedule, plainNotes } = parseContactSchedule(
+          (contactData as { notes: string | null }).notes
+        );
         const updated = updateScheduleMilestone(schedule, nextStepParam as ContactMilestoneId, { date: isoDateTime });
         const newNotes = serializeContactSchedule(updated, eventNotes || plainNotes);
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: updateErr } = await supabase
+        const { error: updateErr } = await db
           .from('contacts')
-          .update({ notes: newNotes } as any)
+          .update({ notes: newNotes })
           .eq('id', saveContactId);
 
         if (updateErr) throw updateErr;
       } else {
         // Save as a work order
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const { error: insertErr } = await supabase
+        const { error: insertErr } = await db
           .from('work_orders')
           .insert({
             contact_id: saveContactId,
@@ -146,7 +149,7 @@ export default function CalendarPage() {
             scheduled_date: isoDateTime,
             notes: eventNotes || null,
             status: 'scheduled',
-          } as any);
+          });
 
         if (insertErr) throw insertErr;
       }
