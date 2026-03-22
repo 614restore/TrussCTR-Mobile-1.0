@@ -31,10 +31,43 @@ const TABS = [
   { id: 'insurance', label: 'Insurance', icon: Shield },
 ];
 
+// Ordered pipeline stages for progress bar (main path only)
 const STAGES: CustomerStatus[] = [
-  'lead', 'contacted', 'appointment_set', 'inspected', 'estimate_sent', 
-  'approved', 'scheduled', 'in_progress', 'completed', 'paid'
+  'lead', 'contacted', 'appointment_set', 'inspected', 'estimate_sent',
+  'approved', 'scheduled', 'in_progress', 'completed', 'paid',
 ];
+
+// All valid statuses available in the status dropdown (includes aliases and terminal stages)
+const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
+  { value: 'lead', label: 'Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'appointment_set', label: 'Appointment Set' },
+  { value: 'inspection_scheduled', label: 'Inspection Scheduled' },
+  { value: 'inspected', label: 'Inspection' },
+  { value: 'inspection_complete', label: 'Inspection Complete' },
+  { value: 'estimate_sent', label: 'Follow Up / Negotiating' },
+  { value: 'approved', label: 'Sold' },
+  { value: 'signed_won', label: 'Signed / Won' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'retail', label: 'Retail' },
+  { value: 'lost', label: 'Lost' },
+];
+
+// Normalize alias statuses to their canonical stage for progress bar positioning
+function normalizeStatusForProgress(status: string): CustomerStatus {
+  const aliases: Record<string, CustomerStatus> = {
+    new_lead: 'lead',
+    inspection_scheduled: 'appointment_set',
+    inspection_complete: 'inspected',
+    signed_won: 'approved',
+    retail: 'approved',
+    lost: 'completed',
+  };
+  return (aliases[status] as CustomerStatus) ?? (status as CustomerStatus);
+}
 
 export default function ContactDetail() {
   const { id } = useParams();
@@ -390,7 +423,7 @@ export default function ContactDetail() {
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase">Status</label>
                 <select className="w-full bg-slate-50 rounded-xl p-3 text-sm mt-1" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
-                  {STAGES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                  {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
 
@@ -521,7 +554,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
 
     const reachedStatuses = new Set<string>();
     const statusOrder: CustomerStatus[] = ['appointment_set', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'];
-    const currentIndex = statusOrder.indexOf(contact.status);
+    const currentIndex = statusOrder.indexOf(normalizeStatusForProgress(contact.status) as CustomerStatus);
     if (currentIndex >= 0) {
       for (let index = 0; index <= currentIndex; index += 1) {
         reachedStatuses.add(statusOrder[index]);
@@ -711,7 +744,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
         </div>
         <div className="flex gap-1">
           {STAGES.map((stage, i) => {
-            const currentIndex = STAGES.indexOf(contact.status);
+            const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status));
             return <div key={stage} className={`h-1.5 flex-1 rounded-full ${i <= currentIndex ? 'bg-accent' : 'bg-slate-100'}`} />;
           })}
         </div>
@@ -1415,7 +1448,7 @@ function StatusTab({ contact }: { contact: any }) {
       <h3 className="text-sm font-bold text-primary">Job Timeline</h3>
       <div className="space-y-8 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
         {STAGES.map((stage, i) => {
-          const currentIndex = STAGES.indexOf(contact.status);
+          const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status));
           const isDone = i <= currentIndex;
           return (
             <div key={stage} className="flex gap-6 relative">
