@@ -798,7 +798,9 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
                 <div>
                   <p className="text-sm font-bold text-primary">{event.title}</p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    {new Date(event.date).toLocaleString()}
+                    {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {' at '}
+                    {new Date(event.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                   </p>
                 </div>
                 <ChevronRight size={18} className="text-slate-300" />
