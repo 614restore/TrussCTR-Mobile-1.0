@@ -354,6 +354,23 @@ export default function EstimateSigner() {
 
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
 
+  // Editable terms state — initialized from quoteMeta when estimate loads
+  const [termsPayment, setTermsPayment] = useState('');
+  const [termsWarranty, setTermsWarranty] = useState('');
+  const [termsNotes, setTermsNotes] = useState('');
+
+  const canEditTerms = profile?.role === 'owner' || profile?.role === 'admin';
+
+  useEffect(() => {
+    if (estimate) {
+      const parsed = parseEstimateNotes(estimate.notes);
+      const meta = parsed.meta || buildDefaultQuoteMeta(Number(estimate.total || 0));
+      setTermsPayment(meta.paymentTerms);
+      setTermsWarranty(meta.warrantyPeriod);
+      setTermsNotes(parsed.plainNotes || meta.customerMessage);
+    }
+  }, [estimate]);
+
   useEffect(() => {
     if (estimate?.items) {
       setLineItems(
@@ -423,8 +440,7 @@ export default function EstimateSigner() {
     if (!estimate || !profile || !customerSignatureDataUrl || !repSignatureDataUrl) return;
     setSaving(true);
     try {
-      const parsedNotes = parseEstimateNotes(estimate.notes);
-      const quoteMeta = parsedNotes.meta || buildDefaultQuoteMeta(Number(estimate.total || 0));
+      const quoteMeta = buildDefaultQuoteMeta(derivedTotal);
       const customerName = `${estimate.contacts?.first_name || ''} ${estimate.contacts?.last_name || ''}`.trim();
       const propertyAddress = [estimate.contacts?.address, estimate.contacts?.city, estimate.contacts?.state, estimate.contacts?.zip].filter(Boolean).join(', ');
       const companyName = estimate.companies?.name || profile?.companies?.name || 'TrussCTR';
@@ -454,9 +470,9 @@ export default function EstimateSigner() {
         total: derivedTotal,
         depositAmount: derivedDeposit,
         finalPaymentAmount: derivedBalance,
-        paymentTerms: quoteMeta.paymentTerms,
-        warrantyPeriod: quoteMeta.warrantyPeriod,
-        customerNotes: parsedNotes.plainNotes || quoteMeta.customerMessage,
+        paymentTerms: termsPayment,
+        warrantyPeriod: termsWarranty,
+        customerNotes: termsNotes,
         customerSignatureDataUrl,
         repSignatureDataUrl,
         repLabel,
@@ -709,6 +725,62 @@ export default function EstimateSigner() {
             </div>
           </div>
 
+          {/* Terms & Conditions — editable for owner/admin */}
+          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-primary">Terms &amp; Conditions</h3>
+                {canEditTerms && (
+                  <p className="text-[10px] text-amber-600 font-medium mt-0.5">Editable — changes apply to this document only</p>
+                )}
+              </div>
+              {!canEditTerms && (
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">View only</span>
+              )}
+            </div>
+            <div className="space-y-4 px-5 pb-5">
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Payment Terms</p>
+                {canEditTerms ? (
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none"
+                    value={termsPayment}
+                    onChange={(e) => setTermsPayment(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">{termsPayment}</p>
+                )}
+              </div>
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Warranty</p>
+                {canEditTerms ? (
+                  <textarea
+                    rows={2}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none"
+                    value={termsWarranty}
+                    onChange={(e) => setTermsWarranty(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">{termsWarranty}</p>
+                )}
+              </div>
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Additional Notes</p>
+                {canEditTerms ? (
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none"
+                    value={termsNotes}
+                    onChange={(e) => setTermsNotes(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">{termsNotes}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-3xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
             <SignaturePad title="Customer Signature" helperText="Customer / homeowner signature" onChange={setCustomerSignatureDataUrl} />
             <SignaturePad title="Sales Rep Signature" helperText={`${repLabel} signature`} onChange={setRepSignatureDataUrl} />
@@ -764,6 +836,14 @@ export default function EstimateSigner() {
               ))}
             </tbody>
           </table>
+          {(termsPayment || termsWarranty || termsNotes) && (
+            <div style={{ marginTop: '20px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '14px 16px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#92400e', marginBottom: '8px' }}>Terms &amp; Conditions</div>
+              {termsPayment && <p style={{ fontSize: '12px', color: '#78350f', marginBottom: '6px' }}><strong>Payment:</strong> {termsPayment}</p>}
+              {termsWarranty && <p style={{ fontSize: '12px', color: '#78350f', marginBottom: '6px' }}><strong>Warranty:</strong> {termsWarranty}</p>}
+              {termsNotes && <p style={{ fontSize: '12px', color: '#78350f', whiteSpace: 'pre-line' }}>{termsNotes}</p>}
+            </div>
+          )}
         </div>
       </div>
     </div>
