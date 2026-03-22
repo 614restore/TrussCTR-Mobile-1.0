@@ -94,6 +94,8 @@ export default function Team() {
               <p className="text-sm text-slate-500">
                 To invite a new team member, send the invitation from the{' '}
                 <span className="font-bold text-accent">TrussCTR web app</span> under Team.
+                The invite link will take them to a <span className="font-semibold">Create Account</span> page
+                showing their role and company.
               </p>
               <button onClick={() => setShowLimitModal(false)} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
                 OK

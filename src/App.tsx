@@ -25,6 +25,7 @@ import HelpSupport from './pages/HelpSupport';
 import Notifications from './pages/Notifications';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
+import AcceptInvite from './pages/AcceptInvite';
 import DocumentManager from './pages/DocumentManager';
 import DocumentSigner from './pages/DocumentSigner';
 import DocumentViewer from './pages/DocumentViewer';
@@ -54,8 +55,9 @@ function AppRoutes() {
 
   return (
     <Routes>
-      {/* Always-accessible route — must work with or without a session */}
+      {/* Always-accessible routes — work with or without a session */}
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
       {!session ? (
         <>
           <Route path="/login" element={<Login />} />
