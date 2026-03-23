@@ -354,9 +354,11 @@ export default function DocumentSigner() {
   const [contractorSignatureDataUrl, setContractorSignatureDataUrl] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
+  const [additionalTerms, setAdditionalTerms] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const printableRef = useRef<HTMLDivElement>(null);
   const doc = DOC_CONTENT[docType || ''];
+  const canEditTerms = profile?.role === 'owner' || profile?.role === 'admin';
 
   useEffect(() => {
     const fetchContact = async () => {
@@ -456,7 +458,9 @@ export default function DocumentSigner() {
         propertyAddress: propertyAddress || 'Address pending',
         companyAddress,
         today,
-        sections: renderedSections,
+        sections: additionalTerms.trim()
+          ? [...renderedSections, `ADDITIONAL TERMS & CONDITIONS\n\n${additionalTerms.trim()}`]
+          : renderedSections,
         customerSignatureDataUrl,
         contractorSignatureDataUrl,
         contractorRoleLabel,
@@ -640,6 +644,12 @@ export default function DocumentSigner() {
                     {section}
                   </p>
                 ))}
+                {additionalTerms.trim() && (
+                  <div style={{ marginTop: '8px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                    <p style={{ fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.2em', color: '#94a3b8', marginBottom: '8px' }}>Additional Terms &amp; Conditions</p>
+                    <p style={{ fontSize: '14px', color: '#334155', lineHeight: 1.75, whiteSpace: 'pre-line' }}>{additionalTerms}</p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -653,6 +663,38 @@ export default function DocumentSigner() {
                   <p style={{ fontSize: '12px', color: '#047857', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pdfUrl || 'Document available in the contact documents tab.'}</p>
                 </div>
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* Additional Terms & Conditions */}
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 pt-5 pb-3">
+            <div>
+              <p className="text-sm font-bold text-primary">Additional Terms &amp; Conditions</p>
+              {canEditTerms ? (
+                <p className="text-[10px] text-amber-600 font-medium mt-0.5">Editable — applies to this document only</p>
+              ) : (
+                <p className="text-[10px] text-slate-400 mt-0.5">Set by your company admin</p>
+              )}
+            </div>
+            {!canEditTerms && (
+              <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">View only</span>
+            )}
+          </div>
+          <div className="px-5 pb-5">
+            {canEditTerms ? (
+              <textarea
+                rows={5}
+                placeholder="Enter any additional terms, conditions, or company-specific language that applies to this document…"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none placeholder:text-slate-300"
+                value={additionalTerms}
+                onChange={(e) => setAdditionalTerms(e.target.value)}
+              />
+            ) : additionalTerms ? (
+              <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600 whitespace-pre-line">{additionalTerms}</p>
+            ) : (
+              <p className="text-sm text-slate-300 italic">No additional terms have been added.</p>
             )}
           </div>
         </div>
@@ -762,6 +804,12 @@ export default function DocumentSigner() {
                 {section}
               </p>
             ))}
+            {additionalTerms.trim() && (
+              <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid #e2e8f0', background: '#fffbeb', borderRadius: '8px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.18em', color: '#92400e', marginBottom: '10px' }}>Additional Terms &amp; Conditions</div>
+                <p style={{ fontSize: '13px', lineHeight: 1.8, whiteSpace: 'pre-line', color: '#78350f' }}>{additionalTerms}</p>
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: '36px', paddingTop: '24px', borderTop: '1px solid #cbd5e1' }}>

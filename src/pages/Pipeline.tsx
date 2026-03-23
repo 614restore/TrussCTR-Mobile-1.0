@@ -9,16 +9,21 @@ import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
 
-const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
-  { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
-  { id: 'contacted', label: 'Contacted', color: 'bg-sky-500' },
-  { id: 'appointment_set', label: 'Appt Set', color: 'bg-indigo-500' },
-  { id: 'inspected', label: 'Inspected', color: 'bg-amber-500' },
-  { id: 'estimate_sent', label: 'Est. Sent', color: 'bg-orange-500' },
-  { id: 'approved', label: 'Approved', color: 'bg-emerald-500' },
-  { id: 'scheduled', label: 'Scheduled', color: 'bg-teal-500' },
-  { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
-  { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
+type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
+
+const STAGES: StageConfig[] = [
+  { statuses: ['new_lead', 'lead'], label: 'Leads', color: 'bg-blue-500' },
+  { statuses: ['contacted'], label: 'Contacted', color: 'bg-sky-500' },
+  { statuses: ['appointment_set', 'inspection_scheduled'], label: 'Appointment Set', color: 'bg-indigo-500' },
+  { statuses: ['inspected', 'inspection_complete'], label: 'Inspection', color: 'bg-amber-500' },
+  { statuses: ['estimate_sent'], label: 'Follow Up / Negotiating', color: 'bg-orange-500' },
+  { statuses: ['approved', 'signed_won'], label: 'Sold', color: 'bg-emerald-500' },
+  { statuses: ['scheduled'], label: 'Scheduled', color: 'bg-teal-500' },
+  { statuses: ['in_progress'], label: 'In Progress', color: 'bg-primary' },
+  { statuses: ['completed'], label: 'Completed', color: 'bg-slate-800' },
+  { statuses: ['paid'], label: 'Paid', color: 'bg-green-600' },
+  { statuses: ['retail'], label: 'Retail', color: 'bg-purple-500' },
+  { statuses: ['lost'], label: 'Lost', color: 'bg-red-400' },
 ];
 
 export default function Pipeline() {
@@ -276,9 +281,9 @@ export default function Pipeline() {
         ) : viewMode === 'kanban' ? (
           <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x">
             {STAGES.map((stage) => {
-              const stageContacts = filteredContacts.filter(c => c.status === stage.id);
+              const stageContacts = filteredContacts.filter(c => stage.statuses.includes(c.status));
               return (
-                <div key={stage.id} className="min-w-[280px] flex flex-col gap-4 snap-center">
+                <div key={stage.statuses[0]} className="min-w-[280px] flex flex-col gap-4 snap-center">
                   <div className="flex items-center justify-between px-2">
                     <div className="flex items-center gap-2">
                       <div className={`h-2 w-2 rounded-full ${stage.color}`} />
@@ -356,7 +361,7 @@ export default function Pipeline() {
                   <p className="text-xs text-slate-500 truncate">{contact.address}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.id === contact.status)?.color || 'bg-slate-400'} text-white`}>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.statuses.includes(contact.status))?.color || 'bg-slate-400'} text-white`}>
                     {contact.status.replace('_', ' ')}
                   </span>
                   <button 
@@ -397,7 +402,7 @@ export default function Pipeline() {
                       <p className="text-xs text-slate-500">{contact.address}</p>
                     </div>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.id === contact.status)?.color || 'bg-slate-400'} text-white`}>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.statuses.includes(contact.status))?.color || 'bg-slate-400'} text-white`}>
                     {contact.status.replace('_', ' ')}
                   </span>
                 </div>

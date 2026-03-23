@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, Users, Briefcase, DollarSign, Plus, Calendar, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
@@ -49,7 +49,7 @@ export default function Dashboard() {
   });
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
-  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
+  const [allPipelineEvents, setAllPipelineEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -140,12 +140,10 @@ export default function Dashboard() {
         workOrdersByContact.set(order.contact_id, current);
       }
 
-      const nextEvents = contactRows
+      const allEvents = contactRows
         .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
-        .filter((event) => new Date(event.date).getTime() >= Date.now())
-        .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime())
-        .slice(0, 4);
-      setUpcomingEvents(nextEvents);
+        .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
+      setAllPipelineEvents(allEvents);
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -159,6 +157,12 @@ export default function Dashboard() {
     { label: 'Jobs In Progress', value: stats.jobsInProgress.toString(), icon: Briefcase, color: 'bg-amber-500' },
     { label: 'Revenue (MTD)', value: formatCurrency(stats.revenueMTD), icon: TrendingUp, color: 'bg-indigo-500' },
   ];
+
+  // Recomputed fresh on every render so stale state can never show yesterday's events
+  const upcomingEvents = useMemo(
+    () => getUpcomingPipelineEvents(allPipelineEvents).slice(0, 4),
+    [allPipelineEvents]
+  );
 
   const totalContacts = (Object.values(stageCounts) as number[]).reduce((a, b) => a + b, 0);
 
@@ -311,7 +315,9 @@ export default function Dashboard() {
                 <div>
                   <p className="text-sm font-bold text-primary">{event.title}</p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    {new Date(event.date).toLocaleString()}
+                    {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {' at '}
+                    {new Date(event.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                   </p>
                 </div>
                 <ChevronRight size={16} className="text-slate-300" />

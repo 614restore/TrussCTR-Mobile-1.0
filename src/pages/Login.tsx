@@ -24,7 +24,19 @@ export default function Login() {
       });
       if (error) throw error;
     } catch (err: any) {
-      setError(err.message);
+      const msg: string = err?.message || '';
+      // iOS WebKit reports network failures as "Load failed"; catch that and
+      // other generic fetch errors so the user gets a helpful message.
+      if (
+        msg.toLowerCase().includes('load failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network') ||
+        msg.toLowerCase().includes('fetch')
+      ) {
+        setError('Unable to reach the server. Check your internet connection and try again.');
+      } else {
+        setError(msg || 'Sign-in failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -39,13 +51,30 @@ export default function Login() {
     setForgotLoading(true);
     setError(null);
     try {
+      // On iOS Capacitor, window.location.origin is "capacitor://localhost"
+      // which isn't a valid Supabase redirect URL. Always use the deployed
+      // web app URL so the reset link opens in the browser and the user
+      // can set a new password, then sign in on the mobile app.
+      const resetRedirect = import.meta.env.VITE_APP_URL
+        ? `${import.meta.env.VITE_APP_URL}/reset-password`
+        : `${window.location.origin}/reset-password`;
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: resetRedirect,
       });
       if (error) throw error;
       setForgotSent(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to send reset email. Please try again.');
+      const msg: string = err?.message || '';
+      if (
+        msg.toLowerCase().includes('load failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network') ||
+        msg.toLowerCase().includes('fetch')
+      ) {
+        setError('Unable to reach the server. Check your internet connection and try again.');
+      } else {
+        setError(msg || 'Failed to send reset email. Please try again.');
+      }
     } finally {
       setForgotLoading(false);
     }

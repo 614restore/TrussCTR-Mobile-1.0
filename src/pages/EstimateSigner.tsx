@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Check, Download, Eraser, FileText } from 'lucide-react';
+import { ArrowLeft, Check, Download, Eraser, Eye, EyeOff, FileText, Plus, Trash2 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -341,12 +341,106 @@ export default function EstimateSigner() {
 
   const repLabel = useMemo(() => profile?.role || 'Sales Representative', [profile]);
 
+  type LineItem = {
+    id: string;
+    description: string;
+    quantity: number;
+    unit: string;
+    rate: number;
+    amount: number;
+    hidden: boolean;
+    isCustom: boolean;
+  };
+
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+
+  // Editable terms state — initialized from quoteMeta when estimate loads
+  const [termsPayment, setTermsPayment] = useState('');
+  const [termsWarranty, setTermsWarranty] = useState('');
+  const [termsNotes, setTermsNotes] = useState('');
+
+  const canEditTerms = profile?.role === 'owner' || profile?.role === 'admin';
+
+  useEffect(() => {
+    if (estimate) {
+      const parsed = parseEstimateNotes(estimate.notes);
+      const meta = parsed.meta || buildDefaultQuoteMeta(Number(estimate.total || 0));
+      setTermsPayment(meta.paymentTerms);
+      setTermsWarranty(meta.warrantyPeriod);
+      setTermsNotes(parsed.plainNotes || meta.customerMessage);
+    }
+  }, [estimate]);
+
+  useEffect(() => {
+    if (estimate?.items) {
+      setLineItems(
+        (estimate.items as any[]).map((item: any, i: number) => ({
+          id: `item-${i}`,
+          description: item.description || '',
+          quantity: Number(item.quantity ?? 1),
+          unit: item.unit || '',
+          rate: Number(item.rate ?? item.unit_price ?? 0),
+          amount: Number(item.amount ?? item.total ?? 0),
+          hidden: false,
+          isCustom: false,
+        }))
+      );
+    }
+  }, [estimate]);
+
+  const visibleItems = lineItems.filter((i) => !i.hidden);
+  const derivedSubtotal = Number(visibleItems.reduce((sum, i) => sum + i.amount, 0).toFixed(2));
+  const originalSubtotal = Number(estimate?.subtotal || 0);
+  const taxRate = originalSubtotal > 0 ? Number(estimate?.tax_amount || 0) / originalSubtotal : 0;
+  const derivedTaxAmount = Number((derivedSubtotal * taxRate).toFixed(2));
+  const derivedTotal = Number((derivedSubtotal + derivedTaxAmount).toFixed(2));
+  const derivedDeposit = Number((derivedTotal * 0.35).toFixed(2));
+  const derivedBalance = Number((derivedTotal - derivedDeposit).toFixed(2));
+
+  const updateItem = (id: string, field: 'quantity' | 'rate', value: number) => {
+    setLineItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        const qty = field === 'quantity' ? value : item.quantity;
+        const rate = field === 'rate' ? value : item.rate;
+        return { ...item, [field]: value, amount: Number((qty * rate).toFixed(2)) };
+      })
+    );
+  };
+
+  const updateDescription = (id: string, value: string) => {
+    setLineItems((prev) => prev.map((item) => (item.id === id ? { ...item, description: value } : item)));
+  };
+
+  const toggleHidden = (id: string) => {
+    setLineItems((prev) => prev.map((item) => (item.id === id ? { ...item, hidden: !item.hidden } : item)));
+  };
+
+  const removeItem = (id: string) => {
+    setLineItems((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const addItem = () => {
+    setLineItems((prev) => [
+      ...prev,
+      {
+        id: `custom-${Date.now()}`,
+        description: '',
+        quantity: 1,
+        unit: '',
+        rate: 0,
+        amount: 0,
+        hidden: false,
+        isCustom: true,
+      },
+    ]);
+  };
+
   const handleSign = async () => {
     if (!estimate || !profile || !customerSignatureDataUrl || !repSignatureDataUrl) return;
     setSaving(true);
     try {
-      const parsedNotes = parseEstimateNotes(estimate.notes);
-      const quoteMeta = parsedNotes.meta || buildDefaultQuoteMeta(Number(estimate.total || 0));
+      const quoteMeta = buildDefaultQuoteMeta(derivedTotal);
       const customerName = `${estimate.contacts?.first_name || ''} ${estimate.contacts?.last_name || ''}`.trim();
       const propertyAddress = [estimate.contacts?.address, estimate.contacts?.city, estimate.contacts?.state, estimate.contacts?.zip].filter(Boolean).join(', ');
       const companyName = estimate.companies?.name || profile?.companies?.name || 'TrussCTR';
@@ -370,15 +464,15 @@ export default function EstimateSigner() {
         customerName,
         propertyAddress,
         scopeSummary: quoteMeta.scopeSummary,
-        items: estimate.items || [],
-        subtotal: Number(estimate.subtotal || 0),
-        taxAmount: Number(estimate.tax_amount || 0),
-        total: Number(estimate.total || 0),
-        depositAmount: Number(quoteMeta.depositAmount || 0),
-        finalPaymentAmount: Number(quoteMeta.finalPaymentAmount || 0),
-        paymentTerms: quoteMeta.paymentTerms,
-        warrantyPeriod: quoteMeta.warrantyPeriod,
-        customerNotes: parsedNotes.plainNotes || quoteMeta.customerMessage,
+        items: visibleItems,
+        subtotal: derivedSubtotal,
+        taxAmount: derivedTaxAmount,
+        total: derivedTotal,
+        depositAmount: derivedDeposit,
+        finalPaymentAmount: derivedBalance,
+        paymentTerms: termsPayment,
+        warrantyPeriod: termsWarranty,
+        customerNotes: termsNotes,
         customerSignatureDataUrl,
         repSignatureDataUrl,
         repLabel,
@@ -507,8 +601,8 @@ export default function EstimateSigner() {
               </div>
               <div className="rounded-2xl bg-slate-50 p-4">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total</p>
-                <p className="mt-2 text-2xl font-black text-primary">{formatCurrency(estimate.total)}</p>
-                <p className="text-xs text-slate-500">Deposit {formatCurrency(quoteMeta.depositAmount)} • Balance {formatCurrency(quoteMeta.finalPaymentAmount)}</p>
+                <p className="mt-2 text-2xl font-black text-primary">{formatCurrency(derivedTotal)}</p>
+                <p className="text-xs text-slate-500">Deposit {formatCurrency(derivedDeposit)} • Balance {formatCurrency(derivedBalance)}</p>
               </div>
             </div>
             {signed && (
@@ -522,6 +616,169 @@ export default function EstimateSigner() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Cost Breakdown — editable line items */}
+          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3">
+              <h3 className="text-sm font-bold text-primary">Cost Breakdown</h3>
+              <button
+                type="button"
+                onClick={addItem}
+                className="flex items-center gap-1 rounded-xl bg-accent/10 px-3 py-1.5 text-xs font-bold text-accent"
+              >
+                <Plus size={13} /> Add Item
+              </button>
+            </div>
+
+            {/* Column headers */}
+            <div className="flex border-b border-t border-slate-100 bg-slate-50 px-4 py-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              <span className="flex-1">Description</span>
+              <span className="w-14 text-center">Qty</span>
+              <span className="flex-1 text-center">Rate</span>
+              <span className="w-16 text-right">Total</span>
+            </div>
+
+            {/* Line item rows */}
+            <div className="divide-y divide-slate-50">
+              {lineItems.map((item) => (
+                <div key={item.id} className={`px-4 py-3 transition-opacity ${item.hidden ? 'opacity-35' : ''}`}>
+                  <div className="mb-2 flex items-start gap-2">
+                    {item.isCustom ? (
+                      <input
+                        className="flex-1 border-b border-slate-200 bg-transparent text-sm font-medium text-primary outline-none placeholder:text-slate-300"
+                        placeholder="Item description"
+                        value={item.description}
+                        onChange={(e) => updateDescription(item.id, e.target.value)}
+                      />
+                    ) : (
+                      <p className={`flex-1 text-sm font-medium text-primary ${item.hidden ? 'line-through' : ''}`}>{item.description}</p>
+                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button type="button" onClick={() => toggleHidden(item.id)} className="text-slate-300 active:text-slate-500">
+                        {item.hidden ? <Eye size={15} /> : <EyeOff size={15} />}
+                      </button>
+                      {item.isCustom && (
+                        <button type="button" onClick={() => removeItem(item.id)} className="text-red-300 active:text-red-500">
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {!item.hidden && (
+                    <div className="flex items-center gap-2">
+                      {/* qty */}
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="number"
+                          min="0"
+                          className="w-14 rounded-lg border border-slate-200 px-2 py-1 text-center text-xs outline-none focus:border-accent"
+                          value={item.quantity}
+                          onChange={(e) => updateItem(item.id, 'quantity', Number(e.target.value))}
+                        />
+                        {item.unit && <span className="text-[10px] text-slate-400">{item.unit}</span>}
+                      </div>
+                      {/* rate */}
+                      <div className="flex flex-1 items-center gap-0.5 rounded-lg border border-slate-200 px-2 py-1 focus-within:border-accent">
+                        <span className="text-[10px] text-slate-400">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="w-full bg-transparent text-xs outline-none"
+                          value={item.rate}
+                          onChange={(e) => updateItem(item.id, 'rate', Number(e.target.value))}
+                        />
+                      </div>
+                      {/* row total */}
+                      <p className="w-16 text-right text-xs font-bold text-primary">{formatCurrency(item.amount)}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Totals footer */}
+            <div className="space-y-1 border-t border-slate-100 px-5 py-4">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Subtotal</span>
+                <span className="font-bold text-primary">{formatCurrency(derivedSubtotal)}</span>
+              </div>
+              {derivedTaxAmount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Tax ({(taxRate * 100).toFixed(1)}%)</span>
+                  <span className="font-bold text-primary">{formatCurrency(derivedTaxAmount)}</span>
+                </div>
+              )}
+              <div className="mt-2 flex justify-between border-t border-slate-200 pt-2">
+                <span className="font-black text-primary">Total</span>
+                <span className="font-black text-primary">{formatCurrency(derivedTotal)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Deposit (35%)</span>
+                <span>{formatCurrency(derivedDeposit)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Balance at Completion</span>
+                <span>{formatCurrency(derivedBalance)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Terms & Conditions — editable for owner/admin */}
+          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-primary">Terms &amp; Conditions</h3>
+                {canEditTerms && (
+                  <p className="text-[10px] text-amber-600 font-medium mt-0.5">Editable — changes apply to this document only</p>
+                )}
+              </div>
+              {!canEditTerms && (
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">View only</span>
+              )}
+            </div>
+            <div className="space-y-4 px-5 pb-5">
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Payment Terms</p>
+                {canEditTerms ? (
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none"
+                    value={termsPayment}
+                    onChange={(e) => setTermsPayment(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">{termsPayment}</p>
+                )}
+              </div>
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Warranty</p>
+                {canEditTerms ? (
+                  <textarea
+                    rows={2}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none"
+                    value={termsWarranty}
+                    onChange={(e) => setTermsWarranty(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">{termsWarranty}</p>
+                )}
+              </div>
+              <div>
+                <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">Additional Notes</p>
+                {canEditTerms ? (
+                  <textarea
+                    rows={3}
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-primary outline-none focus:border-accent focus:bg-white resize-none"
+                    value={termsNotes}
+                    onChange={(e) => setTermsNotes(e.target.value)}
+                  />
+                ) : (
+                  <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">{termsNotes}</p>
+                )}
+              </div>
+            </div>
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-white p-5 space-y-4 shadow-sm">
@@ -569,16 +826,24 @@ export default function EstimateSigner() {
               </tr>
             </thead>
             <tbody>
-              {(estimate.items || []).map((item: any, index: number) => (
+              {visibleItems.map((item, index) => (
                 <tr key={index}>
                   <td style={{ padding: '10px 12px', borderBottom: '1px solid #f3f4f6' }}>{item.description}</td>
                   <td style={{ padding: '10px 12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{item.quantity} {item.unit}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(item.rate ?? item.unit_price ?? 0)}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(item.amount ?? item.total ?? 0)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(item.rate)}</td>
+                  <td style={{ padding: '10px 12px', textAlign: 'right', borderBottom: '1px solid #f3f4f6' }}>{formatCurrency(item.amount)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {(termsPayment || termsWarranty || termsNotes) && (
+            <div style={{ marginTop: '20px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '6px', padding: '14px 16px' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: '#92400e', marginBottom: '8px' }}>Terms &amp; Conditions</div>
+              {termsPayment && <p style={{ fontSize: '12px', color: '#78350f', marginBottom: '6px' }}><strong>Payment:</strong> {termsPayment}</p>}
+              {termsWarranty && <p style={{ fontSize: '12px', color: '#78350f', marginBottom: '6px' }}><strong>Warranty:</strong> {termsWarranty}</p>}
+              {termsNotes && <p style={{ fontSize: '12px', color: '#78350f', whiteSpace: 'pre-line' }}>{termsNotes}</p>}
+            </div>
+          )}
         </div>
       </div>
     </div>
