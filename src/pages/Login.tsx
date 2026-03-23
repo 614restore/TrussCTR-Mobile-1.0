@@ -121,7 +121,7 @@ export default function Login() {
               </div>
             )}
             <p className="text-slate-500 text-sm text-center">
-              Enter your email and we'll send you a link to reset your password.
+              Enter your email and we'll send you a temporary password to sign in with.
             </p>
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
@@ -146,7 +146,7 @@ export default function Login() {
               {forgotLoading ? (
                 <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               ) : (
-                'Send Reset Link'
+                'Send Temporary Password'
               )}
             </button>
             <div className="text-center">
