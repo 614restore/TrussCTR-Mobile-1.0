@@ -8,6 +8,7 @@ interface AuthContextType {
   loading: boolean;
   isRecoverySession: boolean;
   clearRecoverySession: () => void;
+  requestPasswordChange: () => void;
   refreshProfile: () => Promise<void>;
 }
 
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   isRecoverySession: false,
   clearRecoverySession: () => {},
+  requestPasswordChange: () => {},
   refreshProfile: async () => {},
 });
 
@@ -211,9 +213,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 
   const clearRecoverySession = () => setIsRecoverySession(false);
+  const requestPasswordChange = () => setIsRecoverySession(true);
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, isRecoverySession, clearRecoverySession, refreshProfile }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, isRecoverySession, clearRecoverySession, requestPasswordChange, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

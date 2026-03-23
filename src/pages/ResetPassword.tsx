@@ -5,11 +5,12 @@ import { useAuth } from '../context/AuthContext';
 import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
 
-// This page is shown after login when must_change_password = true.
-// The user is already authenticated — they just need to set a permanent password.
+// Shown when must_change_password = true (temp password), after a Supabase
+// PASSWORD_RECOVERY event (web reset link), or when the user taps Change Password
+// in Settings. In all cases the user is already authenticated.
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { clearRecoverySession } = useAuth();
+  const { profile, clearRecoverySession } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -64,7 +65,9 @@ export default function ResetPassword() {
           <div className="space-y-1">
             <h1 className="text-3xl font-bold text-primary tracking-tight">Set New Password</h1>
             <p className="text-slate-500 text-sm font-medium">
-              You signed in with a temporary password.{'\n'}Please set a permanent one to continue.
+              {(profile as any)?.must_change_password
+                ? 'You signed in with a temporary password. Please set a permanent one to continue.'
+                : 'Choose a new password for your account.'}
             </p>
           </div>
         </div>
