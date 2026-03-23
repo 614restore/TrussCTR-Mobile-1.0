@@ -38,7 +38,7 @@ import PitchGauge from './pages/PitchGauge';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
-  const { session, loading } = useAuth();
+  const { session, loading, profile } = useAuth();
 
   // Hide the native splash screen once auth has finished initialising.
   // autoHide is false in capacitor.config.ts so the splash stays up until

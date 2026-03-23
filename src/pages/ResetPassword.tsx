@@ -36,8 +36,8 @@ export default function ResetPassword() {
       // Clear the forced-change flag on the profile
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        await supabase
-          .from('profiles')
+        await (supabase
+          .from('profiles') as any)
           .update({ must_change_password: false })
           .eq('id', user.id);
       }
