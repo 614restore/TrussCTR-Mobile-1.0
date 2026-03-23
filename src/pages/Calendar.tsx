@@ -159,6 +159,30 @@ export default function CalendarPage() {
         if (insertErr) throw insertErr;
       }
 
+      // Advance contact pipeline status when a key step is scheduled
+      const STATUS_ADVANCEMENT: Record<string, { from: string[]; to: string }> = {
+        inspection: { from: ['new_lead', 'lead', 'contacted'], to: 'appointment_set' },
+        build:      { from: ['approved', 'signed_won'],        to: 'scheduled' },
+      };
+      const advancement = STATUS_ADVANCEMENT[nextStepParam];
+      if (advancement && saveContactId) {
+        try {
+          const { data: contactRow } = await db
+            .from('contacts')
+            .select('status')
+            .eq('id', saveContactId)
+            .single();
+          if (contactRow && advancement.from.includes((contactRow as any).status)) {
+            await db
+              .from('contacts')
+              .update({ status: advancement.to, status_changed_at: new Date().toISOString() })
+              .eq('id', saveContactId);
+          }
+        } catch (err) {
+          console.error('Error advancing contact status from calendar:', err);
+        }
+      }
+
       setSavedOk(true);
       await fetchEvents();
 

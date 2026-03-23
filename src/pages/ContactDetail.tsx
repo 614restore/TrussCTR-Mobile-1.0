@@ -164,6 +164,45 @@ export default function ContactDetail() {
     }
   };
 
+  // Advance contact to a new pipeline status and log the change in the timeline
+  const advanceStatus = async (newStatus: CustomerStatus, logContent?: string) => {
+    if (!contact || !user?.id) return;
+    const from = contact.status as string;
+    if (from === newStatus) return;
+    const now = new Date().toISOString();
+    try {
+      await (supabase.from('contacts') as any)
+        .update({ status: newStatus, status_changed_at: now })
+        .eq('id', contact.id);
+      await (supabase.from('communications') as any).insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        type: 'stage_change',
+        content: logContent || `Stage updated: ${from.replace(/_/g, ' ')} → ${newStatus.replace(/_/g, ' ')}`,
+        user_id: user.id,
+        direction: 'outbound',
+      });
+      fetchContact();
+      fetchTimeline();
+    } catch (err) {
+      console.error('Error advancing status:', err);
+    }
+  };
+
+  // Handle Call / SMS / Email actions — auto-advance lead → contacted on first outreach
+  const handleContactAction = async (type: 'call' | 'sms' | 'email', value: string | null) => {
+    if (!value) return;
+    if (['new_lead', 'lead'].includes(contact.status as string) && user?.id) {
+      await advanceStatus(
+        'contacted',
+        `Stage updated: ${(contact.status as string).replace(/_/g, ' ')} → contacted (outbound ${type})`,
+      );
+    }
+    if (type === 'call') window.location.href = `tel:${value}`;
+    else if (type === 'sms') window.location.href = `sms:${value}`;
+    else window.location.href = `mailto:${value}`;
+  };
+
   const openEdit = () => {
     const parsed = parseContactSchedule(contact?.notes);
     setEditForm({ ...contact, notes: parsed.plainNotes });
@@ -310,9 +349,9 @@ export default function ContactDetail() {
         </div>
         <div className="absolute -bottom-8 left-6 right-6 flex justify-between gap-3">
           {[
-            { icon: Phone, label: 'Call', color: 'bg-emerald-500', action: () => contact.phone1 && (window.location.href = `tel:${contact.phone1}`) },
-            { icon: MessageSquare, label: 'SMS', color: 'bg-accent', action: () => contact.phone1 && (window.location.href = `sms:${contact.phone1}`) },
-            { icon: Mail, label: 'Email', color: 'bg-amber-500', action: () => contact.email && (window.location.href = `mailto:${contact.email}`) },
+            { icon: Phone, label: 'Call', color: 'bg-emerald-500', action: () => handleContactAction('call', contact.phone1) },
+            { icon: MessageSquare, label: 'SMS', color: 'bg-accent', action: () => handleContactAction('sms', contact.phone1) },
+            { icon: Mail, label: 'Email', color: 'bg-amber-500', action: () => handleContactAction('email', contact.email) },
           ].map((action) => (
             <button key={action.label} onClick={action.action} className="flex-1 bg-white p-4 rounded-2xl shadow-lg flex flex-col items-center gap-1 active:scale-95 transition-transform">
               <div className={`${action.color} h-10 w-10 rounded-xl flex items-center justify-center text-white mb-1`}><action.icon size={20} /></div>
@@ -381,7 +420,7 @@ export default function ContactDetail() {
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
             {activeTab === 'overview' && <OverviewTab contact={contact} onRefresh={fetchContact} />}
             {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
-            {activeTab === 'status' && <StatusTab contact={contact} />}
+            {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
             {activeTab === 'documents' && <DocumentsTab contactId={contact.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} />}
             {activeTab === 'financial' && <FinancialTab contact={contact} userId={user?.id} onEdit={openEdit} onRefresh={fetchContact} />}
@@ -1444,25 +1483,93 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   );
 }
 
-function StatusTab({ contact }: { contact: any }) {
+function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: CustomerStatus) => Promise<void> }) {
+  const [advancing, setAdvancing] = useState(false);
+  const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status) as CustomerStatus);
+  const nextStage = currentIndex >= 0 && currentIndex < STAGES.length - 1 ? STAGES[currentIndex + 1] : null;
+  const nextStageLabel = nextStage ? ALL_STATUSES.find(s => s.value === nextStage)?.label || nextStage.replace(/_/g, ' ') : null;
+
+  const handleAdvance = async (status: CustomerStatus) => {
+    setAdvancing(true);
+    try {
+      await onAdvance(status);
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <h3 className="text-sm font-bold text-primary">Job Timeline</h3>
-      <div className="space-y-8 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
+      {/* Quick-advance to the very next stage */}
+      {nextStage ? (
+        <button
+          type="button"
+          disabled={advancing}
+          onClick={() => handleAdvance(nextStage)}
+          className="w-full bg-accent text-white py-4 rounded-2xl font-bold text-sm shadow-lg shadow-accent/30 active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <CheckCircle2 size={18} />
+          {advancing ? 'Updating...' : `Move to ${nextStageLabel}`}
+        </button>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-center">
+          <p className="text-sm font-bold text-emerald-700">Job Complete — Paid</p>
+          <p className="text-xs text-emerald-600 mt-1">This job has reached the final stage.</p>
+        </div>
+      )}
+
+      {/* Full pipeline — past stages show as done, future stages are tappable */}
+      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pipeline Stages</h3>
+      <div className="space-y-1 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
         {STAGES.map((stage, i) => {
-          const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status));
-          const isDone = i <= currentIndex;
+          const isDone = i < currentIndex;
+          const isCurrent = i === currentIndex;
+          const isFuture = i > currentIndex;
+          const stageLabel = ALL_STATUSES.find(s => s.value === stage)?.label || stage.replace(/_/g, ' ');
           return (
-            <div key={stage} className="flex gap-6 relative">
-              <div className={`h-8 w-8 rounded-full flex items-center justify-center z-10 ${isDone ? 'bg-accent text-white' : 'bg-white border-2 border-slate-100 text-slate-300'}`}>
-                {isDone ? <CheckCircle2 size={16} /> : <div className="h-2 w-2 rounded-full bg-current" />}
+            <button
+              key={stage}
+              type="button"
+              disabled={advancing || !isFuture}
+              onClick={() => isFuture ? handleAdvance(stage) : undefined}
+              className={`w-full flex gap-4 relative py-2 px-2 rounded-xl text-left transition-colors ${isFuture ? 'active:bg-slate-50' : 'cursor-default'}`}
+            >
+              <div className={`h-8 w-8 rounded-full flex items-center justify-center z-10 flex-shrink-0 ${isCurrent ? 'bg-accent text-white ring-4 ring-accent/20' : isDone ? 'bg-emerald-500 text-white' : 'bg-white border-2 border-slate-100 text-slate-300'}`}>
+                {isDone ? <CheckCircle2 size={16} /> : isCurrent ? <div className="h-2.5 w-2.5 rounded-full bg-white" /> : <div className="h-2 w-2 rounded-full bg-current" />}
               </div>
               <div className="flex-1 pt-1">
-                <p className={`text-sm font-bold ${isDone ? 'text-primary' : 'text-slate-400'}`}>{stage.replace(/_/g, ' ').toUpperCase()}</p>
+                <p className={`text-sm font-bold ${isCurrent ? 'text-accent' : isDone ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {stageLabel}
+                </p>
+                {isCurrent && <p className="text-[10px] text-accent/70 font-medium mt-0.5">Current Stage</p>}
+                {isFuture && <p className="text-[10px] text-slate-400 mt-0.5">Tap to jump here</p>}
               </div>
-            </div>
+              {isFuture && <ChevronRight size={16} className="text-slate-300 mt-2 flex-shrink-0" />}
+            </button>
           );
         })}
+      </div>
+
+      {/* Other outcomes (Retail / Lost) */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Other Outcomes</h3>
+        <div className="grid grid-cols-2 gap-3">
+          {(['retail', 'lost'] as CustomerStatus[]).map(status => {
+            const label = ALL_STATUSES.find(s => s.value === status)?.label || status;
+            const isActive = contact.status === status;
+            return (
+              <button
+                key={status}
+                type="button"
+                disabled={advancing || isActive}
+                onClick={() => !isActive && handleAdvance(status)}
+                className={`py-3 rounded-xl text-xs font-bold border active:scale-95 transition-transform disabled:opacity-50 ${isActive ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600'}`}
+              >
+                {isActive ? `✓ ${label}` : label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
