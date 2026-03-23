@@ -22,6 +22,11 @@ export const supabase = createClient<Database>(
       detectSessionInUrl: !Capacitor.isNativePlatform(),
       autoRefreshToken: true,
       storage: window.localStorage,
+      // Use implicit flow so password-reset emails contain #access_token=...
+      // in the URL hash. PKCE stores its code_verifier in the originating app's
+      // localStorage — when the link opens in a browser that verifier is not
+      // present, causing "invalid or expired reset link" on the web app.
+      flowType: 'implicit',
     },
   }
 );
