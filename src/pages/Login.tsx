@@ -24,7 +24,19 @@ export default function Login() {
       });
       if (error) throw error;
     } catch (err: any) {
-      setError(err.message);
+      const msg: string = err?.message || '';
+      // iOS WebKit reports network failures as "Load failed"; catch that and
+      // other generic fetch errors so the user gets a helpful message.
+      if (
+        msg.toLowerCase().includes('load failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network') ||
+        msg.toLowerCase().includes('fetch')
+      ) {
+        setError('Unable to reach the server. Check your internet connection and try again.');
+      } else {
+        setError(msg || 'Sign-in failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -45,7 +57,17 @@ export default function Login() {
       if (error) throw error;
       setForgotSent(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to send reset email. Please try again.');
+      const msg: string = err?.message || '';
+      if (
+        msg.toLowerCase().includes('load failed') ||
+        msg.toLowerCase().includes('failed to fetch') ||
+        msg.toLowerCase().includes('network') ||
+        msg.toLowerCase().includes('fetch')
+      ) {
+        setError('Unable to reach the server. Check your internet connection and try again.');
+      } else {
+        setError(msg || 'Failed to send reset email. Please try again.');
+      }
     } finally {
       setForgotLoading(false);
     }
