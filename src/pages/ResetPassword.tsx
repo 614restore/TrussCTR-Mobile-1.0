@@ -1,34 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Lock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
 
+// This page is shown after login when must_change_password = true.
+// The user is already authenticated — they just need to set a permanent password.
 export default function ResetPassword() {
   const navigate = useNavigate();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [sessionReady, setSessionReady] = useState(false);
-
-  // Supabase processes the recovery token from the URL hash automatically.
-  // We listen for the PASSWORD_RECOVERY event to confirm a valid recovery session.
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setSessionReady(true);
-      }
-    });
-
-    // Also check if a session already exists (user arrived with token already processed)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) setSessionReady(true);
-    });
-
-    return () => subscription.unsubscribe();
-  }, []);
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,14 +30,22 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.updateUser({ password });
-      if (error) throw error;
+      const { error: pwError } = await supabase.auth.updateUser({ password });
+      if (pwError) throw pwError;
+
+      // Clear the forced-change flag on the profile
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase
+          .from('profiles')
+          .update({ must_change_password: false })
+          .eq('id', user.id);
+      }
+
       setSuccess(true);
-      // Sign out the recovery session so the user logs in fresh
-      await supabase.auth.signOut();
-      setTimeout(() => navigate('/login'), 2500);
+      setTimeout(() => navigate('/'), 1800);
     } catch (err: any) {
-      setError(err.message || 'Failed to update password. Please request a new reset link.');
+      setError(err.message || 'Failed to update password. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -67,7 +60,9 @@ export default function ResetPassword() {
           </div>
           <div className="space-y-1">
             <h1 className="text-3xl font-bold text-primary tracking-tight">Set New Password</h1>
-            <p className="text-slate-500 text-sm font-medium">Choose a strong password for your account</p>
+            <p className="text-slate-500 text-sm font-medium">
+              You signed in with a temporary password.{'\n'}Please set a permanent one to continue.
+            </p>
           </div>
         </div>
 
@@ -75,19 +70,12 @@ export default function ResetPassword() {
           <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
             <CheckCircle size={32} className="text-emerald-500" />
             <p className="font-bold text-sm">Password updated successfully!</p>
-            <p className="text-xs text-emerald-600">Redirecting you to sign in...</p>
-          </div>
-        ) : !sessionReady ? (
-          <div className="bg-amber-50 border border-amber-100 text-amber-700 p-5 rounded-2xl flex items-center gap-3 text-sm">
-            <AlertCircle size={18} className="shrink-0" />
-            <span className="font-medium">
-              No recovery session found. Please use the password reset link from your email.
-            </span>
+            <p className="text-xs text-emerald-600">Taking you to the app…</p>
           </div>
         ) : (
           <form onSubmit={handleReset} className="space-y-6">
             {error && (
-              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm animate-shake">
+              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm">
                 <AlertCircle size={18} className="shrink-0" />
                 <span className="font-medium">{error}</span>
               </div>
@@ -99,14 +87,22 @@ export default function ResetPassword() {
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     required
                     minLength={8}
-                    className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
+                    autoFocus
+                    className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-12 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
                     placeholder="Min. 8 characters"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -115,7 +111,7 @@ export default function ResetPassword() {
                 <div className="relative">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                   <input
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     required
                     minLength={8}
                     className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-all shadow-sm"
@@ -133,21 +129,11 @@ export default function ResetPassword() {
               className="w-full bg-accent hover:bg-accent/90 text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? (
-                <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : (
-                'Update Password'
+                'Set Password'
               )}
             </button>
-
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => navigate('/login')}
-                className="text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors"
-              >
-                Back to Sign In
-              </button>
-            </div>
           </form>
         )}
       </div>
