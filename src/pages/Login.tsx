@@ -51,8 +51,15 @@ export default function Login() {
     setForgotLoading(true);
     setError(null);
     try {
+      // On iOS Capacitor, window.location.origin is "capacitor://localhost"
+      // which isn't a valid Supabase redirect URL. Always use the deployed
+      // web app URL so the reset link opens in the browser and the user
+      // can set a new password, then sign in on the mobile app.
+      const resetRedirect = import.meta.env.VITE_APP_URL
+        ? `${import.meta.env.VITE_APP_URL}/reset-password`
+        : `${window.location.origin}/reset-password`;
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: resetRedirect,
       });
       if (error) throw error;
       setForgotSent(true);
