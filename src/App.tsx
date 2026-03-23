@@ -38,7 +38,7 @@ import PitchGauge from './pages/PitchGauge';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
-  const { session, loading, profile } = useAuth();
+  const { session, loading, profile, isRecoverySession } = useAuth();
 
   // Hide the native splash screen once auth has finished initialising.
   // autoHide is false in capacitor.config.ts so the splash stays up until
@@ -67,8 +67,10 @@ function AppRoutes() {
     );
   }
 
-  // Force password change screen when user signed in with a temp password
-  const mustChangePassword = session && (profile as any)?.must_change_password === true;
+  // Show change-password screen for temp-password users or Supabase recovery links
+  const mustChangePassword = session && (
+    (profile as any)?.must_change_password === true || isRecoverySession
+  );
 
   return (
     <Routes>

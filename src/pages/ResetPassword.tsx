@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../context/AuthContext';
 import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
 
@@ -8,6 +9,7 @@ import trussLogo from '../assets/trussctr-logo.png';
 // The user is already authenticated — they just need to set a permanent password.
 export default function ResetPassword() {
   const navigate = useNavigate();
+  const { clearRecoverySession } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -42,6 +44,7 @@ export default function ResetPassword() {
           .eq('id', user.id);
       }
 
+      clearRecoverySession();
       setSuccess(true);
       setTimeout(() => navigate('/'), 1800);
     } catch (err: any) {
