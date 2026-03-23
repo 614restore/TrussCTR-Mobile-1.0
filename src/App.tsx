@@ -38,7 +38,7 @@ import PitchGauge from './pages/PitchGauge';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
-  const { session, loading } = useAuth();
+  const { session, loading, profile } = useAuth();
 
   // Hide the native splash screen once auth has finished initialising.
   // autoHide is false in capacitor.config.ts so the splash stays up until
@@ -67,15 +67,21 @@ function AppRoutes() {
     );
   }
 
+  // Force password change screen when user signed in with a temp password
+  const mustChangePassword = session && (profile as any)?.must_change_password === true;
+
   return (
     <Routes>
-      {/* Always-accessible routes — work with or without a session */}
-      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/accept-invite" element={<AcceptInvite />} />
       {!session ? (
         <>
           <Route path="/login" element={<Login />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
+        </>
+      ) : mustChangePassword ? (
+        <>
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<Navigate to="/reset-password" replace />} />
         </>
       ) : (
         <Route element={<Layout />}>

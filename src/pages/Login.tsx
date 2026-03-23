@@ -51,17 +51,21 @@ export default function Login() {
     setForgotLoading(true);
     setError(null);
     try {
-      // On iOS Capacitor, window.location.origin is "capacitor://localhost"
-      // which isn't a valid Supabase redirect URL. Always use the deployed
-      // web app URL so the reset link opens in the browser and the user
-      // can set a new password, then sign in on the mobile app.
-      const resetRedirect = import.meta.env.VITE_APP_URL
-        ? `${import.meta.env.VITE_APP_URL}/reset-password`
-        : `${window.location.origin}/reset-password`;
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: resetRedirect,
+      // Call the temp-password-reset edge function. It generates a temporary
+      // password, emails it to the user, and sets must_change_password = true
+      // in the profile. No redirect link is involved, so it works from any
+      // device or email client without PKCE / cross-context issues.
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const res = await fetch(`${supabaseUrl}/functions/v1/temp-password-reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': anonKey },
+        body: JSON.stringify({ email }),
       });
-      if (error) throw error;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed to send temporary password.');
+      }
       setForgotSent(true);
     } catch (err: any) {
       const msg: string = err?.message || '';
@@ -73,7 +77,7 @@ export default function Login() {
       ) {
         setError('Unable to reach the server. Check your internet connection and try again.');
       } else {
-        setError(msg || 'Failed to send reset email. Please try again.');
+        setError(msg || 'Failed to send temporary password. Please try again.');
       }
     } finally {
       setForgotLoading(false);
@@ -97,8 +101,8 @@ export default function Login() {
         {forgotSent ? (
           <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
             <CheckCircle size={32} className="text-emerald-500" />
-            <p className="font-bold text-sm">Reset link sent!</p>
-            <p className="text-xs text-emerald-600">Check your email for a link to set a new password.</p>
+            <p className="font-bold text-sm">Temporary password sent!</p>
+            <p className="text-xs text-emerald-600">Check your email for a temporary password, then sign in below. You'll be asked to set a new password right away.</p>
             <button
               type="button"
               onClick={() => { setForgotMode(false); setForgotSent(false); setError(null); }}
