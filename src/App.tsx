@@ -33,6 +33,7 @@ import ReportBuilder from './pages/ReportBuilder';
 import RetailEstimator from './pages/RetailEstimator';
 import SmartInspection from './pages/SmartInspection';
 import PitchGauge from './pages/PitchGauge';
+import TimeClock from './pages/TimeClock';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
@@ -96,6 +97,7 @@ function AppRoutes() {
           <Route path="/help" element={<HelpSupport />} />
           <Route path="/notifications" element={<Notifications />} />
           <Route path="/pitch-gauge" element={<PitchGauge />} />
+          <Route path="/time-clock" element={<TimeClock />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       )}
