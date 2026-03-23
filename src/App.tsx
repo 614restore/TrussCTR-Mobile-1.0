@@ -1,5 +1,7 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { SplashScreen } from '@capacitor/splash-screen';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -37,6 +39,18 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
   const { session, loading } = useAuth();
+
+  // Hide the native splash screen once auth has finished initialising.
+  // autoHide is false in capacitor.config.ts so the splash stays up until
+  // the JS is actually ready — preventing the blank white flash on slow
+  // simulator / device cold starts.
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {
+        // Web/browser — SplashScreen plugin not available, ignore.
+      });
+    }
+  }, [loading]);
 
   if (loading) {
     return (
