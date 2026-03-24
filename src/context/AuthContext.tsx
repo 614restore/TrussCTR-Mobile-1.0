@@ -131,57 +131,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const cleanEmail = email?.trim();
-      console.log('Fetching profile for:', { userId, cleanEmail });
 
-      const fetchById = async () => {
-        return await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .maybeSingle();
-      };
+      // Fetch profile + company in a single round trip using a join
+      const queryById = () =>
+        supabase.from('profiles').select('*, companies(*)').eq('id', userId).maybeSingle();
 
-      let { data, error } = await fetchById();
+      let { data, error } = await queryById();
       if (error?.message?.includes('Lock was stolen')) {
         await new Promise((r) => setTimeout(r, 250));
-        ({ data, error } = await fetchById());
+        ({ data, error } = await queryById());
       }
 
-      if (error) {
-        console.error('Error fetching from profiles by id:', error);
-      }
+      if (error) console.error('Error fetching profile by id:', error);
 
       if (!data && cleanEmail) {
-        console.log('Profile not found by id, trying email in profiles...');
-        const fetchByEmail = async () => {
-          return await supabase
-            .from('profiles')
-            .select('*')
-            .eq('email', cleanEmail)
-            .maybeSingle();
-        };
+        const queryByEmail = () =>
+          supabase.from('profiles').select('*, companies(*)').eq('email', cleanEmail).maybeSingle();
 
-        let { data: emailData, error: emailError } = await fetchByEmail();
+        let { data: emailData, error: emailError } = await queryByEmail();
         if (emailError?.message?.includes('Lock was stolen')) {
           await new Promise((r) => setTimeout(r, 250));
-          ({ data: emailData, error: emailError } = await fetchByEmail());
+          ({ data: emailData, error: emailError } = await queryByEmail());
         }
-
-        if (!emailError && emailData) {
-          data = emailData;
-        }
+        if (!emailError && emailData) data = emailData;
       }
 
-      if (data) {
-        const profileData = data as any;
-        const { data: companyData } = await supabase
-          .from('companies')
-          .select('*')
-          .eq('id', profileData.company_id)
-          .maybeSingle();
-
-        setProfile(companyData ? { ...profileData, companies: companyData } : profileData);
-      }
+      if (data) setProfile(data);
     } catch (err) {
       console.error('Error fetching profile:', err);
     } finally {
