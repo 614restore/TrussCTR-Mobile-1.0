@@ -16,7 +16,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
 import { getNextPipelineStageLabel, getPipelineStageLabel } from '../lib/pipelineStages';
-import { getElevationStyle, getMainElevations, FIXED_DIRS } from '../lib/photoPreferences';
+import { getElevationStyle, getMainElevations, FIXED_DIRS, INDOOR_PREFIX, DEFAULT_ROOMS } from '../lib/photoPreferences';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
 import { applyMention, extractMentionHandles, findActiveMentionQuery, getMentionSuggestions, getMentionTargets, parseNoteMentions, serializeNoteMentions, validateMentions } from '../lib/noteMentions';
 
@@ -929,6 +929,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [activeBuildingIdx, setActiveBuildingIdx] = useState(0);
 
   const switchBuilding = (idx: number) => {
+    setShowIndoor(false);
     setActiveBuildingIdx(idx);
     setActiveElevation(mainElevDirs[0]);
   };
@@ -937,7 +938,26 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     const name = `Building ${buildings.length + 1}`;
     setBuildings((prev) => [...prev, name]);
     setActiveBuildingIdx(buildings.length);
+    setShowIndoor(false);
     setActiveElevation(mainElevDirs[0]);
+  };
+
+  // Indoor mode
+  const [showIndoor, setShowIndoor]   = useState(false);
+  const [activeRoom, setActiveRoom]   = useState<string>(DEFAULT_ROOMS[0]);
+  const [customRooms, setCustomRooms] = useState<string[]>([]);
+  const [addingRoom, setAddingRoom]   = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const allRooms = [...DEFAULT_ROOMS, ...customRooms];
+
+  const switchToIndoor = () => { setShowIndoor(true); setActiveBuildingIdx(-1); };
+  const commitNewRoom  = () => {
+    const name = newRoomName.trim();
+    if (!name) { setAddingRoom(false); return; }
+    setCustomRooms((prev) => [...prev, name]);
+    setActiveRoom(name);
+    setNewRoomName('');
+    setAddingRoom(false);
   };
 
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
@@ -957,10 +977,12 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
   const [completedInspection, setCompletedInspection] = useState<any>(null);
 
-  // Full photo key — includes building prefix for additional buildings
-  const currentPhotoKey = activeBuildingIdx === 0
-    ? activeElevation
-    : `${buildings[activeBuildingIdx]} – ${activeElevation}`;
+  // Full photo key — namespaced by building (exterior) or room (indoor)
+  const currentPhotoKey = showIndoor
+    ? `${INDOOR_PREFIX} – ${activeRoom}`
+    : activeBuildingIdx === 0
+      ? activeElevation
+      : `${buildings[activeBuildingIdx]} – ${activeElevation}`;
 
   const pitchDecimal = pitch.run ? pitch.rise / pitch.run : 0;
   const angle = pitch.run ? (Math.atan(pitchDecimal) * 180 / Math.PI) : 0;
@@ -1088,7 +1110,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     const { error: dbError } = await supabase.from('documents').insert({
       contact_id: contact.id,
       company_id: contact.company_id,
-      name: `${currentPhotoKey} Inspection Photo`,
+      name: showIndoor ? `${currentPhotoKey} Photo` : `${currentPhotoKey} Inspection Photo`,
       type: 'photo',
       url: publicUrl,
       size: blob.size,
@@ -1420,38 +1442,84 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Photos</h3>
             <button onClick={() => setStep('report')} className="text-xs font-bold text-accent">Skip to Report</button>
           </div>
-          {/* Building selector */}
+          {/* Building + Indoor tabs */}
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none -mx-1 px-1">
             {buildings.map((name, idx) => (
-              <button
-                key={idx}
-                onClick={() => switchBuilding(idx)}
-                className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}
-              >
+              <button key={idx} onClick={() => switchBuilding(idx)}
+                className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${!showIndoor && activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
                 {name}
               </button>
             ))}
             {buildings.length < 5 && (
-              <button
-                onClick={addBuilding}
-                className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border border-dashed border-slate-300 text-slate-400"
-              >
+              <button onClick={addBuilding}
+                className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border border-dashed border-slate-300 text-slate-400">
                 + Add Building
               </button>
             )}
+            <div className="flex-shrink-0 w-px h-4 bg-slate-200" />
+            <button onClick={switchToIndoor}
+              className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${showIndoor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+              🏠 Indoor
+              {photos.filter(p => p.elevation.startsWith(INDOOR_PREFIX)).length > 0 && !showIndoor && (
+                <span className="ml-0.5 text-[9px] text-indigo-500 font-black">
+                  ({photos.filter(p => p.elevation.startsWith(INDOOR_PREFIX)).length})
+                </span>
+              )}
+            </button>
           </div>
-          <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed. You can come back to any elevation.</div>
-          <div className="grid grid-cols-3 gap-2">
-            {[...mainElevDirs, ...FIXED_DIRS].map((dir) => {
-              const key = activeBuildingIdx === 0 ? dir : `${buildings[activeBuildingIdx]} – ${dir}`;
-              return (
-                <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
-                  {dir}
-                  <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === key).length})</span>
-                </button>
-              );
-            })}
-          </div>
+
+          {/* Exterior elevation grid */}
+          {!showIndoor && (
+            <>
+              <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed.</div>
+              <div className="grid grid-cols-3 gap-2">
+                {[...mainElevDirs, ...FIXED_DIRS].map((dir) => {
+                  const key = activeBuildingIdx === 0 ? dir : `${buildings[activeBuildingIdx]} – ${dir}`;
+                  return (
+                    <button key={dir} onClick={() => setActiveElevation(dir)}
+                      className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                      {dir}
+                      <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === key).length})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {/* Indoor room grid */}
+          {showIndoor && (
+            <div className="space-y-3">
+              <div className="text-[10px] text-slate-500">Tap a room, then add photos. Use "+ Add Room" for spaces not listed.</div>
+              <div className="grid grid-cols-2 gap-2">
+                {allRooms.map((room) => {
+                  const key   = `${INDOOR_PREFIX} – ${room}`;
+                  const count = photos.filter(p => p.elevation === key).length;
+                  return (
+                    <button key={room} onClick={() => setActiveRoom(room)}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold border text-left flex items-center justify-between transition-all ${activeRoom === room ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-white border-slate-100 text-slate-600'}`}>
+                      <span className="truncate">{room}</span>
+                      {count > 0 && <span className="ml-1 text-[10px] opacity-70 flex-shrink-0">({count})</span>}
+                    </button>
+                  );
+                })}
+                {!addingRoom ? (
+                  <button onClick={() => setAddingRoom(true)}
+                    className="py-2 px-3 rounded-lg text-xs font-bold border border-dashed border-slate-200 text-slate-400 flex items-center justify-center gap-1">
+                    + Add Room
+                  </button>
+                ) : (
+                  <div className="col-span-2 flex gap-2">
+                    <input autoFocus type="text" value={newRoomName} onChange={(e) => setNewRoomName(e.target.value)}
+                      placeholder="Room name..." className="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                      onKeyDown={(e) => { if (e.key === 'Enter') commitNewRoom(); if (e.key === 'Escape') { setAddingRoom(false); setNewRoomName(''); } }} />
+                    <button onClick={commitNewRoom} className="px-3 py-2 bg-indigo-500 rounded-lg text-xs font-bold text-white flex-shrink-0">Save</button>
+                    <button onClick={() => { setAddingRoom(false); setNewRoomName(''); }} className="px-3 py-2 bg-slate-100 rounded-lg text-xs font-bold text-slate-500 flex-shrink-0">✕</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {usesNativeInspectionCamera ? (
             <button
               type="button"
@@ -1460,15 +1528,23 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
             >
               <span className="text-sm font-bold text-slate-500">
-                {uploading ? 'Uploading...' : `Tap to capture ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
+                {uploading ? 'Uploading...' : showIndoor
+                  ? `Tap to photograph ${activeRoom}`
+                  : `Tap to capture ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
               </span>
-              <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that elevation is complete.</span>
+              <span className="text-[10px] text-slate-400">
+                {showIndoor ? 'Indoor photo — any camera angle.' : 'Keep shooting, then tap Done once that elevation is complete.'}
+              </span>
             </button>
           ) : (
             <label className="block w-full cursor-pointer">
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
               <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-                <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}</span>
+                <span className="text-sm font-bold text-slate-500">
+                  {uploading ? 'Uploading...' : showIndoor
+                    ? `Tap to photograph ${activeRoom}`
+                    : `Tap to add ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
+                </span>
               </div>
             </label>
           )}

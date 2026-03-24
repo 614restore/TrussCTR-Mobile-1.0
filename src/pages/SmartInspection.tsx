@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, ArrowLeft, CheckCircle2, Send, Plus, Building2 } from 'lucide-react';
+import { Camera, ArrowLeft, CheckCircle2, Send, Plus, Building2, DoorOpen } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -11,6 +11,8 @@ import {
   getElevationStyle,
   getMainElevations,
   FIXED_DIRS,
+  INDOOR_PREFIX,
+  DEFAULT_ROOMS,
   type ElevationStyle,
 } from '../lib/photoPreferences';
 
@@ -25,153 +27,145 @@ const MAX_BUILDINGS = 5;
 // ─── component ─────────────────────────────────────────────────────────────
 
 export default function SmartInspection() {
-  const navigate = useNavigate();
-  const { id } = useParams();
+  const navigate  = useNavigate();
+  const { id }    = useParams();
   const { profile } = useAuth();
 
-  // Read elevation style from the user's preference (set in Settings)
   const [elevStyle] = useState<ElevationStyle>(() => getElevationStyle());
-  const mainDirs = getMainElevations(elevStyle);
+  const mainDirs    = getMainElevations(elevStyle);
 
-  // Buildings: start with a single "Main" building; user can add more
-  const [buildings, setBuildings] = useState<string[]>(['Main']);
+  // ── exterior buildings ──
+  const [buildings, setBuildings]             = useState<string[]>(['Main']);
   const [activeBuildingIdx, setActiveBuildingIdx] = useState(0);
-
-  // Active elevation within the current building (just the base label, no building prefix)
   const [activeElevation, setActiveElevation] = useState<string>(mainDirs[0]);
 
-  // Flat map of all photo counts keyed by the full photo key (building-prefixed for extra buildings)
+  // ── indoor mode ──
+  const [showIndoor, setShowIndoor]   = useState(false);
+  const [activeRoom, setActiveRoom]   = useState<string>(DEFAULT_ROOMS[0]);
+  const [customRooms, setCustomRooms] = useState<string[]>([]);
+  const [addingRoom, setAddingRoom]   = useState(false);
+  const [newRoomName, setNewRoomName] = useState('');
+  const newRoomInputRef = useRef<HTMLInputElement>(null);
+
+  const allRooms = [...DEFAULT_ROOMS, ...customRooms];
+
+  // ── shared ──
   const [photoCounts, setPhotoCounts] = useState<Record<string, number>>({});
+  const [submitting, setSubmitting]   = useState(false);
+  const [step, setStep]               = useState<'photos' | 'questions'>('photos');
+  const [checklist, setChecklist]     = useState({ roofAge: '', material: '', damageTypes: [] as string[] });
 
-  const [submitting, setSubmitting] = useState(false);
-  const [step, setStep] = useState<'photos' | 'questions'>('photos');
-  const [checklist, setChecklist] = useState({
-    roofAge: '',
-    material: '',
-    damageTypes: [] as string[],
-  });
+  // Current full photo key
+  const currentKey = showIndoor
+    ? `${INDOOR_PREFIX} – ${activeRoom}`
+    : buildingPhotoKey(activeBuildingIdx, buildings[activeBuildingIdx], activeElevation);
 
-  // Current full photo key for whatever is selected
-  const currentKey = buildingPhotoKey(activeBuildingIdx, buildings[activeBuildingIdx], activeElevation);
-
-  // Switch to a different building, resetting active elevation to the first one
+  // ── building helpers ──
   const switchBuilding = (idx: number) => {
+    setShowIndoor(false);
     setActiveBuildingIdx(idx);
     setActiveElevation(mainDirs[0]);
   };
 
   const addBuilding = () => {
     if (buildings.length >= MAX_BUILDINGS) return;
-    const n = buildings.length + 1;
-    const name = `Building ${n}`;
+    const name = `Building ${buildings.length + 1}`;
     setBuildings((prev) => [...prev, name]);
     setActiveBuildingIdx(buildings.length);
+    setShowIndoor(false);
     setActiveElevation(mainDirs[0]);
   };
 
-  // ── photo capture ──
+  const switchToIndoor = () => {
+    setShowIndoor(true);
+    setActiveBuildingIdx(-1);
+  };
 
+  // ── room helpers ──
+  const commitNewRoom = () => {
+    const name = newRoomName.trim();
+    if (!name) { setAddingRoom(false); return; }
+    setCustomRooms((prev) => [...prev, name]);
+    setActiveRoom(name);
+    setNewRoomName('');
+    setAddingRoom(false);
+  };
+
+  // ── photo capture ──
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !id || !profile) return;
 
     try {
       const rawExt = (file.name.split('.').pop() || 'jpg').toLowerCase();
-      const ext = rawExt === 'heic' || rawExt === 'heif' ? 'jpg' : rawExt;
-      const filePath = `${id}/${currentKey.replace(/\s/g, '_')}_${Date.now()}.${ext}`;
+      const ext    = rawExt === 'heic' || rawExt === 'heif' ? 'jpg' : rawExt;
+      const filePath = `${id}/${currentKey.replace(/[\s–]/g, '_')}_${Date.now()}.${ext}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('documents')
-        .upload(filePath, file);
-
+      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, file);
       if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('documents')
-        .getPublicUrl(filePath);
+      const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
 
       await supabase.from('documents').insert({
-        contact_id: id,
-        company_id: profile.company_id,
-        name: `${currentKey} Slope Photo`,
-        type: 'photo',
-        url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
-        size: file.size,
+        contact_id:  id,
+        company_id:  profile.company_id,
+        name:        showIndoor ? `${currentKey} Photo` : `${currentKey} Slope Photo`,
+        type:        'photo',
+        url:         buildStoredDocumentUrl(publicUrl, 'documents', filePath),
+        size:        file.size,
         uploaded_by: profile.id,
       } as any);
 
-      setPhotoCounts((prev) => ({
-        ...prev,
-        [currentKey]: (prev[currentKey] || 0) + 1,
-      }));
+      setPhotoCounts((prev) => ({ ...prev, [currentKey]: (prev[currentKey] || 0) + 1 }));
     } catch (err) {
       console.error('Upload error:', err);
       alert('Photo upload failed. Check Supabase storage bucket.');
     }
 
-    // Reset file input so the same file can be re-selected
     e.target.value = '';
   };
 
-  // ── checklist helpers ──
-
+  // ── checklist ──
   const toggleDamage = (type: string) => {
     setChecklist((prev) => {
-      const isNone = type === 'None';
-      if (isNone) {
-        return { ...prev, damageTypes: prev.damageTypes.includes('None') ? [] : ['None'] };
-      }
+      if (type === 'None') return { ...prev, damageTypes: prev.damageTypes.includes('None') ? [] : ['None'] };
       const next = prev.damageTypes.filter((d) => d !== 'None');
-      return next.includes(type)
-        ? { ...prev, damageTypes: next.filter((d) => d !== type) }
-        : { ...prev, damageTypes: [...next, type] };
+      return { ...prev, damageTypes: next.includes(type) ? next.filter((d) => d !== type) : [...next, type] };
     });
   };
 
   // ── submit ──
-
   const handleSubmit = async () => {
     if (!id || !profile) return;
     setSubmitting(true);
     try {
-      const total = (Object.values(photoCounts) as number[]).reduce((a, b) => a + b, 0);
-      const damage = checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None';
+      const total   = Object.values(photoCounts).reduce((a, b) => a + b, 0);
+      const damage  = checklist.damageTypes.length ? checklist.damageTypes.join(', ') : 'None';
 
-      const elevationSummary = Object.entries(photoCounts)
-        .filter(([, v]) => (v as number) > 0)
-        .map(([k, v]) => `${k}(${v})`)
-        .join(', ');
+      const exteriorEntries = Object.entries(photoCounts).filter(([k]) => !k.startsWith(INDOOR_PREFIX));
+      const indoorEntries   = Object.entries(photoCounts).filter(([k]) =>  k.startsWith(INDOOR_PREFIX));
 
-      const buildingsSummary = buildings.length > 1
-        ? `\nBuildings documented: ${buildings.join(', ')}`
-        : '';
+      const extSummary = exteriorEntries.filter(([, v]) => v > 0).map(([k, v]) => `${k}(${v})`).join(', ');
+      const indSummary = indoorEntries.filter(([, v]) => v > 0).map(([k, v]) => `${k.replace(`${INDOOR_PREFIX} – `, '')}(${v})`).join(', ');
+
+      const lines = [`📸 Smart Inspection completed — ${total} total photos`];
+      if (extSummary) lines.push(`Exterior: ${extSummary}`);
+      if (indSummary) lines.push(`Indoor: ${indSummary}`);
+      if (buildings.length > 1) lines.push(`Buildings: ${buildings.join(', ')}`);
+      lines.push('');
+      lines.push(`Checklist:\nAge: ${checklist.roofAge || '—'}\nMaterial: ${checklist.material || '—'}\nDamage: ${damage}`);
 
       await supabase.from('communications').insert({
-        contact_id: id,
-        company_id: profile.company_id,
-        type: 'note',
-        content: `📸 Smart Inspection completed — ${total} photos uploaded across elevations: ${elevationSummary}${buildingsSummary}\n\nChecklist:\nAge: ${checklist.roofAge || '—'}\nMaterial: ${checklist.material || '—'}\nDamage: ${damage}`,
-        user_id: profile.id,
-        direction: 'outbound',
+        contact_id: id, company_id: profile.company_id, type: 'note',
+        content: lines.join('\n'), user_id: profile.id, direction: 'outbound',
       } as any);
 
       try {
         await (supabase.from('inspections') as any).upsert({
-          contact_id: id,
-          company_id: profile.company_id,
-          user_id: profile.id,
-          status: 'completed',
-          data: {
-            photoCounts,
-            buildings,
-            elevationStyle: elevStyle,
-            checklist,
-            completedAt: new Date().toISOString(),
-          },
+          contact_id: id, company_id: profile.company_id, user_id: profile.id, status: 'completed',
+          data: { photoCounts, buildings, customRooms, elevationStyle: elevStyle, checklist, completedAt: new Date().toISOString() },
         }, { onConflict: 'contact_id' });
-      } catch {
-        // ignore if inspections table is unavailable
-      }
+      } catch { /* ignore if table unavailable */ }
 
       await handleAutoMove(id, 'submit_inspection');
       alert('Inspection saved to timeline!');
@@ -183,10 +177,11 @@ export default function SmartInspection() {
     }
   };
 
+  // ── derived ──
+  const totalPhotos   = Object.values(photoCounts).reduce((a, b) => a + b, 0);
+  const indoorPhotos  = Object.entries(photoCounts).filter(([k]) => k.startsWith(INDOOR_PREFIX)).reduce((a, [, v]) => a + v, 0);
+
   // ── render ──
-
-  const totalPhotos = Object.values(photoCounts).reduce((a, b) => a + b, 0);
-
   return (
     <PageTransition>
       <div className="min-h-screen bg-slate-900 text-white flex flex-col">
@@ -204,91 +199,152 @@ export default function SmartInspection() {
 
         {step === 'photos' && (
           <>
-            {/* Building tabs */}
-            <div className="flex items-center gap-2 px-4 pt-4 overflow-x-auto scrollbar-none">
+            {/* Tab row — buildings + Indoor Photos */}
+            <div className="flex items-center gap-2 px-4 pt-4 pb-1 overflow-x-auto scrollbar-none">
               {buildings.map((name, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => switchBuilding(idx)}
+                <button key={idx} onClick={() => switchBuilding(idx)}
                   className={cn(
                     'flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold border transition-all',
-                    activeBuildingIdx === idx
+                    !showIndoor && activeBuildingIdx === idx
                       ? 'bg-accent border-accent text-white'
                       : 'bg-slate-800 border-white/20 text-slate-400'
-                  )}
-                >
+                  )}>
                   {idx > 0 && <Building2 size={11} />}
                   {name}
                 </button>
               ))}
+
               {buildings.length < MAX_BUILDINGS && (
-                <button
-                  onClick={addBuilding}
-                  className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-full text-xs font-bold border border-dashed border-white/30 text-slate-500 hover:border-white/50 hover:text-slate-300 transition-all"
-                >
-                  <Plus size={12} />
-                  Add Building
+                <button onClick={addBuilding}
+                  className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-full text-xs font-bold border border-dashed border-white/30 text-slate-500 transition-all">
+                  <Plus size={12} /> Add Building
                 </button>
               )}
+
+              {/* Divider */}
+              <div className="flex-shrink-0 w-px h-5 bg-white/10" />
+
+              {/* Indoor Photos tab */}
+              <button onClick={switchToIndoor}
+                className={cn(
+                  'flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold border transition-all',
+                  showIndoor
+                    ? 'bg-indigo-500 border-indigo-400 text-white'
+                    : 'bg-slate-800 border-white/20 text-slate-400'
+                )}>
+                <DoorOpen size={12} />
+                Indoor
+                {indoorPhotos > 0 && !showIndoor && (
+                  <span className="ml-0.5 bg-indigo-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[9px] font-black">{indoorPhotos}</span>
+                )}
+              </button>
             </div>
 
-            {/* Compass selector */}
-            <div className="p-6 flex flex-col items-center">
-              <div className="relative w-64 h-64 flex items-center justify-center">
-                <div className="absolute inset-0 border-2 border-white/10 rounded-full" />
+            {/* ── EXTERIOR: compass ── */}
+            {!showIndoor && (
+              <div className="p-6 flex flex-col items-center">
+                <div className="relative w-64 h-64 flex items-center justify-center">
+                  <div className="absolute inset-0 border-2 border-white/10 rounded-full" />
+                  {mainDirs.map((dir, i) => (
+                    <button key={dir} onClick={() => setActiveElevation(dir)}
+                      className={cn(
+                        'absolute w-14 h-14 rounded-full flex flex-col items-center justify-center transition-all border-2',
+                        activeElevation === dir
+                          ? 'bg-accent border-white scale-110 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
+                          : 'bg-slate-800 border-white/20 text-slate-400',
+                        i === 0 && 'top-0', i === 1 && 'bottom-0',
+                        i === 2 && 'right-0', i === 3 && 'left-0'
+                      )}>
+                      <span className="text-[10px] font-black">{dir[0]}</span>
+                      {(photoCounts[buildingPhotoKey(activeBuildingIdx, buildings[activeBuildingIdx], dir)] || 0) > 0 && (
+                        <CheckCircle2 size={10} className="mt-0.5" />
+                      )}
+                    </button>
+                  ))}
+                  <div className="text-center z-10">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Target</p>
+                    <p className="text-xl font-black">{activeElevation}</p>
+                    <p className="text-[10px] text-slate-500">
+                      {photoCounts[currentKey] || 0} photo{(photoCounts[currentKey] || 0) !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
 
-                {mainDirs.map((dir, i) => (
-                  <button
-                    key={dir}
-                    onClick={() => setActiveElevation(dir)}
-                    className={cn(
-                      'absolute w-14 h-14 rounded-full flex flex-col items-center justify-center transition-all border-2',
-                      activeElevation === dir
-                        ? 'bg-accent border-white scale-110 shadow-[0_0_20px_rgba(245,158,11,0.5)]'
-                        : 'bg-slate-800 border-white/20 text-slate-400',
-                      i === 0 && 'top-0',
-                      i === 1 && 'bottom-0',
-                      i === 2 && 'right-0',
-                      i === 3 && 'left-0'
-                    )}
-                  >
-                    <span className="text-[10px] font-black">{dir[0]}</span>
-                    {(photoCounts[buildingPhotoKey(activeBuildingIdx, buildings[activeBuildingIdx], dir)] || 0) > 0 && (
-                      <CheckCircle2 size={10} className="mt-0.5" />
-                    )}
-                  </button>
-                ))}
+                {/* Garage + Detached pills */}
+                <div className="flex gap-3 mt-4">
+                  {FIXED_DIRS.map((dir) => {
+                    const key = buildingPhotoKey(activeBuildingIdx, buildings[activeBuildingIdx], dir);
+                    return (
+                      <button key={dir} onClick={() => setActiveElevation(dir)}
+                        className={cn(
+                          'px-4 py-2 rounded-full text-xs font-bold border transition-all',
+                          activeElevation === dir ? 'bg-accent border-accent text-white' : 'bg-slate-800 border-white/20 text-slate-400'
+                        )}>
+                        {dir} {(photoCounts[key] || 0) > 0 && `(${photoCounts[key]})`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
-                <div className="text-center z-10">
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Target</p>
-                  <p className="text-xl font-black">{activeElevation}</p>
+            {/* ── INDOOR: room grid ── */}
+            {showIndoor && (
+              <div className="px-6 pt-4 pb-2 flex flex-col gap-3">
+                <div className="grid grid-cols-2 gap-2">
+                  {allRooms.map((room) => {
+                    const key   = `${INDOOR_PREFIX} – ${room}`;
+                    const count = photoCounts[key] || 0;
+                    return (
+                      <button key={room} onClick={() => setActiveRoom(room)}
+                        className={cn(
+                          'py-3 px-4 rounded-2xl text-xs font-bold border-2 transition-all flex items-center justify-between',
+                          activeRoom === room
+                            ? 'bg-indigo-500 border-indigo-400 text-white'
+                            : 'bg-slate-800 border-white/10 text-slate-300'
+                        )}>
+                        <span className="truncate">{room}</span>
+                        {count > 0 && (
+                          <span className="flex items-center gap-1 ml-2 flex-shrink-0 opacity-80">
+                            {count} <CheckCircle2 size={10} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {/* Add Room */}
+                  {!addingRoom ? (
+                    <button onClick={() => { setAddingRoom(true); setTimeout(() => newRoomInputRef.current?.focus(), 50); }}
+                      className="py-3 px-4 rounded-2xl text-xs font-bold border-2 border-dashed border-white/20 text-slate-500 flex items-center justify-center gap-1 col-span-1">
+                      <Plus size={12} /> Add Room
+                    </button>
+                  ) : (
+                    <div className="col-span-2 flex gap-2 items-center">
+                      <input
+                        ref={newRoomInputRef}
+                        type="text"
+                        value={newRoomName}
+                        onChange={(e) => setNewRoomName(e.target.value)}
+                        placeholder="Room name..."
+                        className="flex-1 min-w-0 bg-slate-800 border border-white/20 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none focus:border-indigo-400"
+                        onKeyDown={(e) => { if (e.key === 'Enter') commitNewRoom(); if (e.key === 'Escape') { setAddingRoom(false); setNewRoomName(''); } }}
+                      />
+                      <button onClick={commitNewRoom} className="px-3 py-2 bg-indigo-500 rounded-xl text-xs font-bold text-white flex-shrink-0">Save</button>
+                      <button onClick={() => { setAddingRoom(false); setNewRoomName(''); }} className="px-3 py-2 bg-slate-700 rounded-xl text-xs font-bold text-slate-400 flex-shrink-0">Cancel</button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="text-center py-2">
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Active Room</p>
+                  <p className="text-xl font-black">{activeRoom}</p>
                   <p className="text-[10px] text-slate-500">
                     {photoCounts[currentKey] || 0} photo{(photoCounts[currentKey] || 0) !== 1 ? 's' : ''}
                   </p>
                 </div>
               </div>
-
-              {/* Garage + Detached pills */}
-              <div className="flex gap-3 mt-4">
-                {FIXED_DIRS.map((dir) => {
-                  const key = buildingPhotoKey(activeBuildingIdx, buildings[activeBuildingIdx], dir);
-                  return (
-                    <button
-                      key={dir}
-                      onClick={() => setActiveElevation(dir)}
-                      className={cn(
-                        'px-4 py-2 rounded-full text-xs font-bold border transition-all',
-                        activeElevation === dir
-                          ? 'bg-accent border-accent text-white'
-                          : 'bg-slate-800 border-white/20 text-slate-400'
-                      )}
-                    >
-                      {dir} {(photoCounts[key] || 0) > 0 && `(${photoCounts[key]})`}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+            )}
           </>
         )}
 
@@ -298,8 +354,13 @@ export default function SmartInspection() {
             <>
               <div className="flex justify-between items-center mb-6">
                 <div>
-                  <h2 className="text-lg font-black uppercase tracking-tight">{activeElevation}</h2>
-                  {activeBuildingIdx > 0 && (
+                  <h2 className="text-lg font-black uppercase tracking-tight">
+                    {showIndoor ? activeRoom : activeElevation}
+                  </h2>
+                  {showIndoor && (
+                    <p className="text-[10px] font-bold text-indigo-500 mt-0.5 uppercase tracking-widest">Indoor</p>
+                  )}
+                  {!showIndoor && activeBuildingIdx > 0 && (
                     <p className="text-[10px] font-bold text-slate-400 mt-0.5">{buildings[activeBuildingIdx]}</p>
                   )}
                 </div>
@@ -312,16 +373,27 @@ export default function SmartInspection() {
                 <input
                   type="file"
                   accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
-                  capture="environment"
+                  capture={showIndoor ? undefined : 'environment'}
                   className="hidden"
                   onChange={handleCapture}
                 />
-                <div className="aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-                  <div className="w-16 h-16 bg-accent text-white rounded-full flex items-center justify-center shadow-lg">
-                    <Camera size={28} />
+                <div className={cn(
+                  'aspect-square border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-3 active:opacity-80 transition-all',
+                  showIndoor
+                    ? 'bg-indigo-50 border-indigo-200 text-indigo-400'
+                    : 'bg-slate-50 border-slate-200 text-slate-400'
+                )}>
+                  <div className={cn(
+                    'w-16 h-16 rounded-full flex items-center justify-center shadow-lg text-white',
+                    showIndoor ? 'bg-indigo-500' : 'bg-accent'
+                  )}>
+                    {showIndoor ? <DoorOpen size={28} /> : <Camera size={28} />}
                   </div>
                   <span className="text-sm font-bold text-slate-500">
-                    Tap to capture {activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}{activeElevation}
+                    Tap to photograph{' '}
+                    {showIndoor
+                      ? activeRoom
+                      : `${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
                   </span>
                   <span className="text-xs text-slate-400">Photos upload directly to Supabase</span>
                 </div>
@@ -369,7 +441,7 @@ export default function SmartInspection() {
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Damage Observed (Select all that apply)</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase">Damage Observed (Select all)</label>
                 <div className="grid grid-cols-2 gap-2 mt-1">
                   {['Hail', 'Wind', 'Wear', 'None'].map((d) => (
                     <button key={d} onClick={() => toggleDamage(d)}

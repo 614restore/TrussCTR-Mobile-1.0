@@ -38,3 +38,20 @@ export function getMainElevations(style: ElevationStyle): string[] {
 export function getAllElevations(style: ElevationStyle): string[] {
   return [...getMainElevations(style), ...FIXED_DIRS];
 }
+
+/** Prefix used to namespace all indoor room photo keys. */
+export const INDOOR_PREFIX = 'Indoor';
+
+/** Default room list shown in the indoor photo picker. */
+export const DEFAULT_ROOMS = [
+  'Living Room',
+  'Kitchen',
+  'Master Bedroom',
+  'Bedroom',
+  'Bathroom',
+  'Hallway',
+  'Basement',
+  'Attic',
+  'Garage Interior',
+  'Other',
+] as const;
