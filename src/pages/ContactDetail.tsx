@@ -428,7 +428,7 @@ export default function ContactDetail() {
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
             {activeTab === 'overview' && <OverviewTab contact={contact} onRefresh={fetchContact} />}
-            {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
+            {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} onRefresh={fetchContact} />}
             {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
             {activeTab === 'documents' && <DocumentsTab contactId={contact.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} />}
@@ -943,7 +943,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   );
 }
 
-function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
+function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { contact: any; userId?: string; onDocumentsChanged?: () => void; onRefresh?: () => void }) {
   const navigate = useNavigate();
   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
 
@@ -1397,6 +1397,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       }
       alert('Inspection completed and saved to timeline!');
       setStep('report');
+      onRefresh?.();
     } catch (err) {
       console.error('Error completing inspection:', err);
       alert('Failed to complete inspection.');
