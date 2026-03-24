@@ -4,7 +4,7 @@ import {
   ChevronLeft, Phone, MessageSquare, Mail, Edit2,
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
-  ClipboardList, PenLine, Wrench, TrendingUp
+  ClipboardList, PenLine, Wrench, TrendingUp, Download, Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -13,7 +13,9 @@ import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
 import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
-import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
+import { buildDocumentDisplayUrl, buildStoredDocumentUrl, fetchDocumentObjectUrl } from '../lib/documentAccess';
+import { uploadToAvailableBucket } from '../lib/pdfService';
+import { jsPDF } from 'jspdf';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
 import { getNextPipelineStageLabel, getPipelineStageLabel } from '../lib/pipelineStages';
 import { getElevationStyle, getMainElevations, FIXED_DIRS, INDOOR_PREFIX, DEFAULT_ROOMS } from '../lib/photoPreferences';
@@ -1415,6 +1417,213 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { con
     }
   };
 
+  const [savingReport, setSavingReport] = useState(false);
+  const [savedReportId, setSavedReportId] = useState<string | null>(null);
+  const [savedReportBlob, setSavedReportBlob] = useState<Blob | null>(null);
+
+  const exportInspectionReport = async () => {
+    if (!contact || !profile) return;
+    setSavingReport(true);
+    try {
+      const { data: companyData } = await supabase.from('companies').select('*').eq('id', profile.company_id).maybeSingle();
+      const company = companyData as any;
+      const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Customer';
+      const propertyAddress = [contact.address, contact.city, contact.state, contact.zip].filter(Boolean).join(', ');
+
+      // Fetch all photos for this contact from DB for the PDF
+      const { data: photoDocs } = await supabase
+        .from('documents')
+        .select('id, name, url')
+        .eq('contact_id', contact.id)
+        .eq('type', 'photo')
+        .order('created_at', { ascending: true });
+
+      // Group by elevation key (encoded in name)
+      type PdfPhoto = { name: string; dataUrl: string };
+      const grouped = new Map<string, PdfPhoto[]>();
+      const toLoad = (photoDocs || []) as Array<{ id: string; name: string; url: string }>;
+
+      await Promise.all(toLoad.map(async (doc) => {
+        const label = doc.name
+          .replace(/ Slope Photo$/i, '')
+          .replace(/ Inspection Photo$/i, '')
+          .replace(/ Photo$/i, '')
+          .trim();
+        try {
+          const loaded = await fetchDocumentObjectUrl(doc.url);
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(String(reader.result || ''));
+            reader.onerror = reject;
+            reader.readAsDataURL(loaded.blob);
+          });
+          URL.revokeObjectURL(loaded.objectUrl);
+          if (!grouped.has(label)) grouped.set(label, []);
+          grouped.get(label)!.push({ name: doc.name, dataUrl });
+        } catch {
+          // skip photos that can't be loaded
+        }
+      }));
+
+      // Build PDF
+      const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const left = 14, right = pageWidth - 14, width = right - left;
+      let y = 16;
+
+      const ensureSpace = (needed: number) => {
+        if (y + needed > pageHeight - 16) { pdf.addPage(); y = 16; }
+      };
+
+      // Header
+      pdf.setFillColor(30, 64, 175);
+      pdf.roundedRect(left, y, width, 28, 4, 4, 'F');
+      pdf.setTextColor(255, 255, 255);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(18);
+      pdf.text(company?.name || 'TrussCTR', left + 5, y + 10);
+      pdf.setFontSize(9);
+      pdf.text('Roof Inspection Report', left + 5, y + 17);
+      pdf.setFontSize(8);
+      pdf.text(new Date().toLocaleDateString(), left + 5, y + 23);
+      y += 34;
+
+      // Customer info
+      pdf.setTextColor(15, 23, 42);
+      pdf.setFontSize(10);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Customer', left, y);
+      pdf.text('Property Address', left + 92, y);
+      y += 5;
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(9.5);
+      pdf.text(pdf.splitTextToSize(contactName, 84), left, y);
+      pdf.text(pdf.splitTextToSize(propertyAddress || 'Not provided', 84), left + 92, y);
+      y += 14;
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Stage', left, y);
+      y += 5;
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(String(contact.status || '').replaceAll('_', ' '), left, y);
+      y += 14;
+
+      // Inspection data block
+      const dataLines: [string, string][] = [
+        ['Pitch', `${pitch.rise}/${pitch.run}  (${angle.toFixed(1)}°)`],
+        ['Pitch Multiplier', pitchMultiplier.toFixed(3)],
+        ...(effectiveFootprint > 0 ? [['Roof Surface Area', `${roofSurfaceArea.toFixed(1)} sq ft`] as [string, string]] : []),
+        ['Approx. Roof Age', checklist.roofAge || '—'],
+        ['Primary Material', checklist.material || '—'],
+        ['Damage Types', checklist.damageTypes.join(', ') || 'None'],
+        ['Leaks Present', checklist.leaks ? 'Yes' : 'No'],
+      ];
+      const blockH = dataLines.length * 7 + 12;
+      ensureSpace(blockH);
+      pdf.setFillColor(248, 250, 252);
+      pdf.roundedRect(left, y, width, blockH, 3, 3, 'F');
+      pdf.setTextColor(51, 65, 85);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(9);
+      pdf.text('Inspection Data', left + 4, y + 6);
+      y += 10;
+      for (const [label, value] of dataLines) {
+        pdf.setFont('helvetica', 'normal');
+        pdf.setFontSize(8.5);
+        pdf.text(label, left + 4, y);
+        pdf.setFont('helvetica', 'bold');
+        pdf.text(value, left + 60, y);
+        y += 7;
+      }
+      y += 6;
+
+      // Photo sections
+      const cardW = (width - 6) / 2;
+      const imgH = 46;
+      for (const [elevLabel, elevPhotos] of grouped.entries()) {
+        const isIndoor = elevLabel.startsWith(INDOOR_PREFIX);
+        const displayLabel = isIndoor ? elevLabel.replace(`${INDOOR_PREFIX} – `, '') : elevLabel;
+        ensureSpace(14);
+        pdf.setFillColor(isIndoor ? 79 : 15, isIndoor ? 70 : 23, isIndoor ? 229 : 42);
+        pdf.roundedRect(left, y, width, 10, 3, 3, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setFontSize(11);
+        pdf.text(`${displayLabel}${isIndoor ? '  (Indoor)' : ''}`, left + 4, y + 6.4);
+        pdf.setFontSize(8);
+        pdf.text(`${elevPhotos.length} photo${elevPhotos.length !== 1 ? 's' : ''}`, right - 4, y + 6.4, { align: 'right' });
+        y += 14;
+
+        elevPhotos.forEach((photo, index) => {
+          const x = index % 2 === 0 ? left : left + cardW + 6;
+          if (index % 2 === 0) ensureSpace(66);
+          if (index % 2 === 0 && index > 0) y += 4;
+          pdf.setDrawColor(226, 232, 240);
+          pdf.setFillColor(255, 255, 255);
+          pdf.roundedRect(x, y, cardW, 62, 3, 3, 'FD');
+          try {
+            pdf.addImage(photo.dataUrl, photo.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG', x + 2, y + 2, cardW - 4, imgH, undefined, 'FAST');
+          } catch { /* skip bad images */ }
+          pdf.setTextColor(51, 65, 85);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setFontSize(7.5);
+          pdf.text(pdf.splitTextToSize(photo.name, cardW - 6), x + 3, y + imgH + 7);
+          if (index % 2 === 1 || index === elevPhotos.length - 1) y += 66;
+        });
+        y += 4;
+      }
+
+      // Footer
+      ensureSpace(12);
+      pdf.setDrawColor(226, 232, 240);
+      pdf.line(left, y, right, y);
+      y += 6;
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(8);
+      pdf.text(`Generated ${new Date().toLocaleString()} • TrussCTR Mobile`, left, y);
+
+      const pdfBlob = pdf.output('blob');
+      const fileName = `inspection-report-${Date.now()}.pdf`;
+      const uploaded = await uploadToAvailableBucket(`${contact.id}/inspection-reports/${fileName}`, pdfBlob, 'application/pdf');
+      const savedUrl = buildStoredDocumentUrl(uploaded.publicUrl, uploaded.bucket, uploaded.path);
+
+      const { data: savedDoc } = await (supabase.from('documents') as any)
+        .insert({
+          contact_id: contact.id,
+          company_id: profile.company_id,
+          name: `Inspection Report - ${contactName}`,
+          type: 'other',
+          url: savedUrl,
+          size: pdfBlob.size,
+          uploaded_by: profile.id,
+        })
+        .select('id')
+        .single();
+
+      setSavedReportId(savedDoc?.id || null);
+      setSavedReportBlob(pdfBlob);
+    } catch (err) {
+      console.error('Error exporting inspection report:', err);
+      alert(`Failed to save report. ${(err as Error)?.message || ''}`);
+    } finally {
+      setSavingReport(false);
+    }
+  };
+
+  const shareInspectionReport = async () => {
+    if (!savedReportBlob) return;
+    const contactName = `${contact?.first_name || ''} ${contact?.last_name || ''}`.trim() || 'Customer';
+    const file = new File([savedReportBlob], 'inspection-report.pdf', { type: 'application/pdf' });
+    try {
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: `Inspection Report - ${contactName}`, files: [file] });
+      } else if (navigator.share) {
+        await navigator.share({ title: `Inspection Report - ${contactName}`, text: `Roof inspection report for ${contactName}` });
+      }
+    } catch { /* user dismissed share sheet */ }
+  };
+
   const deleteInspection = async () => {
     if (!completedInspection?.id) return;
     if (!window.confirm('Delete this inspection record? The photos will remain but the inspection report will be cleared. This cannot be undone.')) return;
@@ -1792,22 +2001,84 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { con
       )}
 
       {step === 'report' && (
-        <div className="card p-5 space-y-3">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Report</h3>
-          <div className="text-sm text-slate-700 space-y-1">
-            <div>Pitch: <span className="font-bold">{pitch.rise}/{pitch.run}</span> ({angle.toFixed(1)}°)</div>
-            <div>Multiplier: <span className="font-bold">{pitchMultiplier.toFixed(3)}</span></div>
-            {footprintArea && <div>Roof Surface: <span className="font-bold">{roofSurfaceArea.toFixed(1)} sq ft</span></div>}
-            <div>Age: <span className="font-bold">{checklist.roofAge || '—'}</span></div>
-            <div>Material: <span className="font-bold">{checklist.material || '—'}</span></div>
-            <div>Damage: <span className="font-bold">{checklist.damageTypes.join(', ') || 'None'}</span></div>
-            <div>Leaks: <span className="font-bold">{checklist.leaks ? 'Yes' : 'No'}</span></div>
+        <div className="space-y-4">
+          {/* Inspection data summary */}
+          <div className="card p-5 space-y-3">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Report</h3>
+            <div className="text-sm text-slate-700 space-y-1">
+              <div>Pitch: <span className="font-bold">{pitch.rise}/{pitch.run}</span> ({angle.toFixed(1)}°)</div>
+              <div>Multiplier: <span className="font-bold">{pitchMultiplier.toFixed(3)}</span></div>
+              {effectiveFootprint > 0 && <div>Roof Surface: <span className="font-bold">{roofSurfaceArea.toFixed(1)} sq ft</span></div>}
+              <div>Age: <span className="font-bold">{checklist.roofAge || '—'}</span></div>
+              <div>Material: <span className="font-bold">{checklist.material || '—'}</span></div>
+              <div>Damage: <span className="font-bold">{checklist.damageTypes.join(', ') || 'None'}</span></div>
+              <div>Leaks: <span className="font-bold">{checklist.leaks ? 'Yes' : 'No'}</span></div>
+            </div>
           </div>
-          <div className="grid grid-cols-3 gap-2">
-            {photos.slice(0, 6).map((p, i) => (
-              <img key={`${p.url}-${i}`} src={p.displayUrl || p.url} alt="Inspection" className="w-full h-20 object-cover rounded-lg" referrerPolicy="no-referrer" />
-            ))}
+
+          {/* Photos grouped by elevation/room with location labels */}
+          {(() => {
+            const grouped = new Map<string, typeof photos>();
+            for (const p of photos) {
+              if (!grouped.has(p.elevation)) grouped.set(p.elevation, []);
+              grouped.get(p.elevation)!.push(p);
+            }
+            if (grouped.size === 0) return null;
+            return Array.from(grouped.entries()).map(([elevation, elevPhotos]) => {
+              const isIndoor = elevation.startsWith(INDOOR_PREFIX);
+              const displayLabel = isIndoor ? elevation.replace(`${INDOOR_PREFIX} – `, '') : elevation;
+              return (
+                <div key={elevation} className="card p-4 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${isIndoor ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}`}>
+                      {displayLabel}
+                    </span>
+                    {isIndoor && <span className="text-[9px] font-bold text-indigo-400 uppercase">Indoor</span>}
+                    <span className="text-[10px] text-slate-400">{elevPhotos.length} photo{elevPhotos.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {elevPhotos.map((p, i) => (
+                      <img key={`${p.url}-${i}`} src={p.displayUrl || p.url} alt={displayLabel}
+                        className="w-full h-20 object-cover rounded-lg" referrerPolicy="no-referrer" />
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+
+          {/* Save / Share report */}
+          <div className="card p-4 space-y-3">
+            <div className="flex gap-3">
+              <button
+                onClick={exportInspectionReport}
+                disabled={savingReport}
+                className="flex-1 bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50"
+              >
+                {savingReport ? 'Saving...' : 'Save Report PDF'}
+              </button>
+              {savedReportId && (
+                <button
+                  onClick={() => navigate(`/documents/view/${savedReportId}`)}
+                  className="px-4 py-3 bg-slate-100 rounded-xl text-primary"
+                >
+                  <Download size={16} />
+                </button>
+              )}
+              {savedReportBlob && (
+                <button
+                  onClick={shareInspectionReport}
+                  className="px-4 py-3 bg-slate-100 rounded-xl text-primary"
+                >
+                  <Share2 size={16} />
+                </button>
+              )}
+            </div>
+            {savedReportId && (
+              <p className="text-[10px] text-emerald-600 font-bold text-center">Report saved to Documents</p>
+            )}
           </div>
+
           <button onClick={() => setStep('photos')} className="w-full text-xs font-bold text-accent">Back to Photos</button>
         </div>
       )}
