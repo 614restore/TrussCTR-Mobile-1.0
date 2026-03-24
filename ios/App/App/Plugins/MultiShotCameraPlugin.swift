@@ -19,6 +19,9 @@ public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             self.savedCall = call
             let controller = MultiShotCameraViewController()
             controller.saveMode = call.getString("saveMode") ?? "app_files"
+            // contactFolder organises photos under Documents/TrussCTR/[Name]/
+            let rawFolder = call.getString("contactFolder") ?? ""
+            controller.contactFolder = rawFolder.isEmpty ? "General" : rawFolder
             controller.onDone = { urls in
                 self.savedCall?.resolve(["photos": urls])
                 self.savedCall = nil
@@ -45,6 +48,8 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
     var onDone: (([String]) -> Void)?
     var onCancel: (() -> Void)?
     var saveMode: String = "app_files"
+    /// Sub-folder under Documents/TrussCTR/ for this contact's photos.
+    var contactFolder: String = "General"
 
     // Dedicated serial queue for all AVCaptureSession work — never run
     // session operations on the main thread or it will block the UI and
@@ -243,9 +248,20 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
         guard error == nil, let data = photo.fileDataRepresentation() else { return }
 
         let fileName  = "capture_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
-        let baseURL   = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let docsURL   = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
                         ?? FileManager.default.temporaryDirectory
-        let storedURL = baseURL.appendingPathComponent(fileName)
+
+        // Build organised path: Documents/TrussCTR/[contactFolder]/
+        let safeFolder = contactFolder
+            .components(separatedBy: CharacterSet(charactersIn: "<>:\"/\\|?*"))
+            .joined(separator: "_")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let folderURL = docsURL
+            .appendingPathComponent("TrussCTR", isDirectory: true)
+            .appendingPathComponent(safeFolder.isEmpty ? "General" : safeFolder, isDirectory: true)
+
+        try? FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true, attributes: nil)
+        let storedURL = folderURL.appendingPathComponent(fileName)
 
         do {
             try data.write(to: storedURL, options: .atomic)

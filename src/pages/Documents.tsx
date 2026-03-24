@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Search, ChevronLeft, Filter, Download, File, FileImage, FileCode, Trash2 } from 'lucide-react';
+import { FileText, Search, ChevronLeft, Filter, Download, File, FileImage, FileCode, Trash2, FolderDown } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import { buildDocumentDisplayUrl, parseDocumentStorageLocation } from '../lib/documentAccess';
+import { saveFileToDevice } from '../lib/localFiles';
 
 function getSignatureParentName(name: string) {
   if (name.includes(' Customer Signature - ')) return name.replace(' Customer Signature - ', ' - ');
@@ -108,6 +109,27 @@ export default function Documents() {
     }
   };
 
+  const [savingToFilesId, setSavingToFilesId] = useState<string | null>(null);
+
+  const saveDocumentToFiles = async (doc: any) => {
+    setSavingToFilesId(doc.id);
+    try {
+      const contactName = doc.contacts
+        ? `${doc.contacts.first_name || ''} ${doc.contacts.last_name || ''}`.trim()
+        : 'Customer';
+      const ext = doc.name?.match(/\.(pdf|jpg|jpeg|png|gif|webp)$/i)?.[0] || '.pdf';
+      const baseName = (doc.name || 'document').replace(/[^a-z0-9 _\-]/gi, '_');
+      const fileName = baseName.endsWith(ext) ? baseName : `${baseName}${ext}`;
+      const url = doc.displayUrl || doc.url;
+      await saveFileToDevice(url, contactName, fileName);
+    } catch (err) {
+      console.error('Error saving document to files:', err);
+      alert('Failed to save to Files. Please try again.');
+    } finally {
+      setSavingToFilesId(null);
+    }
+  };
+
   const getFileIcon = (type: string) => {
     switch (type) {
       case 'photo': return <FileImage className="text-rose-500" size={20} />;
@@ -181,6 +203,18 @@ export default function Documents() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
+                  {/* Save to Files */}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); saveDocumentToFiles(doc); }}
+                    disabled={savingToFilesId === doc.id}
+                    className="p-2 text-slate-300 hover:text-indigo-500 transition-colors disabled:opacity-40"
+                    title="Save to Files app"
+                  >
+                    {savingToFilesId === doc.id
+                      ? <span className="text-[9px] font-bold text-indigo-500">…</span>
+                      : <FolderDown size={17} />
+                    }
+                  </button>
                   {canDelete && (
                     <button
                       onClick={(e) => { e.stopPropagation(); deleteDocument(doc, signatureDocsByParent.get(String(doc.name || '')) || []); }}
