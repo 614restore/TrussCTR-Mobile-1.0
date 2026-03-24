@@ -124,6 +124,10 @@ export async function fetchDocumentObjectUrl(storedUrl: string) {
   };
 }
 
+export function parseDocumentStorageLocation(storedUrl: string): { bucket: string; path: string } | null {
+  return parseStoredMetadata(storedUrl) || parseBucketAndPathFromUrl(storedUrl);
+}
+
 export async function buildDocumentDisplayUrl(storedUrl: string) {
   try {
     const resolved = await resolveDocumentSignedUrl(storedUrl);

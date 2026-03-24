@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Search, ChevronLeft, Filter, Download, File, FileImage, FileCode } from 'lucide-react';
+import { FileText, Search, ChevronLeft, Filter, Download, File, FileImage, FileCode, Trash2 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
-import { buildDocumentDisplayUrl } from '../lib/documentAccess';
+import { buildDocumentDisplayUrl, parseDocumentStorageLocation } from '../lib/documentAccess';
 
 function getSignatureParentName(name: string) {
   if (name.includes(' Customer Signature - ')) return name.replace(' Customer Signature - ', ' - ');
@@ -87,6 +87,27 @@ export default function Documents() {
 
   const visibleDocs = filteredDocs.filter((doc) => !getSignatureParentName(String(doc.name || '')));
 
+  const canDelete = profile?.role === 'owner' || profile?.role === 'admin';
+
+  const deleteDocument = async (doc: any, relatedDocs: any[] = []) => {
+    const allDocs = [doc, ...relatedDocs];
+    if (!window.confirm(`Delete "${doc.name}"${relatedDocs.length ? ` and ${relatedDocs.length} attached signature(s)` : ''}? This cannot be undone.`)) return;
+
+    try {
+      for (const d of allDocs) {
+        const loc = parseDocumentStorageLocation(String(d.url || ''));
+        if (loc?.bucket && loc?.path) {
+          await supabase.storage.from(loc.bucket).remove([loc.path]);
+        }
+        await supabase.from('documents').delete().eq('id', d.id);
+      }
+      setDocuments(prev => prev.filter(d => !allDocs.find(a => a.id === d.id)));
+    } catch (err) {
+      console.error('Error deleting document:', err);
+      alert('Failed to delete document. Please try again.');
+    }
+  };
+
   const getFileIcon = (type: string) => {
     switch (type) {
       case 'photo': return <FileImage className="text-rose-500" size={20} />;
@@ -159,15 +180,25 @@ export default function Documents() {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    navigate(`/documents/view/${doc.id}`);
-                  }}
-                  className="p-2 text-slate-300 hover:text-accent transition-colors"
-                >
-                  <Download size={18} />
-                </button>
+                <div className="flex items-center gap-1">
+                  {canDelete && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteDocument(doc, signatureDocsByParent.get(String(doc.name || '')) || []); }}
+                      className="p-2 text-slate-300 hover:text-rose-500 transition-colors"
+                    >
+                      <Trash2 size={17} />
+                    </button>
+                  )}
+                  <button
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      navigate(`/documents/view/${doc.id}`);
+                    }}
+                    className="p-2 text-slate-300 hover:text-accent transition-colors"
+                  >
+                    <Download size={18} />
+                  </button>
+                </div>
               </button>
 
               {(signatureDocsByParent.get(String(doc.name || '')) || []).map((signatureDoc) => (

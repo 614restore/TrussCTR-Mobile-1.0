@@ -952,6 +952,8 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
 
 function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { contact: any; userId?: string; onDocumentsChanged?: () => void; onRefresh?: () => void }) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
+  const canDeleteInspection = profile?.role === 'owner' || profile?.role === 'admin';
   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
 
   // Elevation style and buildings (mirrors SmartInspection)
@@ -1413,6 +1415,20 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { con
     }
   };
 
+  const deleteInspection = async () => {
+    if (!completedInspection?.id) return;
+    if (!window.confirm('Delete this inspection record? The photos will remain but the inspection report will be cleared. This cannot be undone.')) return;
+    try {
+      await supabase.from('inspections').delete().eq('id', completedInspection.id);
+      setCompletedInspection(null);
+      setStep('questions');
+      onRefresh?.();
+    } catch (err) {
+      console.error('Error deleting inspection:', err);
+      alert('Failed to delete inspection. Please try again.');
+    }
+  };
+
   return (
     <div className="space-y-6">
       {completedInspection?.status === 'completed' && (
@@ -1421,12 +1437,22 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { con
             <p className="text-xs font-bold text-emerald-700 uppercase">Inspection Completed</p>
             <p className="text-[10px] text-emerald-600">Tap to view the completed inspection.</p>
           </div>
-          <button
-            onClick={() => { loadInspectionData(completedInspection.data); setStep('report'); }}
-            className="text-xs font-bold text-emerald-700"
-          >
-            View
-          </button>
+          <div className="flex items-center gap-3">
+            {canDeleteInspection && (
+              <button
+                onClick={deleteInspection}
+                className="text-[10px] font-bold text-rose-400"
+              >
+                Delete
+              </button>
+            )}
+            <button
+              onClick={() => { loadInspectionData(completedInspection.data); setStep('report'); }}
+              className="text-xs font-bold text-emerald-700"
+            >
+              View
+            </button>
+          </div>
         </div>
       )}
       <div className="card p-5 bg-slate-900 text-white space-y-4">

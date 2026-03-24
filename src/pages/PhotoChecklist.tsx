@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Camera, ChevronLeft, CheckCircle2, Circle, AlertCircle } from 'lucide-react';
+import { Camera, ChevronLeft, CheckCircle2, Circle, AlertCircle, Trash2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { buildDocumentDisplayUrl } from '../lib/documentAccess';
+import { buildDocumentDisplayUrl, parseDocumentStorageLocation } from '../lib/documentAccess';
 import { INDOOR_PREFIX } from '../lib/photoPreferences';
+import { useAuth } from '../context/AuthContext';
 
 type PhotoDoc = {
   id: string;
@@ -30,9 +31,11 @@ const STANDARD_EXTERIOR = [
 export default function PhotoChecklist() {
   const navigate   = useNavigate();
   const { id }     = useParams<{ id: string }>();
+  const { profile } = useAuth();
   const [groups, setGroups]   = useState<ChecklistGroup[]>([]);
   const [contact, setContact] = useState<{ name?: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const canDelete = profile?.role === 'owner' || profile?.role === 'admin';
 
   useEffect(() => {
     if (!id) return;
@@ -115,6 +118,24 @@ export default function PhotoChecklist() {
     load();
   }, [id]);
 
+  const deletePhoto = async (photoId: string, photoUrl: string) => {
+    if (!window.confirm('Delete this photo? This cannot be undone.')) return;
+    try {
+      const loc = parseDocumentStorageLocation(String(photoUrl || ''));
+      if (loc?.bucket && loc?.path) {
+        await supabase.storage.from(loc.bucket).remove([loc.path]);
+      }
+      await supabase.from('documents').delete().eq('id', photoId);
+      setGroups(prev => prev.map(g => ({
+        ...g,
+        photos: g.photos.filter(p => p.id !== photoId),
+      })).filter(g => g.photos.length > 0 || g.required));
+    } catch (err) {
+      console.error('Error deleting photo:', err);
+      alert('Failed to delete photo. Please try again.');
+    }
+  };
+
   const covered = groups.filter((g) => g.photos.length > 0).length;
   const total   = groups.length;
   const pct     = total > 0 ? Math.round((covered / total) * 100) : 0;
@@ -183,9 +204,17 @@ export default function PhotoChecklist() {
                 {/* Photo thumbnails */}
                 <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1">
                   {group.photos.map((photo) => (
-                    <div key={photo.id} className="flex-shrink-0 h-20 w-20 rounded-xl overflow-hidden border border-slate-100 bg-slate-100">
+                    <div key={photo.id} className="relative flex-shrink-0 h-20 w-20 rounded-xl overflow-hidden border border-slate-100 bg-slate-100">
                       <img src={photo.displayUrl || photo.url} alt={group.label}
                         className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                      {canDelete && (
+                        <button
+                          onClick={() => deletePhoto(photo.id, photo.url)}
+                          className="absolute top-1 right-1 bg-black/60 rounded-full p-1 text-white"
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
