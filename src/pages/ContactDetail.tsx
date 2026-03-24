@@ -930,6 +930,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
 
   const switchBuilding = (idx: number) => {
     setShowIndoor(false);
+    setShowVideos(false);
     setActiveBuildingIdx(idx);
     setActiveElevation(mainElevDirs[0]);
   };
@@ -939,6 +940,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     setBuildings((prev) => [...prev, name]);
     setActiveBuildingIdx(buildings.length);
     setShowIndoor(false);
+    setShowVideos(false);
     setActiveElevation(mainElevDirs[0]);
   };
 
@@ -950,7 +952,8 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [newRoomName, setNewRoomName] = useState('');
   const allRooms = [...DEFAULT_ROOMS, ...customRooms];
 
-  const switchToIndoor = () => { setShowIndoor(true); setActiveBuildingIdx(-1); };
+  const switchToIndoor = () => { setShowIndoor(true); setShowVideos(false); setActiveBuildingIdx(-1); };
+  const switchToVideos = () => { setShowVideos(true); setShowIndoor(false); setActiveBuildingIdx(-1); };
   const commitNewRoom  = () => {
     const name = newRoomName.trim();
     if (!name) { setAddingRoom(false); return; }
@@ -959,6 +962,13 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     setNewRoomName('');
     setAddingRoom(false);
   };
+
+  // Videos
+  const VIDEO_TYPES = ['Repairability Video', 'Damage Assessment', 'General Site Overview', 'Supplemental Evidence'];
+  const [showVideos, setShowVideos] = useState(false);
+  const [videos, setVideos] = useState<{ id: string; name: string; url: string }[]>([]);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const [selectedVideoType, setSelectedVideoType] = useState('Repairability Video');
 
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
@@ -1027,6 +1037,24 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       }
     };
     if (contact?.id) fetchInspection();
+  }, [contact?.id]);
+
+  useEffect(() => {
+    if (!contact?.id) return;
+    const fetchVideos = async () => {
+      try {
+        const { data } = await supabase
+          .from('documents')
+          .select('id, name, url')
+          .eq('contact_id', contact.id)
+          .eq('type', 'video')
+          .order('created_at', { ascending: false });
+        if (data) setVideos(data.map((d) => ({ id: d.id, name: d.name, url: d.url })));
+      } catch {
+        // ignore
+      }
+    };
+    fetchVideos();
   }, [contact?.id]);
 
   const toggleDamage = (type: string) => {
@@ -1172,6 +1200,60 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       alert(`Camera capture failed. ${err?.message || 'Unknown error'}`);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !contact?.id || !userId) return;
+    // Size guard — ~200 MB
+    if (file.size > 200 * 1024 * 1024) {
+      alert('Video is too large. Maximum size is 200 MB.');
+      e.target.value = '';
+      return;
+    }
+    // Duration guard — max 3 minutes (180 s)
+    const objUrl = URL.createObjectURL(file);
+    const duration = await new Promise<number>((resolve) => {
+      const vid = document.createElement('video');
+      vid.preload = 'metadata';
+      vid.onloadedmetadata = () => { URL.revokeObjectURL(objUrl); resolve(vid.duration); };
+      vid.onerror = () => { URL.revokeObjectURL(objUrl); resolve(0); };
+      vid.src = objUrl;
+    });
+    if (duration > 180) {
+      alert('Video exceeds the 3-minute limit. Please trim it and try again.');
+      e.target.value = '';
+      return;
+    }
+    setUploadingVideo(true);
+    try {
+      const ext = file.name.split('.').pop()?.toLowerCase() || 'mp4';
+      const safeName = selectedVideoType.replace(/\s+/g, '_');
+      const filePath = `${contact.id}/videos/${safeName}_${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('projectceo-photos')
+        .upload(filePath, file, { contentType: file.type || 'video/mp4' });
+      if (uploadErr) throw uploadErr;
+      const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
+      const { data: doc, error: dbErr } = await supabase.from('documents').insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        name: selectedVideoType,
+        type: 'video',
+        url: publicUrl,
+        size: file.size,
+        uploaded_by: userId,
+      } as any).select('id').maybeSingle();
+      if (dbErr) throw dbErr;
+      setVideos((prev) => [{ id: (doc as any)?.id ?? String(Date.now()), name: selectedVideoType, url: publicUrl }, ...prev]);
+      onDocumentsChanged?.();
+    } catch (err) {
+      console.error('Video upload error:', err);
+      alert(`Video upload failed. ${(err as any)?.message || ''}`);
+    } finally {
+      setUploadingVideo(false);
+      e.target.value = '';
     }
   };
 
@@ -1446,7 +1528,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none -mx-1 px-1">
             {buildings.map((name, idx) => (
               <button key={idx} onClick={() => switchBuilding(idx)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${!showIndoor && activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${!showIndoor && !showVideos && activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
                 {name}
               </button>
             ))}
@@ -1463,10 +1545,10 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             const indoorCount = photos.filter(p => p.elevation.startsWith(INDOOR_PREFIX)).length;
             return (
               <button onClick={switchToIndoor}
-                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-xs font-bold border transition-all ${showIndoor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-xs font-bold border transition-all ${showIndoor && !showVideos ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
                 <span>🏠 Indoor Photos</span>
                 {indoorCount > 0 ? (
-                  <span className={`text-[10px] font-black ${showIndoor ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                  <span className={`text-[10px] font-black ${showIndoor && !showVideos ? 'text-indigo-200' : 'text-indigo-500'}`}>
                     {indoorCount} photo{indoorCount !== 1 ? 's' : ''}
                   </span>
                 ) : (
@@ -1476,8 +1558,21 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             );
           })()}
 
+          {/* Row 3: Videos — always fully visible */}
+          <button onClick={switchToVideos}
+            className={`w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-xs font-bold border transition-all ${showVideos ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+            <span>🎥 Videos</span>
+            {videos.length > 0 ? (
+              <span className={`text-[10px] font-black ${showVideos ? 'text-rose-200' : 'text-rose-500'}`}>
+                {videos.length} video{videos.length !== 1 ? 's' : ''}
+              </span>
+            ) : (
+              <span className="text-[10px] text-slate-400">Repairability, damage &amp; more</span>
+            )}
+          </button>
+
           {/* Exterior elevation grid */}
-          {!showIndoor && (
+          {!showIndoor && !showVideos && (
             <>
               <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed.</div>
               <div className="grid grid-cols-3 gap-2">
@@ -1496,7 +1591,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
           )}
 
           {/* Indoor room grid */}
-          {showIndoor && (
+          {showIndoor && !showVideos && (
             <div className="space-y-3">
               <div className="text-[10px] text-slate-500">Tap a room, then add photos. Use "+ Add Room" for spaces not listed.</div>
               <div className="grid grid-cols-2 gap-2">
@@ -1528,62 +1623,115 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               </div>
             </div>
           )}
-          {usesNativeInspectionCamera ? (
-            <button
-              type="button"
-              onClick={capturePhoto}
-              disabled={uploading}
-              className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
-            >
-              <span className="text-sm font-bold text-slate-500">
-                {uploading ? 'Uploading...' : showIndoor
-                  ? `Tap to photograph ${activeRoom}`
-                  : `Tap to capture ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
-              </span>
-              <span className="text-[10px] text-slate-400">
-                {showIndoor ? 'Indoor photo — any camera angle.' : 'Keep shooting, then tap Done once that elevation is complete.'}
-              </span>
-            </button>
-          ) : (
-            <label className="block w-full cursor-pointer">
-              <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-              <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-                <span className="text-sm font-bold text-slate-500">
-                  {uploading ? 'Uploading...' : showIndoor
-                    ? `Tap to photograph ${activeRoom}`
-                    : `Tap to add ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
-                </span>
+          {!showVideos && (
+            <>
+              {usesNativeInspectionCamera ? (
+                <button
+                  type="button"
+                  onClick={capturePhoto}
+                  disabled={uploading}
+                  className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
+                >
+                  <span className="text-sm font-bold text-slate-500">
+                    {uploading ? 'Uploading...' : showIndoor
+                      ? `Tap to photograph ${activeRoom}`
+                      : `Tap to capture ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    {showIndoor ? 'Indoor photo — any camera angle.' : 'Keep shooting, then tap Done once that elevation is complete.'}
+                  </span>
+                </button>
+              ) : (
+                <label className="block w-full cursor-pointer">
+                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+                  <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
+                    <span className="text-sm font-bold text-slate-500">
+                      {uploading ? 'Uploading...' : showIndoor
+                        ? `Tap to photograph ${activeRoom}`
+                        : `Tap to add ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
+                    </span>
+                  </div>
+                </label>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                {usesNativeInspectionCamera ? (
+                  <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
+                ) : (
+                  <label className="bg-primary text-white py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
+                    Capture Photo
+                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+                  </label>
+                )}
+                <label className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
+                  Choose from Library
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                </label>
               </div>
-            </label>
+              <div className="grid grid-cols-2 gap-3">
+                {photos.map((p, i) => (
+                  <div key={`${p.url}-${i}`} className="card p-2 space-y-2">
+                    <img src={p.displayUrl || p.url} alt="Inspection" className="w-full h-32 object-cover rounded-xl" referrerPolicy="no-referrer" />
+                    <p className="text-[10px] font-bold text-slate-400">{p.elevation}</p>
+                    <textarea className="w-full bg-slate-50 border-none rounded-lg p-2 text-xs" placeholder="Add note..." value={p.note} onChange={(e) => setPhotos((prev) => {
+                      const next = [...prev];
+                      next[i] = { ...next[i], note: e.target.value };
+                      return next;
+                    })} />
+                    <button onClick={() => openMarkup(i)} className="w-full text-xs font-bold text-accent">Markup Photo</button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            {usesNativeInspectionCamera ? (
-              <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
-            ) : (
-              <label className="bg-primary text-white py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
-                Capture Photo
-                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
-              </label>
-            )}
-            <label className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
-              Choose from Library
-              <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            {photos.map((p, i) => (
-              <div key={`${p.url}-${i}`} className="card p-2 space-y-2">
-                <img src={p.displayUrl || p.url} alt="Inspection" className="w-full h-32 object-cover rounded-xl" referrerPolicy="no-referrer" />
-                <p className="text-[10px] font-bold text-slate-400">{p.elevation}</p>
-                <textarea className="w-full bg-slate-50 border-none rounded-lg p-2 text-xs" placeholder="Add note..." value={p.note} onChange={(e) => setPhotos((prev) => {
-                  const next = [...prev];
-                  next[i] = { ...next[i], note: e.target.value };
-                  return next;
-                })} />
-                <button onClick={() => openMarkup(i)} className="w-full text-xs font-bold text-accent">Markup Photo</button>
+
+          {/* Videos section */}
+          {showVideos && (
+            <div className="space-y-4">
+              <div className="text-[10px] text-slate-500">Record and store videos per contact. Max 3 minutes each. Stored with this customer's file.</div>
+              {/* Video type picker */}
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Video Type</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {VIDEO_TYPES.map((type) => (
+                    <button key={type} onClick={() => setSelectedVideoType(type)}
+                      className={`py-2 px-3 rounded-lg text-xs font-bold border transition-all text-left ${selectedVideoType === type ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white border-slate-100 text-slate-600'}`}>
+                      {type}
+                    </button>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+              {/* Record / upload */}
+              <div className="grid grid-cols-2 gap-3">
+                <label className={`bg-primary text-white py-3 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 ${uploadingVideo ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
+                  🎥 Record Video
+                  <input type="file" accept="video/*" capture="environment" className="hidden" onChange={handleVideoUpload} disabled={uploadingVideo} />
+                </label>
+                <label className={`bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center flex items-center justify-center gap-1.5 ${uploadingVideo ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>
+                  📂 Choose Video
+                  <input type="file" accept="video/*" className="hidden" onChange={handleVideoUpload} disabled={uploadingVideo} />
+                </label>
+              </div>
+              {uploadingVideo && (
+                <div className="bg-slate-50 rounded-xl p-4 text-center text-xs text-slate-500 animate-pulse">Uploading video…</div>
+              )}
+              {/* Existing videos */}
+              {videos.length > 0 ? (
+                <div className="space-y-3">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Stored Videos</p>
+                  {videos.map((v) => (
+                    <div key={v.id} className="card p-3 space-y-2">
+                      <p className="text-xs font-bold text-slate-700">{v.name}</p>
+                      <video src={v.url} controls playsInline preload="metadata"
+                        className="w-full rounded-xl bg-black" style={{ maxHeight: '220px' }} />
+                    </div>
+                  ))}
+                </div>
+              ) : !uploadingVideo && (
+                <div className="bg-slate-50 rounded-xl p-6 text-center text-xs text-slate-400">No videos yet — tap "Record Video" above.</div>
+              )}
+            </div>
+          )}
+
           <button onClick={completeInspection} disabled={saving} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
             {saving ? 'Saving...' : 'Complete Inspection'}
           </button>
