@@ -4,7 +4,7 @@ import {
   ChevronLeft, Phone, MessageSquare, Mail, Edit2,
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
-  ClipboardList, PenLine, Wrench, TrendingUp, Download, Share2
+  ClipboardList, PenLine, Wrench, TrendingUp, Download, Share2, Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -2882,33 +2882,641 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
 }
 
 function InsuranceTab({ contact }: { contact: any }) {
+  const { profile } = useAuth();
+  const canEdit = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager';
+
+  // Claim state
+  const [claim, setClaim] = useState<any | null>(null);
+  const [claimLoading, setClaimLoading] = useState(true);
+  const [editingClaim, setEditingClaim] = useState(false);
+  const [claimForm, setClaimForm] = useState<any>({});
+  const [savingClaim, setSavingClaim] = useState(false);
+
+  // Supplements state
+  const [supplements, setSupplements] = useState<any[]>([]);
+  const [showAddSupp, setShowAddSupp] = useState(false);
+  const [editingSupp, setEditingSupp] = useState<any | null>(null);
+  const [suppForm, setSuppForm] = useState<any>({
+    description: '', amount_requested: '', amount_approved: '', status: 'pending',
+    submitted_date: '', approved_date: '', notes: '',
+  });
+  const [savingSupp, setSavingSupp] = useState(false);
+
+  // Insurance documents state
+  const [insuranceDocs, setInsuranceDocs] = useState<any[]>([]);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    loadClaim();
+  }, [contact.id]);
+
+  const loadClaim = async () => {
+    setClaimLoading(true);
+    try {
+      const { data: claimData } = await (supabase as any)
+        .from('insurance_claims')
+        .select('*')
+        .eq('contact_id', contact.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (claimData) {
+        setClaim(claimData);
+        setClaimForm({ ...(claimData as any) });
+        // Load supplements
+        const { data: supps } = await (supabase as any)
+          .from('supplements')
+          .select('*')
+          .eq('claim_id', claimData.id)
+          .order('created_at', { ascending: true });
+        setSupplements(supps || []);
+      } else {
+        setClaim(null);
+        setClaimForm({
+          insurance_company: contact.insurance_company || '',
+          claim_number: contact.claim_number || '',
+          policy_number: '', adjuster_name: '', adjuster_phone: '', adjuster_email: '',
+          date_of_loss: '', status: 'pending',
+          rcv: '', acv: '', deductible: contact.deductible || '', depreciation: '',
+          overhead_profit: '', notes: '',
+        });
+      }
+
+      // Load insurance documents regardless
+      const { data: docs } = await supabase
+        .from('documents')
+        .select('*')
+        .eq('contact_id', contact.id)
+        .eq('type', 'insurance')
+        .order('created_at', { ascending: false });
+      const withUrls = await Promise.all((docs || []).map(async (d: any) => ({
+        ...d,
+        displayUrl: await buildDocumentDisplayUrl(d.url),
+      })));
+      setInsuranceDocs(withUrls);
+    } catch (err) {
+      console.error('Error loading insurance claim:', err);
+    } finally {
+      setClaimLoading(false);
+    }
+  };
+
+  const saveClaim = async () => {
+    setSavingClaim(true);
+    try {
+      const payload: any = {
+        contact_id: contact.id,
+        company_id: profile?.company_id,
+        insurance_company: claimForm.insurance_company || null,
+        claim_number: claimForm.claim_number || null,
+        policy_number: claimForm.policy_number || null,
+        adjuster_name: claimForm.adjuster_name || null,
+        adjuster_phone: claimForm.adjuster_phone || null,
+        adjuster_email: claimForm.adjuster_email || null,
+        date_of_loss: claimForm.date_of_loss || null,
+        status: claimForm.status || 'pending',
+        rcv: claimForm.rcv ? Number(claimForm.rcv) : null,
+        acv: claimForm.acv ? Number(claimForm.acv) : null,
+        deductible: claimForm.deductible ? Number(claimForm.deductible) : null,
+        depreciation: claimForm.depreciation ? Number(claimForm.depreciation) : null,
+        overhead_profit: claimForm.overhead_profit ? Number(claimForm.overhead_profit) : null,
+        notes: claimForm.notes || null,
+      };
+
+      if (claim?.id) {
+        const { data, error } = await (supabase as any)
+          .from('insurance_claims')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', claim.id)
+          .select()
+          .single();
+        if (error) throw error;
+        setClaim(data);
+        setClaimForm({ ...(data as any) });
+      } else {
+        const { data, error } = await (supabase as any)
+          .from('insurance_claims')
+          .insert(payload)
+          .select()
+          .single();
+        if (error) throw error;
+        setClaim(data);
+        setClaimForm({ ...(data as any) });
+      }
+      setEditingClaim(false);
+    } catch (err) {
+      console.error('Error saving claim:', err);
+      alert('Failed to save. Please try again.');
+    } finally {
+      setSavingClaim(false);
+    }
+  };
+
+  const openAddSupp = () => {
+    setEditingSupp(null);
+    setSuppForm({ description: '', amount_requested: '', amount_approved: '', status: 'pending', submitted_date: '', approved_date: '', notes: '' });
+    setShowAddSupp(true);
+  };
+
+  const openEditSupp = (supp: any) => {
+    setEditingSupp(supp);
+    setSuppForm({
+      description: supp.description || '',
+      amount_requested: supp.amount_requested ?? '',
+      amount_approved: supp.amount_approved ?? '',
+      status: supp.status || 'pending',
+      submitted_date: supp.submitted_date || '',
+      approved_date: supp.approved_date || '',
+      notes: supp.notes || '',
+    });
+    setShowAddSupp(true);
+  };
+
+  const saveSupp = async () => {
+    if (!claim?.id) return;
+    setSavingSupp(true);
+    try {
+      const payload: any = {
+        claim_id: claim.id,
+        company_id: profile?.company_id,
+        description: suppForm.description || null,
+        amount_requested: suppForm.amount_requested ? Number(suppForm.amount_requested) : null,
+        amount_approved: suppForm.amount_approved ? Number(suppForm.amount_approved) : null,
+        status: suppForm.status || 'pending',
+        submitted_date: suppForm.submitted_date || null,
+        approved_date: suppForm.approved_date || null,
+        notes: suppForm.notes || null,
+      };
+
+      if (editingSupp) {
+        const { data, error } = await (supabase as any)
+          .from('supplements')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', editingSupp.id)
+          .select()
+          .single();
+        if (error) throw error;
+        setSupplements(prev => prev.map(s => s.id === editingSupp.id ? data : s));
+      } else {
+        const { data, error } = await (supabase as any)
+          .from('supplements')
+          .insert(payload)
+          .select()
+          .single();
+        if (error) throw error;
+        setSupplements(prev => [...prev, data]);
+      }
+      setShowAddSupp(false);
+    } catch (err) {
+      console.error('Error saving supplement:', err);
+      alert('Failed to save supplement. Please try again.');
+    } finally {
+      setSavingSupp(false);
+    }
+  };
+
+  const deleteSupp = async (supp: any) => {
+    if (!window.confirm(`Delete supplement "${supp.description}"?`)) return;
+    await (supabase as any).from('supplements').delete().eq('id', supp.id);
+    setSupplements(prev => prev.filter(s => s.id !== supp.id));
+  };
+
+  const uploadInsuranceDoc = async (file: File) => {
+    setUploadingDoc(true);
+    try {
+      const ext = file.name.split('.').pop() || 'pdf';
+      const path = `${contact.id}/insurance/${Date.now()}.${ext}`;
+      const uploaded = await uploadToAvailableBucket(path, file, file.type);
+      const storedUrl = buildStoredDocumentUrl(uploaded.publicUrl, uploaded.bucket, uploaded.path);
+      await supabase.from('documents').insert({
+        contact_id: contact.id,
+        company_id: profile?.company_id,
+        name: file.name,
+        url: storedUrl,
+        type: 'insurance',
+        size: file.size,
+      } as any);
+      await loadClaim();
+    } catch (err) {
+      console.error('Error uploading insurance doc:', err);
+      alert('Failed to upload document. Please try again.');
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const deleteInsuranceDoc = async (doc: any) => {
+    if (!window.confirm(`Delete "${doc.name}"?`)) return;
+    try {
+      const { parseDocumentStorageLocation } = await import('../lib/documentAccess');
+      const loc = parseDocumentStorageLocation(String(doc.url || ''));
+      if (loc?.bucket && loc?.path) {
+        await supabase.storage.from(loc.bucket).remove([loc.path]);
+      }
+      await supabase.from('documents').delete().eq('id', doc.id);
+      setInsuranceDocs(prev => prev.filter(d => d.id !== doc.id));
+    } catch (err) {
+      console.error('Error deleting doc:', err);
+      alert('Failed to delete. Please try again.');
+    }
+  };
+
+  // Financial calculations
+  const rcv = Number(claim?.rcv || 0);
+  const acv = Number(claim?.acv || 0);
+  const deductible = Number(claim?.deductible || 0);
+  const depreciation = Number(claim?.depreciation || 0);
+  const overheadProfit = Number(claim?.overhead_profit || 0);
+  const approvedSuppsTotal = supplements
+    .filter(s => s.status === 'approved')
+    .reduce((sum, s) => sum + Number(s.amount_approved || 0), 0);
+  const pendingSuppsTotal = supplements
+    .filter(s => s.status === 'pending')
+    .reduce((sum, s) => sum + Number(s.amount_requested || 0), 0);
+  const netClaim = rcv > 0 ? rcv - deductible : 0;
+  const totalWithSupplements = netClaim + approvedSuppsTotal;
+
+  const statusColor = (s: string) => {
+    if (s === 'approved') return 'text-emerald-600 bg-emerald-50';
+    if (s === 'denied') return 'text-rose-600 bg-rose-50';
+    return 'text-amber-600 bg-amber-50';
+  };
+
+  if (claimLoading) {
+    return <div className="py-16 text-center text-slate-400 text-sm">Loading…</div>;
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="bg-amber-50 border border-amber-100 rounded-2xl p-5 space-y-3">
-        <div className="flex justify-between items-center">
-          <h4 className="text-xs font-bold text-amber-800 uppercase tracking-wider">HailTrace Data</h4>
-          <span className="text-[10px] font-bold text-amber-600 uppercase">Active Event</span>
+    <div className="space-y-5 pb-6">
+
+      {/* Financial Summary Card */}
+      {claim && (
+        <div className="card p-5 bg-primary text-white space-y-4">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Estimate Summary</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-[10px] text-white/60">RCV</p>
+              <p className="text-lg font-black">{rcv > 0 ? formatCurrency(rcv) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-white/60">ACV</p>
+              <p className="text-lg font-black">{acv > 0 ? formatCurrency(acv) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-white/60">Deductible</p>
+              <p className="text-base font-bold">{deductible > 0 ? formatCurrency(deductible) : '—'}</p>
+            </div>
+            <div>
+              <p className="text-[10px] text-white/60">Depreciation</p>
+              <p className="text-base font-bold">{depreciation > 0 ? formatCurrency(depreciation) : '—'}</p>
+            </div>
+            {overheadProfit > 0 && (
+              <div>
+                <p className="text-[10px] text-white/60">O&P</p>
+                <p className="text-base font-bold">{formatCurrency(overheadProfit)}</p>
+              </div>
+            )}
+            {approvedSuppsTotal > 0 && (
+              <div>
+                <p className="text-[10px] text-white/60">Approved Supplements</p>
+                <p className="text-base font-bold text-emerald-300">+{formatCurrency(approvedSuppsTotal)}</p>
+              </div>
+            )}
+          </div>
+          {netClaim > 0 && (
+            <div className="border-t border-white/20 pt-3">
+              <div className="flex justify-between items-center">
+                <p className="text-xs font-bold text-white/70">Net Claim (RCV − Deductible)</p>
+                <p className="text-base font-black">{formatCurrency(netClaim)}</p>
+              </div>
+              {approvedSuppsTotal > 0 && (
+                <div className="flex justify-between items-center mt-1">
+                  <p className="text-xs font-bold text-emerald-300">Total w/ Supplements</p>
+                  <p className="text-base font-black text-emerald-300">{formatCurrency(totalWithSupplements)}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        <p className="text-xs text-amber-700">1.75" Hail detected on May 14, 2025 at this location.</p>
-      </div>
+      )}
+
+      {/* Claim Info Card */}
       <div className="card p-5 space-y-4">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Insurance Policy</h3>
-        <div className="space-y-4">
-          <div>
-            <p className="text-[10px] font-bold text-slate-400 uppercase">Carrier</p>
-            <p className="text-sm font-bold text-primary">{contact.insurance_company || '\u2014'}</p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase">Claim #</p>
-              <p className="text-sm font-bold text-primary">{contact.claim_number || '\u2014'}</p>
-            </div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase">Deductible</p>
-              <p className="text-sm font-bold text-primary">{contact.deductible ? formatCurrency(contact.deductible) : '\u2014'}</p>
-            </div>
-          </div>
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Claim Information</h3>
+          {canEdit && (
+            <button
+              onClick={() => { if (!editingClaim) setClaimForm(claim ? { ...claim } : claimForm); setEditingClaim(v => !v); }}
+              className="text-xs font-bold text-accent"
+            >
+              {editingClaim ? 'Cancel' : claim ? 'Edit' : 'Add Claim'}
+            </button>
+          )}
         </div>
+
+        {editingClaim ? (
+          <div className="space-y-3">
+            {[
+              { label: 'Insurance Company', key: 'insurance_company', type: 'text' },
+              { label: 'Claim Number', key: 'claim_number', type: 'text' },
+              { label: 'Policy Number', key: 'policy_number', type: 'text' },
+              { label: 'Adjuster Name', key: 'adjuster_name', type: 'text' },
+              { label: 'Adjuster Phone', key: 'adjuster_phone', type: 'tel' },
+              { label: 'Adjuster Email', key: 'adjuster_email', type: 'email' },
+              { label: 'Date of Loss', key: 'date_of_loss', type: 'date' },
+            ].map(({ label, key, type }) => (
+              <div key={key}>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">{label}</p>
+                <input
+                  type={type}
+                  value={claimForm[key] || ''}
+                  onChange={e => setClaimForm((f: any) => ({ ...f, [key]: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                />
+              </div>
+            ))}
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Status</p>
+              <select
+                value={claimForm.status || 'pending'}
+                onChange={e => setClaimForm((f: any) => ({ ...f, status: e.target.value }))}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+              >
+                {['pending','filed','adjuster_scheduled','adjuster_completed','approved','supplement_filed','closed'].map(s => (
+                  <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                ))}
+              </select>
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mt-2">Insurance Estimate ($)</p>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'RCV', key: 'rcv' },
+                { label: 'ACV', key: 'acv' },
+                { label: 'Deductible', key: 'deductible' },
+                { label: 'Depreciation', key: 'depreciation' },
+                { label: 'Overhead & Profit', key: 'overhead_profit' },
+              ].map(({ label, key }) => (
+                <div key={key}>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">{label}</p>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={claimForm[key] ?? ''}
+                    onChange={e => setClaimForm((f: any) => ({ ...f, [key]: e.target.value }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                  />
+                </div>
+              ))}
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Notes</p>
+              <textarea
+                rows={3}
+                value={claimForm.notes || ''}
+                onChange={e => setClaimForm((f: any) => ({ ...f, notes: e.target.value }))}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary resize-none"
+              />
+            </div>
+            <button
+              onClick={saveClaim}
+              disabled={savingClaim}
+              className="w-full bg-accent text-white py-3 rounded-xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-transform disabled:opacity-50"
+            >
+              {savingClaim ? 'Saving…' : 'Save Claim'}
+            </button>
+          </div>
+        ) : claim ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'Insurance Company', value: claim.insurance_company },
+                { label: 'Claim #', value: claim.claim_number },
+                { label: 'Policy #', value: claim.policy_number },
+                { label: 'Date of Loss', value: claim.date_of_loss },
+              ].map(({ label, value }) => value ? (
+                <div key={label}>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase">{label}</p>
+                  <p className="text-sm font-bold text-primary">{value}</p>
+                </div>
+              ) : null)}
+            </div>
+            {(claim.adjuster_name || claim.adjuster_phone) && (
+              <div className="bg-slate-50 rounded-xl p-3 space-y-1">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Adjuster</p>
+                {claim.adjuster_name && <p className="text-sm font-bold text-primary">{claim.adjuster_name}</p>}
+                {claim.adjuster_phone && <p className="text-xs text-slate-500">{formatPhone(claim.adjuster_phone)}</p>}
+                {claim.adjuster_email && <p className="text-xs text-slate-500">{claim.adjuster_email}</p>}
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${statusColor(claim.status)}`}>
+                {(claim.status || 'pending').replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+              </span>
+            </div>
+            {claim.notes && <p className="text-xs text-slate-500 italic">{claim.notes}</p>}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">No insurance claim on file. Tap "Add Claim" to get started.</p>
+        )}
+      </div>
+
+      {/* Supplements Section */}
+      {claim && (
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Supplements</h3>
+              {pendingSuppsTotal > 0 && (
+                <p className="text-[10px] text-amber-600 font-bold">{formatCurrency(pendingSuppsTotal)} pending</p>
+              )}
+            </div>
+            {canEdit && !showAddSupp && (
+              <button onClick={openAddSupp} className="flex items-center gap-1 text-xs font-bold text-accent">
+                <Plus size={14} /> Add
+              </button>
+            )}
+          </div>
+
+          {showAddSupp && (
+            <div className="bg-slate-50 rounded-xl p-4 space-y-3">
+              <p className="text-xs font-bold text-primary">{editingSupp ? 'Edit Supplement' : 'New Supplement'}</p>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Description</p>
+                <input
+                  type="text"
+                  value={suppForm.description}
+                  onChange={e => setSuppForm((f: any) => ({ ...f, description: e.target.value }))}
+                  placeholder="e.g. Decking replacement"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Amount Requested ($)</p>
+                  <input
+                    type="number" inputMode="decimal" placeholder="0.00"
+                    value={suppForm.amount_requested}
+                    onChange={e => setSuppForm((f: any) => ({ ...f, amount_requested: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Amount Approved ($)</p>
+                  <input
+                    type="number" inputMode="decimal" placeholder="0.00"
+                    value={suppForm.amount_approved}
+                    onChange={e => setSuppForm((f: any) => ({ ...f, amount_approved: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Submitted Date</p>
+                  <input
+                    type="date"
+                    value={suppForm.submitted_date}
+                    onChange={e => setSuppForm((f: any) => ({ ...f, submitted_date: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                  />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Approved Date</p>
+                  <input
+                    type="date"
+                    value={suppForm.approved_date}
+                    onChange={e => setSuppForm((f: any) => ({ ...f, approved_date: e.target.value }))}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                  />
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Status</p>
+                <select
+                  value={suppForm.status}
+                  onChange={e => setSuppForm((f: any) => ({ ...f, status: e.target.value }))}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary"
+                >
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="denied">Denied</option>
+                </select>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Notes</p>
+                <textarea
+                  rows={2}
+                  value={suppForm.notes}
+                  onChange={e => setSuppForm((f: any) => ({ ...f, notes: e.target.value }))}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-primary resize-none"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={saveSupp}
+                  disabled={savingSupp}
+                  className="flex-1 bg-accent text-white py-2.5 rounded-xl text-xs font-bold disabled:opacity-50"
+                >
+                  {savingSupp ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => setShowAddSupp(false)}
+                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {supplements.length === 0 && !showAddSupp && (
+            <p className="text-sm text-slate-400">No supplements yet.</p>
+          )}
+
+          {supplements.map((supp) => (
+            <div key={supp.id} className="bg-slate-50 rounded-xl p-3 space-y-1">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-primary truncate">{supp.description || 'Supplement'}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${statusColor(supp.status)}`}>
+                      {(supp.status || 'pending').toUpperCase()}
+                    </span>
+                    {supp.amount_requested > 0 && (
+                      <span className="text-[10px] text-slate-500">Req: {formatCurrency(supp.amount_requested)}</span>
+                    )}
+                    {supp.amount_approved > 0 && (
+                      <span className="text-[10px] text-emerald-600 font-bold">Appr: {formatCurrency(supp.amount_approved)}</span>
+                    )}
+                  </div>
+                </div>
+                {canEdit && (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => openEditSupp(supp)} className="text-[10px] font-bold text-slate-400 px-2 py-1">Edit</button>
+                    <button onClick={() => deleteSupp(supp)} className="text-[10px] font-bold text-rose-400 px-1 py-1">✕</button>
+                  </div>
+                )}
+              </div>
+              {supp.notes && <p className="text-[10px] text-slate-400 italic">{supp.notes}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Insurance Documents */}
+      <div className="card p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Insurance Documents</h3>
+          {canEdit && (
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingDoc}
+              className="flex items-center gap-1 text-xs font-bold text-accent disabled:opacity-50"
+            >
+              <Plus size={14} /> {uploadingDoc ? 'Uploading…' : 'Upload'}
+            </button>
+          )}
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.pdf"
+          className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) uploadInsuranceDoc(f); e.target.value = ''; }}
+        />
+        {insuranceDocs.length === 0 ? (
+          <p className="text-sm text-slate-400">No insurance documents uploaded yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {insuranceDocs.map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between bg-slate-50 rounded-xl px-3 py-2.5">
+                <div className="flex items-center gap-3 min-w-0">
+                  <FileText size={18} className="text-amber-500 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-primary truncate max-w-[200px]">{doc.name}</p>
+                    <p className="text-[10px] text-slate-400">{(doc.size / 1024).toFixed(1)} KB</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <a
+                    href={doc.displayUrl || doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 text-slate-400 hover:text-accent"
+                  >
+                    <Download size={16} />
+                  </a>
+                  {canEdit && (
+                    <button onClick={() => deleteInsuranceDoc(doc)} className="p-2 text-slate-300 hover:text-rose-500">
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
