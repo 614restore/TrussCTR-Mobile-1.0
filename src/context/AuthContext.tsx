@@ -36,9 +36,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let isMounted = true;
 
+    // Hard deadline: if auth init hasn't finished in 10 s, unblock the app so
+    // the user reaches the login screen rather than staring at a spinner forever.
+    const initTimeout = window.setTimeout(() => {
+      if (isMounted) {
+        console.warn('[Auth] Init timed out — forcing loading=false');
+        setLoading(false);
+      }
+    }, 10000);
+
     const init = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        // Race getSession against a 8 s timeout so a hung token-refresh
+        // doesn't stall the entire cold start.
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<{ data: { session: null }; error: null }>(resolve =>
+            setTimeout(() => resolve({ data: { session: null }, error: null }), 8000)
+          ),
+        ]);
+
+        const { data, error } = sessionResult;
         if (error) console.error('Error getting session:', error);
         if (!isMounted) return;
 
@@ -56,6 +74,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } catch (err) {
         console.error('Auth init error:', err);
         if (isMounted) setLoading(false);
+      } finally {
+        clearTimeout(initTimeout);
       }
     };
 
@@ -118,6 +138,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       isMounted = false;
+      clearTimeout(initTimeout);
       subscription.unsubscribe();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
@@ -132,14 +153,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const cleanEmail = email?.trim();
 
+      // Wrap a Supabase query so it rejects after `ms` milliseconds
+      const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+        Promise.race([
+          promise,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('Profile query timed out')), ms)
+          ),
+        ]);
+
       // Fetch profile + company in a single round trip using a join
       const queryById = () =>
         supabase.from('profiles').select('*, companies(*)').eq('id', userId).maybeSingle();
 
-      let { data, error } = await queryById();
+      let { data, error } = await withTimeout(queryById(), 7000);
       if (error?.message?.includes('Lock was stolen')) {
         await new Promise((r) => setTimeout(r, 250));
-        ({ data, error } = await queryById());
+        ({ data, error } = await withTimeout(queryById(), 7000));
       }
 
       if (error) console.error('Error fetching profile by id:', error);
@@ -148,10 +178,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const queryByEmail = () =>
           supabase.from('profiles').select('*, companies(*)').eq('email', cleanEmail).maybeSingle();
 
-        let { data: emailData, error: emailError } = await queryByEmail();
+        let { data: emailData, error: emailError } = await withTimeout(queryByEmail(), 7000);
         if (emailError?.message?.includes('Lock was stolen')) {
           await new Promise((r) => setTimeout(r, 250));
-          ({ data: emailData, error: emailError } = await queryByEmail());
+          ({ data: emailData, error: emailError } = await withTimeout(queryByEmail(), 7000));
         }
         if (!emailError && emailData) data = emailData;
       }
