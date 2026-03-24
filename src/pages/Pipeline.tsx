@@ -15,7 +15,7 @@ const STAGES: StageConfig[] = [
   { statuses: ['new_lead', 'lead'], label: 'Leads', color: 'bg-blue-500' },
   { statuses: ['contacted'], label: 'Contacted', color: 'bg-sky-500' },
   { statuses: ['appointment_set', 'inspection_scheduled'], label: 'Appointment Set', color: 'bg-indigo-500' },
-  { statuses: ['inspected', 'inspection_complete'], label: 'Inspection', color: 'bg-amber-500' },
+  { statuses: ['inspected', 'inspection_complete'], label: 'Inspected', color: 'bg-amber-500' },
   { statuses: ['estimate_sent'], label: 'Follow Up / Negotiating', color: 'bg-orange-500' },
   { statuses: ['approved', 'signed_won'], label: 'Sold', color: 'bg-emerald-500' },
   { statuses: ['scheduled'], label: 'Scheduled', color: 'bg-teal-500' },

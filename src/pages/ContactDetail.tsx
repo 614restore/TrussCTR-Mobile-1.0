@@ -44,7 +44,7 @@ const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
   { value: 'contacted', label: 'Contacted' },
   { value: 'appointment_set', label: 'Appointment Set' },
   { value: 'inspection_scheduled', label: 'Inspection Scheduled' },
-  { value: 'inspected', label: 'Inspection' },
+  { value: 'inspected', label: 'Inspected' },
   { value: 'inspection_complete', label: 'Inspection Complete' },
   { value: 'estimate_sent', label: 'Follow Up / Negotiating' },
   { value: 'approved', label: 'Sold' },
