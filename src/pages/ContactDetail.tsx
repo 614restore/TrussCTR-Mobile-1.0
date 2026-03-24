@@ -11,16 +11,14 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
-import { getInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
 import { getNextPipelineStageLabel, getPipelineStageLabel } from '../lib/pipelineStages';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
 import { applyMention, extractMentionHandles, findActiveMentionQuery, getMentionSuggestions, getMentionTargets, parseNoteMentions, serializeNoteMentions, validateMentions } from '../lib/noteMentions';
 
-const MultiShotCamera = registerPlugin<{ open: (options?: { saveMode?: InspectionPhotoStorageMode }) => Promise<{ photos: string[] }> }>('MultiShotCamera');
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -1096,7 +1094,12 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     if (!contact?.id || !userId) return;
     setUploading(true);
     try {
-      let photosToUpload: string[] = [];
+      // Ensure camera permission is granted before opening the camera.
+      const perms = await Camera.requestPermissions({ permissions: ['camera'] });
+      if (perms.camera === 'denied') {
+        alert('Camera access was denied. Please enable it in Settings > Privacy > Camera.');
+        return;
+      }
 
       const photo = await Camera.getPhoto({
         quality: 90,
@@ -1104,22 +1107,22 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         resultType: CameraResultType.Uri,
         source: CameraSource.Camera,
       });
-      if (photo.webPath) photosToUpload = [photo.webPath];
 
-      for (const url of photosToUpload) {
-        // webPath from Camera.getPhoto is already fetchable; file:// paths need conversion
-        const webUrl = (url.startsWith('capacitor://') || url.startsWith('http'))
-          ? url
-          : Capacitor.convertFileSrc(url);
-        const resp = await fetch(webUrl);
-        if (!resp.ok) throw new Error(`Failed to read photo (${resp.status})`);
-        const blob = await resp.blob();
-        await uploadInspectionBlob(blob, url);
-      }
-    } catch (err) {
+      if (!photo.webPath) return;
+
+      // webPath from Camera.getPhoto is already fetchable; file:// paths need conversion
+      const webUrl = (photo.webPath.startsWith('capacitor://') || photo.webPath.startsWith('http'))
+        ? photo.webPath
+        : Capacitor.convertFileSrc(photo.webPath);
+      const resp = await fetch(webUrl);
+      if (!resp.ok) throw new Error(`Failed to read photo (${resp.status})`);
+      const blob = await resp.blob();
+      await uploadInspectionBlob(blob, photo.webPath);
+    } catch (err: any) {
+      // User cancelled — no alert needed
+      if (err?.message === 'User cancelled photos app' || err?.errorMessage === 'User cancelled photos app') return;
       console.error('Camera capture error:', err);
-      const message = (err as any)?.message || 'Camera capture failed.';
-      alert(`Camera capture failed. ${message}`);
+      alert(`Camera capture failed. ${err?.message || 'Unknown error'}`);
     } finally {
       setUploading(false);
     }
@@ -1422,7 +1425,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             </label>
           )}
           <div className="grid grid-cols-2 gap-3">
-            <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
+            {usesNativeInspectionCamera ? (
+              <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
+            ) : (
+              <label className="bg-primary text-white py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
+                Capture Photo
+                <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+              </label>
+            )}
             <label className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
               Choose from Library
               <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
