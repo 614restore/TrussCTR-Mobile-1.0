@@ -1098,26 +1098,13 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     try {
       let photosToUpload: string[] = [];
 
-      if (Capacitor.isPluginAvailable('MultiShotCamera')) {
-        try {
-          const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
-          photosToUpload = result?.photos || [];
-        } catch (pluginErr: any) {
-          console.warn('[Camera] MultiShotCamera failed, using fallback:', pluginErr?.message);
-          // fall through to single-shot below
-        }
-      }
-
-      if (photosToUpload.length === 0) {
-        // Standard single-shot fallback (always available)
-        const photo = await Camera.getPhoto({
-          quality: 90,
-          allowEditing: false,
-          resultType: CameraResultType.Uri,
-          source: CameraSource.Camera,
-        });
-        if (photo.webPath) photosToUpload = [photo.webPath];
-      }
+      const photo = await Camera.getPhoto({
+        quality: 90,
+        allowEditing: false,
+        resultType: CameraResultType.Uri,
+        source: CameraSource.Camera,
+      });
+      if (photo.webPath) photosToUpload = [photo.webPath];
 
       for (const url of photosToUpload) {
         // webPath from Camera.getPhoto is already fetchable; file:// paths need conversion
