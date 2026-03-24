@@ -168,8 +168,7 @@ export default function SmartInspection() {
       } catch { /* ignore if table unavailable */ }
 
       await handleAutoMove(id, 'submit_inspection');
-      alert('Inspection saved to timeline!');
-      navigate(-1);
+      navigate(`/contacts/${id}/photo-checklist`);
     } catch (err) {
       console.error(err);
     } finally {

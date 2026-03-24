@@ -20,7 +20,6 @@ export default function FieldTools() {
     { id: 'estimates', label: 'Estimates', icon: Calculator, color: 'bg-emerald-500', count: '—', path: '/estimates-list' },
     { id: 'crew_schedule', label: 'Crew Schedule', icon: HardHat, color: 'bg-indigo-500', count: '—', path: '/crew-schedule' },
     { id: 'documents', label: 'Documents', icon: FileText, color: 'bg-slate-800', count: '—', path: '/documents' },
-    { id: 'photo_checklist', label: 'Photo Checklist', icon: Camera, color: 'bg-rose-500', count: '—', path: '/photo-checklist' },
   ];
 
   useEffect(() => {

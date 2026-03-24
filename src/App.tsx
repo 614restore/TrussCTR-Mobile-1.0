@@ -118,7 +118,7 @@ function AppRoutes() {
             <Route path="/estimates/:id" element={<EstimateDetail />} />
             <Route path="/estimates/:id/sign" element={<EstimateSigner />} />
             <Route path="/documents" element={<Documents />} />
-            <Route path="/photo-checklist" element={<PhotoChecklist />} />
+            <Route path="/contacts/:id/photo-checklist" element={<PhotoChecklist />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/help" element={<HelpSupport />} />
             <Route path="/notifications" element={<Notifications />} />
