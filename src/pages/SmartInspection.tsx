@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, ArrowLeft, CheckCircle2, Send, Plus, Building2, DoorOpen } from 'lucide-react';
+import { Camera, ArrowLeft, CheckCircle2, Send, Plus, Building2 } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -199,8 +199,8 @@ export default function SmartInspection() {
 
         {step === 'photos' && (
           <>
-            {/* Tab row — buildings + Indoor Photos */}
-            <div className="flex items-center gap-2 px-4 pt-4 pb-1 overflow-x-auto scrollbar-none">
+            {/* Row 1: exterior building tabs */}
+            <div className="flex items-center gap-2 px-4 pt-4 overflow-x-auto scrollbar-none">
               {buildings.map((name, idx) => (
                 <button key={idx} onClick={() => switchBuilding(idx)}
                   className={cn(
@@ -213,29 +213,33 @@ export default function SmartInspection() {
                   {name}
                 </button>
               ))}
-
               {buildings.length < MAX_BUILDINGS && (
                 <button onClick={addBuilding}
                   className="flex-shrink-0 flex items-center gap-1 px-3 py-2 rounded-full text-xs font-bold border border-dashed border-white/30 text-slate-500 transition-all">
                   <Plus size={12} /> Add Building
                 </button>
               )}
+            </div>
 
-              {/* Divider */}
-              <div className="flex-shrink-0 w-px h-5 bg-white/10" />
-
-              {/* Indoor Photos tab */}
+            {/* Row 2: Indoor Photos — always fully visible */}
+            <div className="px-4 pt-2">
               <button onClick={switchToIndoor}
                 className={cn(
-                  'flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-bold border transition-all',
+                  'w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-xs font-bold border transition-all',
                   showIndoor
                     ? 'bg-indigo-500 border-indigo-400 text-white'
-                    : 'bg-slate-800 border-white/20 text-slate-400'
+                    : 'bg-slate-800 border-white/10 text-slate-400'
                 )}>
-                <DoorOpen size={12} />
-                Indoor
-                {indoorPhotos > 0 && !showIndoor && (
-                  <span className="ml-0.5 bg-indigo-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-[9px] font-black">{indoorPhotos}</span>
+                <span className="flex items-center gap-2">
+                  <Camera size={13} />
+                  Indoor Photos
+                </span>
+                {indoorPhotos > 0 ? (
+                  <span className={cn('text-[10px] font-black', showIndoor ? 'text-indigo-200' : 'text-indigo-400')}>
+                    {indoorPhotos} photo{indoorPhotos !== 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-slate-600">Rooms, ceilings, walls</span>
                 )}
               </button>
             </div>
@@ -387,7 +391,7 @@ export default function SmartInspection() {
                     'w-16 h-16 rounded-full flex items-center justify-center shadow-lg text-white',
                     showIndoor ? 'bg-indigo-500' : 'bg-accent'
                   )}>
-                    {showIndoor ? <DoorOpen size={28} /> : <Camera size={28} />}
+                    <Camera size={28} />
                   </div>
                   <span className="text-sm font-bold text-slate-500">
                     Tap to photograph{' '}

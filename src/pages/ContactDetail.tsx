@@ -1442,11 +1442,11 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Photos</h3>
             <button onClick={() => setStep('report')} className="text-xs font-bold text-accent">Skip to Report</button>
           </div>
-          {/* Building + Indoor tabs */}
+          {/* Row 1: exterior building tabs */}
           <div className="flex items-center gap-2 overflow-x-auto scrollbar-none -mx-1 px-1">
             {buildings.map((name, idx) => (
               <button key={idx} onClick={() => switchBuilding(idx)}
-                className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${!showIndoor && activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+                className={`flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${!showIndoor && activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
                 {name}
               </button>
             ))}
@@ -1456,17 +1456,25 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
                 + Add Building
               </button>
             )}
-            <div className="flex-shrink-0 w-px h-4 bg-slate-200" />
-            <button onClick={switchToIndoor}
-              className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${showIndoor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
-              🏠 Indoor
-              {photos.filter(p => p.elevation.startsWith(INDOOR_PREFIX)).length > 0 && !showIndoor && (
-                <span className="ml-0.5 text-[9px] text-indigo-500 font-black">
-                  ({photos.filter(p => p.elevation.startsWith(INDOOR_PREFIX)).length})
-                </span>
-              )}
-            </button>
           </div>
+
+          {/* Row 2: Indoor Photos — always fully visible */}
+          {(() => {
+            const indoorCount = photos.filter(p => p.elevation.startsWith(INDOOR_PREFIX)).length;
+            return (
+              <button onClick={switchToIndoor}
+                className={`w-full flex items-center justify-between px-4 py-2.5 rounded-2xl text-xs font-bold border transition-all ${showIndoor ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+                <span>🏠 Indoor Photos</span>
+                {indoorCount > 0 ? (
+                  <span className={`text-[10px] font-black ${showIndoor ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                    {indoorCount} photo{indoorCount !== 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-slate-400">Rooms, ceilings, walls</span>
+                )}
+              </button>
+            );
+          })()}
 
           {/* Exterior elevation grid */}
           {!showIndoor && (
