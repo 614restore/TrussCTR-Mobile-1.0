@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext';
 import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
 import { getInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
@@ -1095,11 +1096,34 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     if (!contact?.id || !userId) return;
     setUploading(true);
     try {
-      const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
-      const photosToUpload = result?.photos || [];
+      let photosToUpload: string[] = [];
+
+      try {
+        // Custom multi-shot plugin (requires native iOS rebuild to activate)
+        const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
+        photosToUpload = result?.photos || [];
+      } catch (pluginErr: any) {
+        // Plugin not yet compiled into the native binary — fall back to the
+        // official @capacitor/camera for single-shot capture.
+        const msg: string = pluginErr?.message || '';
+        if (msg.toLowerCase().includes('not implemented') || msg.toLowerCase().includes('unimplemented')) {
+          const photo = await Camera.getPhoto({
+            quality: 90,
+            allowEditing: false,
+            resultType: CameraResultType.Uri,
+            source: CameraSource.Camera,
+          });
+          if (photo.webPath) photosToUpload = [photo.webPath];
+        } else {
+          throw pluginErr;
+        }
+      }
+
       for (const url of photosToUpload) {
-        // Convert file:// path → capacitor://localhost/... so WKWebView can fetch it
-        const webUrl = Capacitor.convertFileSrc(url);
+        // webPath from Camera.getPhoto is already fetchable; file:// paths need conversion
+        const webUrl = (url.startsWith('capacitor://') || url.startsWith('http'))
+          ? url
+          : Capacitor.convertFileSrc(url);
         const resp = await fetch(webUrl);
         if (!resp.ok) throw new Error(`Failed to read photo (${resp.status})`);
         const blob = await resp.blob();
