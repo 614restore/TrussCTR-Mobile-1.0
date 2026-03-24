@@ -1,18 +1,15 @@
 import React, { useState } from 'react';
-import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle } from 'lucide-react';
+import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, requestPasswordChange } = useAuth();
   const [inspectionPhotoStorageMode, setMode] = useState<InspectionPhotoStorageMode>(() => getInspectionPhotoStorageMode());
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('notif_enabled') !== 'false');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
-  const [pwResetSent, setPwResetSent] = useState(false);
-  const [pwResetLoading, setPwResetLoading] = useState(false);
 
   const handleToggleNotifications = () => {
     const next = !notificationsEnabled;
@@ -27,19 +24,9 @@ export default function Settings() {
     document.documentElement.classList.toggle('dark', next);
   };
 
-  const handleChangePassword = async () => {
-    if (!user?.email || pwResetLoading) return;
-    setPwResetLoading(true);
-    try {
-      await supabase.auth.resetPasswordForEmail(user.email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      setPwResetSent(true);
-    } catch (err) {
-      console.error('Password reset error:', err);
-    } finally {
-      setPwResetLoading(false);
-    }
+  const handleChangePassword = () => {
+    requestPasswordChange();
+    navigate('/reset-password');
   };
 
   return (
@@ -139,18 +126,13 @@ export default function Settings() {
           <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Account</h2>
           <div className="card divide-y divide-slate-50">
             {/* Change Password */}
-            <button onClick={handleChangePassword} disabled={pwResetLoading || pwResetSent} className="w-full p-4 flex items-center justify-between active:bg-slate-50 transition-colors disabled:opacity-60">
+            <button onClick={handleChangePassword} className="w-full p-4 flex items-center justify-between active:bg-slate-50 transition-colors">
               <div className="flex items-center gap-4">
                 <KeyRound size={20} className="text-rose-500" />
-                <span className="text-sm font-bold text-primary">
-                  {pwResetSent ? 'Reset email sent!' : pwResetLoading ? 'Sending...' : 'Change Password'}
-                </span>
+                <span className="text-sm font-bold text-primary">Change Password</span>
               </div>
-              {pwResetSent ? <CheckCircle size={18} className="text-emerald-500" /> : <ChevronRight size={16} className="text-slate-300" />}
+              <ChevronRight size={16} className="text-slate-300" />
             </button>
-            {pwResetSent && (
-              <p className="px-4 pb-3 text-xs text-slate-400">Check {user?.email} for a password reset link.</p>
-            )}
             {/* Privacy Policy */}
             <button onClick={() => navigate('/help')} className="w-full p-4 flex items-center justify-between active:bg-slate-50 transition-colors">
               <div className="flex items-center gap-4">
