@@ -161,8 +161,8 @@ export default function CalendarPage() {
 
       // Advance contact pipeline status when a key step is scheduled
       const STATUS_ADVANCEMENT: Record<string, { from: string[]; to: string }> = {
-        inspection: { from: ['new_lead', 'lead', 'contacted'], to: 'appointment_set' },
-        build:      { from: ['approved', 'signed_won'],        to: 'scheduled' },
+        inspection: { from: ['prospect', 'lead'], to: 'appt_set' },
+        build:      { from: ['approved', 'signed'],  to: 'ordering_material' },
       };
       const advancement = STATUS_ADVANCEMENT[nextStepParam];
       if (advancement && saveContactId) {

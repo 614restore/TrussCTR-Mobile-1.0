@@ -33,25 +33,31 @@ const TABS = [
 
 // Ordered pipeline stages for progress bar (main path only)
 const STAGES: CustomerStatus[] = [
-  'lead', 'contacted', 'appointment_set', 'inspected', 'estimate_sent',
-  'approved', 'scheduled', 'in_progress', 'completed', 'paid',
+  'prospect', 'lead', 'appt_set', 'inspection_completed', 'estimate_sent',
+  'approved', 'signed', 'ordering_material', 'in_progress', 'completed',
 ];
 
 // All valid statuses available in the status dropdown (includes aliases and terminal stages)
 const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
-  { value: 'lead', label: 'Lead' },
-  { value: 'contacted', label: 'Contacted' },
-  { value: 'appointment_set', label: 'Appointment Set' },
-  { value: 'inspection_scheduled', label: 'Inspection Scheduled' },
-  { value: 'inspected', label: 'Inspected' },
-  { value: 'inspection_complete', label: 'Inspection Complete' },
-  { value: 'estimate_sent', label: 'Follow Up / Negotiating' },
-  { value: 'approved', label: 'Sold' },
-  { value: 'signed_won', label: 'Signed / Won' },
-  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'prospect', label: 'New Lead' },
+  { value: 'lead', label: 'Contacted / Qualifying' },
+  { value: 'appt_set', label: 'Appointment Set' },
+  { value: 'claim_filed', label: 'Claim Filed' },
+  { value: 'adjuster_scheduled', label: 'Adjuster Scheduled' },
+  { value: 'inspection_completed', label: 'Inspected' },
+  { value: 'supplement_filed', label: 'Supplement Filed' },
+  { value: 'estimating', label: 'Estimating' },
+  { value: 'estimate_sent', label: 'Estimate Sent' },
+  { value: 'contingency', label: 'Contingency' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'signed', label: 'Signed / Won' },
+  { value: 'ordering_material', label: 'Ordering Material' },
   { value: 'in_progress', label: 'In Progress' },
+  { value: 'build_phase', label: 'Build Phase' },
+  { value: 'cleanup', label: 'Cleanup' },
+  { value: 'invoicing', label: 'Invoicing' },
+  { value: 'pending_payment', label: 'Pending Payment' },
   { value: 'completed', label: 'Completed' },
-  { value: 'paid', label: 'Paid' },
   { value: 'retail', label: 'Retail' },
   { value: 'lost', label: 'Lost' },
 ];
@@ -59,10 +65,15 @@ const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
 // Normalize alias statuses to their canonical stage for progress bar positioning
 function normalizeStatusForProgress(status: string): CustomerStatus {
   const aliases: Record<string, CustomerStatus> = {
-    new_lead: 'lead',
-    inspection_scheduled: 'appointment_set',
-    inspection_complete: 'inspected',
-    signed_won: 'approved',
+    claim_filed: 'appt_set',
+    adjuster_scheduled: 'appt_set',
+    supplement_filed: 'inspection_completed',
+    estimating: 'estimate_sent',
+    contingency: 'approved',
+    build_phase: 'in_progress',
+    cleanup: 'in_progress',
+    invoicing: 'completed',
+    pending_payment: 'completed',
     retail: 'approved',
     lost: 'completed',
   };
@@ -192,9 +203,9 @@ export default function ContactDetail() {
   // Handle Call / SMS / Email actions — auto-advance lead → contacted on first outreach
   const handleContactAction = async (type: 'call' | 'sms' | 'email', value: string | null) => {
     if (!value) return;
-    if (['new_lead', 'lead'].includes(contact.status as string) && user?.id) {
+    if (['prospect', 'lead'].includes(contact.status as string) && user?.id) {
       await advanceStatus(
-        'contacted',
+        'lead',
         `Stage updated: ${(contact.status as string).replace(/_/g, ' ')} → contacted (outbound ${type})`,
       );
     }
@@ -403,7 +414,7 @@ export default function ContactDetail() {
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
-            const inspectionDone = tab.id === 'inspection' && ['inspection_complete', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'].includes(contact.status);
+            const inspectionDone = tab.id === 'inspection' && ['inspection_completed', 'supplement_filed', 'estimating', 'estimate_sent', 'contingency', 'approved', 'signed', 'ordering_material', 'in_progress', 'build_phase', 'cleanup', 'invoicing', 'pending_payment', 'completed'].includes(contact.status);
             return (
               <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
                 <Icon size={18} />
@@ -592,7 +603,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
     if (!contact?.id) return;
 
     const reachedStatuses = new Set<string>();
-    const statusOrder: CustomerStatus[] = ['appointment_set', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'];
+    const statusOrder: CustomerStatus[] = ['appt_set', 'inspection_completed', 'estimate_sent', 'approved', 'ordering_material', 'in_progress', 'completed'];
     const currentIndex = statusOrder.indexOf(normalizeStatusForProgress(contact.status) as CustomerStatus);
     if (currentIndex >= 0) {
       for (let index = 0; index <= currentIndex; index += 1) {
@@ -604,13 +615,13 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
     const statusTimestamp = contact.status_changed_at || contact.updated_at || new Date().toISOString();
     const finalPaymentTimestamp = contact.final_payment_date || statusTimestamp;
 
-    if (reachedStatuses.has('appointment_set')) {
+    if (reachedStatuses.has('appt_set')) {
       nextSchedule = updateScheduleMilestone(nextSchedule, 'inspection', {
         date: nextSchedule.milestones.find((item) => item.id === 'inspection')?.date || statusTimestamp,
       });
     }
 
-    if (reachedStatuses.has('inspected')) {
+    if (reachedStatuses.has('inspection_completed')) {
       const inspectionMilestone = nextSchedule.milestones.find((item) => item.id === 'inspection');
       nextSchedule = updateScheduleMilestone(nextSchedule, 'inspection', {
         date: inspectionMilestone?.date || statusTimestamp,
@@ -618,7 +629,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
       });
     }
 
-    if (reachedStatuses.has('scheduled')) {
+    if (reachedStatuses.has('ordering_material')) {
       nextSchedule = updateScheduleMilestone(nextSchedule, 'build', {
         date: nextSchedule.milestones.find((item) => item.id === 'build')?.date || statusTimestamp,
       });
@@ -645,9 +656,6 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
         date: nextSchedule.milestones.find((item) => item.id === 'coc')?.date || statusTimestamp,
         completedAt: nextSchedule.milestones.find((item) => item.id === 'coc')?.completedAt || statusTimestamp,
       });
-    }
-
-    if (reachedStatuses.has('paid')) {
       nextSchedule = updateScheduleMilestone(nextSchedule, 'pick_up_check', {
         date: nextSchedule.milestones.find((item) => item.id === 'pick_up_check')?.date || finalPaymentTimestamp,
         completedAt: nextSchedule.milestones.find((item) => item.id === 'pick_up_check')?.completedAt || finalPaymentTimestamp,
@@ -695,30 +703,32 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   } => {
     const id = contact.id;
     switch (status) {
-      case 'lead':
+      case 'prospect':
         return {
           route: `/calendar?contactId=${id}&action=schedule&nextStep=inspection&label=First+Contact`,
           icon: Calendar,
           cta: 'Schedule First Contact',
           detail: 'Open calendar to book a call or site visit with this lead.',
         };
-      case 'contacted':
+      case 'lead':
         return {
           route: `/calendar?contactId=${id}&action=schedule&nextStep=inspection&label=Inspection`,
           icon: Calendar,
           cta: 'Book Appointment',
           detail: 'Open calendar to schedule the inspection appointment.',
         };
-      case 'appointment_set':
-      case 'inspection_scheduled':
+      case 'appt_set':
+      case 'claim_filed':
+      case 'adjuster_scheduled':
         return {
           route: `/contacts/${id}/inspection`,
           icon: ClipboardList,
           cta: 'Start Inspection',
           detail: 'Open the smart inspection checklist to document damage.',
         };
-      case 'inspected':
-      case 'inspection_complete':
+      case 'inspection_completed':
+      case 'supplement_filed':
+      case 'estimating':
         return {
           route: `/contacts/${id}/estimate`,
           icon: FileText,
@@ -726,6 +736,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
           detail: 'Open the estimator to create and send a quote.',
         };
       case 'estimate_sent':
+      case 'contingency':
         return {
           route: `/contacts/${id}/documents`,
           icon: PenLine,
@@ -733,14 +744,14 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
           detail: 'Open documents to collect the customer\'s signature.',
         };
       case 'approved':
-      case 'signed_won':
+      case 'signed':
         return {
           route: `/calendar?contactId=${id}&action=schedule&nextStep=build&label=Schedule+Job`,
           icon: Calendar,
           cta: 'Schedule the Job',
           detail: 'Open calendar to book crew and set the work start date.',
         };
-      case 'scheduled':
+      case 'ordering_material':
         return {
           route: `/calendar?contactId=${id}&action=schedule&nextStep=build&label=Job+Date`,
           icon: Calendar,
@@ -1346,16 +1357,10 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         direction: 'outbound',
       } as any);
       if (error) throw error;
-      // Try to move pipeline using web-app status; fallback to mobile status if enum blocks it.
       const now = new Date().toISOString();
-      const { error: statusError } = await (supabase.from('contacts') as any)
-        .update({ status: 'inspection_complete', status_changed_at: now })
+      await (supabase.from('contacts') as any)
+        .update({ status: 'inspection_completed', status_changed_at: now })
         .eq('id', contact.id);
-      if (statusError) {
-        await (supabase.from('contacts') as any)
-          .update({ status: 'inspected', status_changed_at: now })
-          .eq('id', contact.id);
-      }
       try {
         const { data } = await (supabase.from('inspections') as any).upsert({
           contact_id: contact.id,

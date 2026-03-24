@@ -12,27 +12,39 @@ import { getPipelineStageLabel } from '../lib/pipelineStages';
 import type { Database } from '../types/supabase';
 
 const STAGE_COLORS: Record<string, string> = {
+  prospect: 'bg-slate-400',
   lead: 'bg-blue-500',
-  contacted: 'bg-sky-500',
-  appointment_set: 'bg-indigo-500',
-  inspected: 'bg-amber-500',
+  appt_set: 'bg-indigo-500',
+  claim_filed: 'bg-sky-500',
+  adjuster_scheduled: 'bg-cyan-500',
+  inspection_completed: 'bg-amber-500',
+  supplement_filed: 'bg-yellow-500',
+  estimating: 'bg-orange-400',
   estimate_sent: 'bg-orange-500',
+  contingency: 'bg-purple-400',
   approved: 'bg-emerald-500',
-  scheduled: 'bg-teal-500',
+  signed: 'bg-green-600',
+  ordering_material: 'bg-teal-500',
   in_progress: 'bg-primary',
+  build_phase: 'bg-primary',
+  cleanup: 'bg-slate-500',
+  invoicing: 'bg-violet-500',
+  pending_payment: 'bg-violet-500',
   completed: 'bg-slate-800',
+  lost: 'bg-red-400',
+  retail: 'bg-purple-500',
 };
 
 const PIPELINE_STAGES = [
-  { id: 'lead',            label: 'Leads',       color: 'bg-blue-500'   },
-  { id: 'contacted',       label: 'Contacted',   color: 'bg-sky-500'    },
-  { id: 'appointment_set', label: 'Appt Set',    color: 'bg-indigo-500' },
-  { id: 'inspected',       label: 'Inspected',   color: 'bg-amber-500'  },
-  { id: 'estimate_sent',   label: 'Est. Sent',   color: 'bg-orange-500' },
-  { id: 'approved',        label: 'Approved',    color: 'bg-emerald-500'},
-  { id: 'scheduled',       label: 'Scheduled',   color: 'bg-teal-500'   },
-  { id: 'in_progress',     label: 'In Progress', color: 'bg-primary'    },
-  { id: 'completed',       label: 'Completed',   color: 'bg-slate-800'  },
+  { id: 'prospect',             label: 'New Lead',    color: 'bg-slate-400'  },
+  { id: 'lead',                 label: 'Contacted',   color: 'bg-blue-500'   },
+  { id: 'appt_set',             label: 'Appt Set',    color: 'bg-indigo-500' },
+  { id: 'inspection_completed', label: 'Inspected',   color: 'bg-amber-500'  },
+  { id: 'estimate_sent',        label: 'Est. Sent',   color: 'bg-orange-500' },
+  { id: 'approved',             label: 'Approved',    color: 'bg-emerald-500'},
+  { id: 'ordering_material',    label: 'Ordering',    color: 'bg-teal-500'   },
+  { id: 'in_progress',          label: 'In Progress', color: 'bg-primary'    },
+  { id: 'completed',            label: 'Completed',   color: 'bg-slate-800'  },
 ];
 type ContactRow = Database['public']['Tables']['contacts']['Row'];
 type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
@@ -103,10 +115,10 @@ export default function Dashboard() {
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
       const pipelineValue = (contacts as any[]).reduce((sum, c) => sum + (c.project_value || 0), 0);
-      const openLeads = (contacts as any[]).filter(c => c.status === 'lead').length;
-      const jobsInProgress = (contacts as any[]).filter(c => c.status === 'in_progress').length;
+      const openLeads = (contacts as any[]).filter(c => c.status === 'prospect' || c.status === 'lead').length;
+      const jobsInProgress = (contacts as any[]).filter(c => c.status === 'in_progress' || c.status === 'build_phase').length;
       const revenueMTD = (contacts as any[])
-        .filter(c => (c.status === 'paid' || c.status === 'completed') && new Date(c.updated_at) >= firstDayOfMonth)
+        .filter(c => c.status === 'completed' && new Date(c.updated_at) >= firstDayOfMonth)
         .reduce((sum, c) => sum + (c.project_value || 0), 0);
 
       setStats({ pipelineValue, openLeads, jobsInProgress, revenueMTD });
