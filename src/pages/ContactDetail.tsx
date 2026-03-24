@@ -2883,7 +2883,7 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
 
 function InsuranceTab({ contact }: { contact: any }) {
   const { profile } = useAuth();
-  const canEdit = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager';
+  const canEdit = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager' || profile?.role === 'sales';
 
   // Claim state
   const [claim, setClaim] = useState<any | null>(null);
