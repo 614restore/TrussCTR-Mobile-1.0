@@ -806,12 +806,19 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Current Status</h3>
           <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">{getPipelineStageLabel(contact.status)}</span>
         </div>
-        <div className="flex gap-1">
-          {STAGES.map((stage, i) => {
-            const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status));
-            return <div key={stage} className={`h-1.5 flex-1 rounded-full ${i <= currentIndex ? 'bg-accent' : 'bg-slate-100'}`} />;
-          })}
-        </div>
+        {(() => {
+          const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact?.status ?? ''));
+          return (
+            <div className="flex gap-1">
+              {STAGES.map((stage, i) => (
+                <div
+                  key={stage}
+                  className={`h-2 flex-1 rounded-full ${i <= currentIndex ? 'bg-accent' : 'bg-slate-200'}`}
+                />
+              ))}
+            </div>
+          );
+        })()}
       </div>
       <div className="card p-5 space-y-4">
         <button
