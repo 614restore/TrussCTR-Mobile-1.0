@@ -31,10 +31,10 @@ const TABS = [
   { id: 'insurance', label: 'Insurance', icon: Shield },
 ];
 
-// Ordered pipeline stages for progress bar (main path only)
+// Ordered pipeline stages for progress bar — mirrors the Pipeline board column order
 const STAGES: CustomerStatus[] = [
-  'prospect', 'lead', 'appt_set', 'inspection_completed', 'estimate_sent',
-  'approved', 'signed', 'ordering_material', 'in_progress', 'completed',
+  'prospect', 'lead', 'appt_set', 'inspection_completed', 'estimating',
+  'estimate_sent', 'approved', 'signed', 'ordering_material', 'in_progress', 'invoicing', 'completed',
 ];
 
 // All valid statuses available in the status dropdown (includes aliases and terminal stages)
@@ -62,20 +62,18 @@ const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
   { value: 'lost', label: 'Lost' },
 ];
 
-// Normalize alias statuses to their canonical stage for progress bar positioning
+// Normalize side-track / alias statuses to their nearest main-path stage for progress positioning
 function normalizeStatusForProgress(status: string): CustomerStatus {
   const aliases: Record<string, CustomerStatus> = {
-    claim_filed: 'appt_set',
+    claim_filed:        'appt_set',
     adjuster_scheduled: 'appt_set',
-    supplement_filed: 'inspection_completed',
-    estimating: 'estimate_sent',
-    contingency: 'approved',
-    build_phase: 'in_progress',
-    cleanup: 'in_progress',
-    invoicing: 'completed',
-    pending_payment: 'completed',
-    retail: 'approved',
-    lost: 'completed',
+    supplement_filed:   'inspection_completed',
+    contingency:        'estimate_sent',
+    build_phase:        'in_progress',
+    cleanup:            'in_progress',
+    pending_payment:    'invoicing',
+    retail:             'approved',
+    lost:               'completed',
   };
   return (aliases[status] as CustomerStatus) ?? (status as CustomerStatus);
 }
@@ -759,11 +757,27 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
           detail: 'Review crew assignments and job timeline.',
         };
       case 'in_progress':
+      case 'build_phase':
         return {
           route: `/contacts/${id}/inspection`,
           icon: Wrench,
           cta: 'Update Job Progress',
           detail: 'Log work completed and capture clean-up photos.',
+        };
+      case 'cleanup':
+        return {
+          route: `/contacts/${id}/inspection`,
+          icon: Wrench,
+          cta: 'Finish Cleanup',
+          detail: 'Document final cleanup and capture completion photos.',
+        };
+      case 'invoicing':
+      case 'pending_payment':
+        return {
+          route: `/contacts/${id}/documents`,
+          icon: DollarSign,
+          cta: 'Send Invoice',
+          detail: 'Open documents to send or follow up on the invoice.',
         };
       case 'completed':
         return {
@@ -790,7 +804,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
       <div className="card p-5 space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Current Status</h3>
-          <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">{contact.status.replace(/_/g, ' ')}</span>
+          <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">{getPipelineStageLabel(contact.status)}</span>
         </div>
         <div className="flex gap-1">
           {STAGES.map((stage, i) => {
