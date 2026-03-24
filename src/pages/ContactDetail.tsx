@@ -1098,14 +1098,18 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     try {
       let photosToUpload: string[] = [];
 
-      try {
-        // Custom multi-shot plugin — falls back automatically if unavailable
-        const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
-        photosToUpload = result?.photos || [];
-      } catch (pluginErr: any) {
-        // Plugin not available / not yet compiled in — fall back to the
-        // standard @capacitor/camera for single-shot capture.
-        console.warn('[Camera] MultiShotCamera unavailable, using fallback:', pluginErr?.message);
+      if (Capacitor.isPluginAvailable('MultiShotCamera')) {
+        try {
+          const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
+          photosToUpload = result?.photos || [];
+        } catch (pluginErr: any) {
+          console.warn('[Camera] MultiShotCamera failed, using fallback:', pluginErr?.message);
+          // fall through to single-shot below
+        }
+      }
+
+      if (photosToUpload.length === 0) {
+        // Standard single-shot fallback (always available)
         const photo = await Camera.getPhoto({
           quality: 90,
           allowEditing: false,
