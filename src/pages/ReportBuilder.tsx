@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, CheckCircle2, Download, Loader2, Share2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Download, Loader2, Share2, GitMerge, X, Plus } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -13,6 +13,13 @@ type PhotoDocument = {
   url: string;
   displayUrl?: string;
   created_at?: string;
+};
+
+type PhotoPair = {
+  id: string;
+  beforePhotoId: string;
+  afterPhotoId: string;
+  label: string;
 };
 
 async function blobToDataUrl(blob: Blob) {
@@ -51,6 +58,7 @@ async function buildBeforeAfterReportPdf({
   projectStatus,
   beforePhotos,
   afterPhotos,
+  pairedPhotos,
 }: {
   companyName: string;
   companyAddress: string;
@@ -65,6 +73,7 @@ async function buildBeforeAfterReportPdf({
   projectStatus: string;
   beforePhotos: Array<{ name: string; dataUrl: string }>;
   afterPhotos: Array<{ name: string; dataUrl: string }>;
+  pairedPhotos: Array<{ label: string; before: { name: string; dataUrl: string }; after: { name: string; dataUrl: string } }>;
 }) {
   const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -188,6 +197,51 @@ async function buildBeforeAfterReportPdf({
   paragraphBlock('Progress Summary', progressSummary);
   paragraphBlock('Completion / Next-Step Summary', completionSummary);
 
+  if (pairedPhotos.length > 0) {
+    sectionTitle('Side-by-Side Comparisons', `${pairedPhotos.length} matched pair${pairedPhotos.length === 1 ? '' : 's'}`);
+    const halfW = (width - 4) / 2;
+    const imgH = 46;
+    const cardH = imgH + 22;
+    for (const pair of pairedPhotos) {
+      ensureSpace(cardH + 14);
+      // Before card
+      pdf.setFillColor(255, 251, 235);
+      pdf.roundedRect(left, y, halfW, cardH, 3, 3, 'F');
+      pdf.setTextColor(180, 83, 9);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(7);
+      pdf.text('BEFORE', left + 3, y + 5);
+      pdf.addImage(pair.before.dataUrl, pair.before.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG', left + 2, y + 7, halfW - 4, imgH, undefined, 'FAST');
+      pdf.setTextColor(51, 65, 85);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7.5);
+      const beforeLabel = pdf.splitTextToSize(pair.before.name, halfW - 6);
+      pdf.text(beforeLabel, left + 3, y + imgH + 10);
+      // After card
+      const rx = left + halfW + 4;
+      pdf.setFillColor(240, 253, 244);
+      pdf.roundedRect(rx, y, halfW, cardH, 3, 3, 'F');
+      pdf.setTextColor(21, 128, 61);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(7);
+      pdf.text('AFTER', rx + 3, y + 5);
+      pdf.addImage(pair.after.dataUrl, pair.after.dataUrl.startsWith('data:image/png') ? 'PNG' : 'JPEG', rx + 2, y + 7, halfW - 4, imgH, undefined, 'FAST');
+      pdf.setTextColor(51, 65, 85);
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(7.5);
+      const afterLabel = pdf.splitTextToSize(pair.after.name, halfW - 6);
+      pdf.text(afterLabel, rx + 3, y + imgH + 10);
+      y += cardH + 4;
+      // Pair label
+      pdf.setTextColor(100, 116, 139);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setFontSize(8);
+      pdf.text(pair.label, left, y);
+      y += 8;
+    }
+    y += 4;
+  }
+
   photoSection('Before Conditions', beforePhotos);
   photoSection('After / Current Conditions', afterPhotos);
 
@@ -261,6 +315,22 @@ export default function ReportBuilder() {
   const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
   const [savedDocumentUrl, setSavedDocumentUrl] = useState<string | null>(null);
   const [savedBlob, setSavedBlob] = useState<Blob | null>(null);
+  const [pairs, setPairs] = useState<PhotoPair[]>([]);
+  const [pairBeforeId, setPairBeforeId] = useState('');
+  const [pairAfterId, setPairAfterId] = useState('');
+  const [pairLabel, setPairLabel] = useState('');
+
+  const addPair = () => {
+    if (!pairBeforeId || !pairAfterId) return;
+    const beforePhoto = photos.find(p => p.id === pairBeforeId);
+    const label = pairLabel.trim() || beforePhoto?.name || 'Comparison';
+    setPairs(prev => [...prev, { id: `${Date.now()}`, beforePhotoId: pairBeforeId, afterPhotoId: pairAfterId, label }]);
+    setPairBeforeId('');
+    setPairAfterId('');
+    setPairLabel('');
+  };
+
+  const removePair = (pairId: string) => setPairs(prev => prev.filter(p => p.id !== pairId));
 
   useEffect(() => {
     const fetchData = async () => {
@@ -343,6 +413,18 @@ export default function ReportBuilder() {
         dataUrl: await loadPhotoForPdf(photo.url),
       })));
 
+      const preparedPairs = await Promise.all(pairs.map(async (pair) => {
+        const before = photos.find(p => p.id === pair.beforePhotoId);
+        const after = photos.find(p => p.id === pair.afterPhotoId);
+        if (!before || !after) return null;
+        return {
+          label: pair.label,
+          before: { name: before.name, dataUrl: await loadPhotoForPdf(before.url) },
+          after: { name: after.name, dataUrl: await loadPhotoForPdf(after.url) },
+        };
+      }));
+      const validPairs = preparedPairs.filter(Boolean) as Array<{ label: string; before: { name: string; dataUrl: string }; after: { name: string; dataUrl: string } }>;
+
       const contactName = `${contact.first_name || ''} ${contact.last_name || ''}`.trim() || 'Customer';
       const propertyAddress = formatPropertyAddress(contact);
       const pdfBlob = await buildBeforeAfterReportPdf({
@@ -359,6 +441,7 @@ export default function ReportBuilder() {
         projectStatus: contact.status,
         beforePhotos: preparedBefore,
         afterPhotos: preparedAfter,
+        pairedPhotos: validPairs,
       });
 
       const fileName = `${reportTitle.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-${Date.now()}.pdf`;
@@ -570,6 +653,113 @@ export default function ReportBuilder() {
               </div>
             ) : (
               <p className="text-sm text-emerald-800">No customer photos are available yet. Upload project photos from the Docs tab first.</p>
+            )}
+          </div>
+
+          {/* Photo Pairs */}
+          <div className="rounded-3xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="flex items-center gap-2 text-sm font-bold text-indigo-900">
+                  <GitMerge size={15} /> Photo Pairs
+                </h3>
+                <p className="text-[11px] text-indigo-700">Match a Before + After photo to show them side by side in the PDF.</p>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-700">
+                {pairs.length} pair{pairs.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+
+            {/* Existing pairs */}
+            {pairs.length > 0 && (
+              <div className="mb-4 space-y-3">
+                {pairs.map(pair => {
+                  const before = photos.find(p => p.id === pair.beforePhotoId);
+                  const after = photos.find(p => p.id === pair.afterPhotoId);
+                  return (
+                    <div key={pair.id} className="rounded-2xl bg-white border border-indigo-100 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs font-bold text-indigo-800 truncate max-w-[220px]">{pair.label}</p>
+                        <button onClick={() => removePair(pair.id)} className="text-slate-400 hover:text-rose-500 p-1">
+                          <X size={13} />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {before && (
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold uppercase text-amber-600">Before</p>
+                            <div className="aspect-[4/3] rounded-xl overflow-hidden bg-amber-50 border border-amber-100">
+                              <img src={before.displayUrl || before.url} alt={before.name} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                            <p className="text-[9px] text-slate-500 truncate">{before.name}</p>
+                          </div>
+                        )}
+                        {after && (
+                          <div className="space-y-1">
+                            <p className="text-[9px] font-bold uppercase text-emerald-600">After</p>
+                            <div className="aspect-[4/3] rounded-xl overflow-hidden bg-emerald-50 border border-emerald-100">
+                              <img src={after.displayUrl || after.url} alt={after.name} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                            <p className="text-[9px] text-slate-500 truncate">{after.name}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Add new pair */}
+            {photos.length >= 2 ? (
+              <div className="rounded-2xl bg-white border border-indigo-100 p-4 space-y-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">New Pair</p>
+                <div>
+                  <label className="text-[10px] font-bold text-amber-700 uppercase block mb-1">Before Photo</label>
+                  <select
+                    value={pairBeforeId}
+                    onChange={e => setPairBeforeId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-amber-50 px-3 py-2 text-xs text-primary outline-none"
+                  >
+                    <option value="">Select before photo…</option>
+                    {photos.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-emerald-700 uppercase block mb-1">After Photo</label>
+                  <select
+                    value={pairAfterId}
+                    onChange={e => setPairAfterId(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 bg-emerald-50 px-3 py-2 text-xs text-primary outline-none"
+                  >
+                    <option value="">Select after photo…</option>
+                    {photos.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Pair Label (optional)</label>
+                  <input
+                    value={pairLabel}
+                    onChange={e => setPairLabel(e.target.value)}
+                    placeholder="e.g. North Elevation"
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-primary outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={addPair}
+                  disabled={!pairBeforeId || !pairAfterId}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-xs font-bold text-white disabled:opacity-40"
+                >
+                  <Plus size={13} /> Add Pair
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-indigo-700">Upload at least two photos to create pairs.</p>
             )}
           </div>
 
