@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound } from 'lucide-react';
+import { ChevronLeft, Bell, Shield, Moon, HelpCircle, Images, ChevronRight, KeyRound, Compass } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
+import {
+  getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type InspectionPhotoStorageMode,
+  getElevationStyle, setElevationStyle, type ElevationStyle,
+} from '../lib/photoPreferences';
 
 export default function Settings() {
   const navigate = useNavigate();
   const { user, requestPasswordChange } = useAuth();
   const [inspectionPhotoStorageMode, setMode] = useState<InspectionPhotoStorageMode>(() => getInspectionPhotoStorageMode());
+  const [elevationStyle, setElevStyle] = useState<ElevationStyle>(() => getElevationStyle());
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('notif_enabled') !== 'false');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
 
@@ -81,6 +85,52 @@ export default function Settings() {
                   </div>
                   {inspectionPhotoStorageMode === 'photo_library' && (
                     <span className="rounded-full bg-amber-500 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white">Selected</span>
+                  )}
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Elevation Label Style */}
+        <div className="space-y-3">
+          <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Inspection Elevation Labels</h2>
+          <div className="card space-y-4 p-4">
+            <div className="flex items-start gap-4">
+              <Compass size={20} className="mt-0.5 text-blue-500" />
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-primary">Elevation Label Style</p>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  Choose how the four main slopes are labelled during inspection. Garage and Detached are always available.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3">
+              <button type="button"
+                onClick={() => { setElevStyle('cardinal'); setElevationStyle('cardinal'); }}
+                className={`rounded-2xl border p-4 text-left transition ${elevationStyle === 'cardinal' ? 'border-primary bg-primary/5' : 'border-slate-200 bg-slate-50'}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-primary">Cardinal — N / S / E / W</p>
+                    <p className="mt-1 text-xs text-slate-500">North, South, East, West. Good when you know the property orientation.</p>
+                  </div>
+                  {elevationStyle === 'cardinal' && (
+                    <span className="rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white">Selected</span>
+                  )}
+                </div>
+              </button>
+              <button type="button"
+                onClick={() => { setElevStyle('relative'); setElevationStyle('relative'); }}
+                className={`rounded-2xl border p-4 text-left transition ${elevationStyle === 'relative' ? 'border-primary bg-primary/5' : 'border-slate-200 bg-slate-50'}`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-primary">Relative — Front / Back / Left / Right</p>
+                    <p className="mt-1 text-xs text-slate-500">Easier when standing in front of the property facing the street.</p>
+                  </div>
+                  {elevationStyle === 'relative' && (
+                    <span className="rounded-full bg-primary px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white">Selected</span>
                   )}
                 </div>
               </button>

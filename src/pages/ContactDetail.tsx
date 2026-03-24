@@ -16,6 +16,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
 import { getNextPipelineStageLabel, getPipelineStageLabel } from '../lib/pipelineStages';
+import { getElevationStyle, getMainElevations, FIXED_DIRS } from '../lib/photoPreferences';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
 import { applyMention, extractMentionHandles, findActiveMentionQuery, getMentionSuggestions, getMentionTargets, parseNoteMentions, serializeNoteMentions, validateMentions } from '../lib/noteMentions';
 
@@ -920,6 +921,25 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
 function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
   const navigate = useNavigate();
   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
+
+  // Elevation style and buildings (mirrors SmartInspection)
+  const [elevStyle] = useState(() => getElevationStyle());
+  const mainElevDirs = getMainElevations(elevStyle);
+  const [buildings, setBuildings] = useState<string[]>(['Main']);
+  const [activeBuildingIdx, setActiveBuildingIdx] = useState(0);
+
+  const switchBuilding = (idx: number) => {
+    setActiveBuildingIdx(idx);
+    setActiveElevation(mainElevDirs[0]);
+  };
+  const addBuilding = () => {
+    if (buildings.length >= 5) return;
+    const name = `Building ${buildings.length + 1}`;
+    setBuildings((prev) => [...prev, name]);
+    setActiveBuildingIdx(buildings.length);
+    setActiveElevation(mainElevDirs[0]);
+  };
+
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
@@ -928,7 +948,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [roofLength, setRoofLength] = useState<number | ''>('');
   const [roofWidth, setRoofWidth] = useState<number | ''>('');
   const [overhangFt, setOverhangFt] = useState<number | ''>('');
-  const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
+  const [activeElevation, setActiveElevation] = useState<string>(() => getMainElevations(getElevationStyle())[0]);
   const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [markupIndex, setMarkupIndex] = useState<number | null>(null);
@@ -936,6 +956,11 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
   const [completedInspection, setCompletedInspection] = useState<any>(null);
+
+  // Full photo key — includes building prefix for additional buildings
+  const currentPhotoKey = activeBuildingIdx === 0
+    ? activeElevation
+    : `${buildings[activeBuildingIdx]} – ${activeElevation}`;
 
   const pitchDecimal = pitch.run ? pitch.rise / pitch.run : 0;
   const angle = pitch.run ? (Math.atan(pitchDecimal) * 180 / Math.PI) : 0;
@@ -1063,14 +1088,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     const { error: dbError } = await supabase.from('documents').insert({
       contact_id: contact.id,
       company_id: contact.company_id,
-      name: `${activeElevation} Inspection Photo`,
+      name: `${currentPhotoKey} Inspection Photo`,
       type: 'photo',
       url: publicUrl,
       size: blob.size,
       uploaded_by: userId,
     } as any);
     if (dbError) throw dbError;
-    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: blob.size }, ...prev]);
+    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: currentPhotoKey, size: blob.size }, ...prev]);
     onDocumentsChanged?.();
   };
 
@@ -1395,14 +1420,37 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Photos</h3>
             <button onClick={() => setStep('report')} className="text-xs font-bold text-accent">Skip to Report</button>
           </div>
-          <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed. You can come back to any elevation.</div>
-          <div className="grid grid-cols-3 gap-2">
-            {(['North', 'South', 'East', 'West', 'Garage', 'Detached'] as const).map((dir) => (
-              <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
-                {dir}
-                <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === dir).length})</span>
+          {/* Building selector */}
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none -mx-1 px-1">
+            {buildings.map((name, idx) => (
+              <button
+                key={idx}
+                onClick={() => switchBuilding(idx)}
+                className={`flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border transition-all ${activeBuildingIdx === idx ? 'bg-accent border-accent text-white' : 'bg-white border-slate-200 text-slate-600'}`}
+              >
+                {name}
               </button>
             ))}
+            {buildings.length < 5 && (
+              <button
+                onClick={addBuilding}
+                className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-[10px] font-bold border border-dashed border-slate-300 text-slate-400"
+              >
+                + Add Building
+              </button>
+            )}
+          </div>
+          <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed. You can come back to any elevation.</div>
+          <div className="grid grid-cols-3 gap-2">
+            {[...mainElevDirs, ...FIXED_DIRS].map((dir) => {
+              const key = activeBuildingIdx === 0 ? dir : `${buildings[activeBuildingIdx]} – ${dir}`;
+              return (
+                <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                  {dir}
+                  <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === key).length})</span>
+                </button>
+              );
+            })}
           </div>
           {usesNativeInspectionCamera ? (
             <button
@@ -1412,7 +1460,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
             >
               <span className="text-sm font-bold text-slate-500">
-                {uploading ? 'Uploading...' : `Tap to capture ${activeElevation} photos`}
+                {uploading ? 'Uploading...' : `Tap to capture ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}
               </span>
               <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that elevation is complete.</span>
             </button>
@@ -1420,7 +1468,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <label className="block w-full cursor-pointer">
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
               <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-                <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
+                <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeBuildingIdx > 0 ? `${buildings[activeBuildingIdx]} – ` : ''}${activeElevation}`}</span>
               </div>
             </label>
           )}
