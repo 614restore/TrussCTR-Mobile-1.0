@@ -2,14 +2,14 @@ import { supabase } from './supabase';
 
 /**
  * Automation Logic Mapping:
- * submit_inspection  -> status: 'inspection_completed'
+ * submit_inspection  -> status: 'estimating'
  * sign_contingency   -> status: 'contingency'
  * sign_csa           -> status: 'approved'
  * sign_completion    -> status: 'completed'
  */
 export async function handleAutoMove(contactId: string, action: string) {
   const statusMap: Record<string, string> = {
-    submit_inspection: 'inspection_completed',
+    submit_inspection: 'estimating',
     sign_contingency: 'contingency',
     sign_csa: 'approved',
     sign_completion: 'completed',

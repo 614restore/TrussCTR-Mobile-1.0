@@ -1359,7 +1359,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       if (error) throw error;
       const now = new Date().toISOString();
       await (supabase.from('contacts') as any)
-        .update({ status: 'inspection_completed', status_changed_at: now })
+        .update({ status: 'estimating', status_changed_at: now })
         .eq('id', contact.id);
       try {
         const { data } = await (supabase.from('inspections') as any).upsert({
