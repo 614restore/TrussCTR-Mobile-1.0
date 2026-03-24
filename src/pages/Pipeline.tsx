@@ -8,6 +8,7 @@ import { formatCurrency, getStatusColor } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
+import { getPipelineStageLabel } from '../lib/pipelineStages';
 
 const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
   { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
@@ -20,6 +21,15 @@ const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
   { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
   { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
 ];
+
+function normalizePipelineStatus(status?: string | null): CustomerStatus {
+  if (status === 'new_lead') return 'lead';
+  if (status === 'inspection_scheduled') return 'appointment_set';
+  if (status === 'inspection_complete') return 'inspected';
+  if (status === 'signed_won') return 'approved';
+  if (status === 'paid') return 'completed';
+  return (status as CustomerStatus) || 'lead';
+}
 
 export default function Pipeline() {
   const navigate = useNavigate();
@@ -276,7 +286,7 @@ export default function Pipeline() {
         ) : viewMode === 'kanban' ? (
           <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x">
             {STAGES.map((stage) => {
-              const stageContacts = filteredContacts.filter(c => c.status === stage.id);
+              const stageContacts = filteredContacts.filter((contact) => normalizePipelineStatus(contact.status) === stage.id);
               return (
                 <div key={stage.id} className="min-w-[280px] flex flex-col gap-4 snap-center">
                   <div className="flex items-center justify-between px-2">
@@ -356,8 +366,8 @@ export default function Pipeline() {
                   <p className="text-xs text-slate-500 truncate">{contact.address}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.id === contact.status)?.color || 'bg-slate-400'} text-white`}>
-                    {contact.status.replace('_', ' ')}
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find((stage) => stage.id === normalizePipelineStatus(contact.status))?.color || 'bg-slate-400'} text-white`}>
+                    {getPipelineStageLabel(contact.status)}
                   </span>
                   <button 
                     onClick={(e) => {
@@ -397,8 +407,8 @@ export default function Pipeline() {
                       <p className="text-xs text-slate-500">{contact.address}</p>
                     </div>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.id === contact.status)?.color || 'bg-slate-400'} text-white`}>
-                    {contact.status.replace('_', ' ')}
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find((stage) => stage.id === normalizePipelineStatus(contact.status))?.color || 'bg-slate-400'} text-white`}>
+                    {getPipelineStageLabel(contact.status)}
                   </span>
                 </div>
                 <div className="flex gap-2">
