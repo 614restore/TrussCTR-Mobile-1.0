@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ClipboardList, Package, Calculator, 
-  FileText, Camera, ChevronRight, HardHat, 
+import {
+  ClipboardList, Package, Calculator,
+  FileText, Image, ChevronRight, HardHat,
   Truck, Ruler
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -14,12 +14,15 @@ export default function FieldTools() {
   const { profile, loading: loadingAuth } = useAuth();
   const [recentWorkOrders, setRecentWorkOrders] = useState<any[]>([]);
 
+  const isSalesRep = profile?.role === 'sales_rep';
+
   const tools = [
     { id: 'work_orders', label: 'Work Orders', icon: ClipboardList, color: 'bg-blue-500', count: '—', path: '/work-orders' },
     { id: 'material_orders', label: 'Material Orders', icon: Package, color: 'bg-amber-500', count: '—', path: '/material-orders' },
     { id: 'estimates', label: 'Estimates', icon: Calculator, color: 'bg-emerald-500', count: '—', path: '/estimates-list' },
-    { id: 'crew_schedule', label: 'Crew Schedule', icon: HardHat, color: 'bg-indigo-500', count: '—', path: '/crew-schedule' },
-    { id: 'documents', label: 'Documents', icon: FileText, color: 'bg-slate-800', count: '—', path: '/documents' },
+    ...(!isSalesRep ? [{ id: 'crew_schedule', label: 'Crew Schedule', icon: HardHat, color: 'bg-indigo-500', count: '—', path: '/crew-schedule' }] : []),
+    { id: 'documents', label: 'Documents', icon: FileText, color: 'bg-slate-800', count: '—', path: '/documents?folder=documents' },
+    { id: 'photos', label: 'Photos', icon: Image, color: 'bg-rose-500', count: '—', path: '/documents?folder=photos' },
   ];
 
   useEffect(() => {

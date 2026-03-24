@@ -21,12 +21,13 @@ export default function Documents() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const contactId = searchParams.get('contactId');
+  const folder = searchParams.get('folder'); // 'photos' | 'documents' | null (all)
 
   useEffect(() => {
     if (profile?.company_id) {
       fetchDocuments();
     }
-  }, [profile?.company_id, contactId]);
+  }, [profile?.company_id, contactId, folder]);
 
   const fetchDocuments = async () => {
     try {
@@ -44,6 +45,11 @@ export default function Documents() {
 
       if (contactId) {
         query = query.eq('contact_id', contactId);
+      }
+      if (folder === 'photos') {
+        query = query.eq('type', 'photo');
+      } else if (folder === 'documents') {
+        query = query.neq('type', 'photo');
       }
 
       const { data, error } = await query;
@@ -100,7 +106,9 @@ export default function Documents() {
             <ChevronLeft size={24} />
           </button>
           <div>
-            <h1 className="text-xl font-bold text-primary">{contactId ? 'Customer Documents' : 'Documents'}</h1>
+            <h1 className="text-xl font-bold text-primary">
+              {contactId ? 'Customer Documents' : folder === 'photos' ? 'Photos' : folder === 'documents' ? 'Documents' : 'Documents'}
+            </h1>
             {contactId && <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Filtered to this contact</p>}
           </div>
         </div>

@@ -24,7 +24,7 @@ const EMPTY_FORM = {
   state: '',
   zip: '',
   project_type: 'Roofing',
-  status: 'lead' as any,
+  status: 'prospect' as any,
   is_retail: null as boolean | null,
   retail_notes: '',
   insurance_company: '',
