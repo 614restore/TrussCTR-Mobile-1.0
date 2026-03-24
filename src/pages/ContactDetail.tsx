@@ -1099,24 +1099,20 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       let photosToUpload: string[] = [];
 
       try {
-        // Custom multi-shot plugin (requires native iOS rebuild to activate)
+        // Custom multi-shot plugin — falls back automatically if unavailable
         const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
         photosToUpload = result?.photos || [];
       } catch (pluginErr: any) {
-        // Plugin not yet compiled into the native binary — fall back to the
-        // official @capacitor/camera for single-shot capture.
-        const msg: string = pluginErr?.message || '';
-        if (msg.toLowerCase().includes('not implemented') || msg.toLowerCase().includes('unimplemented')) {
-          const photo = await Camera.getPhoto({
-            quality: 90,
-            allowEditing: false,
-            resultType: CameraResultType.Uri,
-            source: CameraSource.Camera,
-          });
-          if (photo.webPath) photosToUpload = [photo.webPath];
-        } else {
-          throw pluginErr;
-        }
+        // Plugin not available / not yet compiled in — fall back to the
+        // standard @capacitor/camera for single-shot capture.
+        console.warn('[Camera] MultiShotCamera unavailable, using fallback:', pluginErr?.message);
+        const photo = await Camera.getPhoto({
+          quality: 90,
+          allowEditing: false,
+          resultType: CameraResultType.Uri,
+          source: CameraSource.Camera,
+        });
+        if (photo.webPath) photosToUpload = [photo.webPath];
       }
 
       for (const url of photosToUpload) {
