@@ -114,7 +114,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
                         className="w-full bg-slate-50 border-none rounded-2xl p-4 text-sm focus:ring-2 focus:ring-accent/20"
                         placeholder="Doe"
                         value={formData.last_name}
-                        onChange={e => setFormData({ ...formData, formData, last_name: e.target.value })}
+                        onChange={e => setFormData({ ...formData, last_name: e.target.value })}
                       />
                     </div>
                   </div>
