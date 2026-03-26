@@ -13,14 +13,32 @@ export default function ResetPassword() {
   const [success, setSuccess] = useState(false);
   const [sessionReady, setSessionReady] = useState(false);
 
-  // Supabase processes the recovery token from the URL hash automatically.
-  // We listen for the PASSWORD_RECOVERY event to confirm a valid recovery session.
+  // Supabase does NOT auto-detect the session from the URL hash (detectSessionInUrl: false)
+  // because the app uses HashRouter in native mode. We manually parse the hash here so
+  // the reset flow works when the user opens the email link in a browser.
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
+      if (event === 'PASSWORD_RECOVERY' || event === 'SIGNED_IN') {
         setSessionReady(true);
       }
     });
+
+    // Manually parse recovery token from URL hash (e.g. #access_token=...&type=recovery)
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+      const params = new URLSearchParams(hash);
+      const type = params.get('type');
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+      if ((type === 'recovery' || type === 'email') && accessToken && refreshToken) {
+        supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          .then(({ error }) => {
+            if (!error) setSessionReady(true);
+          });
+        // Clean up the hash from the URL so it doesn't interfere
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    }
 
     // Also check if a session already exists (user arrived with token already processed)
     supabase.auth.getSession().then(({ data: { session } }) => {

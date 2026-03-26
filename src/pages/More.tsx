@@ -20,10 +20,11 @@ export default function More() {
       setIsSigningOut(true);
       const { error } = await supabase.auth.signOut();
       if (error) throw error;
+      navigate('/login');
     } catch (err) {
       console.error('Error signing out:', err);
       localStorage.clear();
-      window.location.reload();
+      navigate('/login');
     } finally {
       setIsSigningOut(false);
     }
