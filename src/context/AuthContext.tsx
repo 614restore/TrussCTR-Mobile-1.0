@@ -6,6 +6,9 @@ interface AuthContextType {
   user: any;
   profile: any;
   loading: boolean;
+  isRecoverySession: boolean;
+  clearRecoverySession: () => void;
+  requestPasswordChange: () => void;
   refreshProfile: () => Promise<void>;
 }
 
@@ -14,6 +17,9 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   loading: true,
+  isRecoverySession: false,
+  clearRecoverySession: () => {},
+  requestPasswordChange: () => {},
   refreshProfile: async () => {},
 });
 
@@ -22,6 +28,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isRecoverySession, setIsRecoverySession] = useState(false);
   const isFetchingProfile = useRef(false);
   const hasInitialized = useRef(false);
   const lastUserId = useRef<string | null>(null);
@@ -59,6 +66,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       setSession(session);
       setUser(session?.user ?? null);
+
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoverySession(true);
+        if (session?.user) {
+          lastUserId.current = session.user.id;
+          await fetchProfile(session.user.id, session.user.email);
+        }
+        return;
+      }
 
       if (event === 'TOKEN_REFRESHED' && session?.user) {
         // After dormancy: token refreshed but profile may be null — re-fetch if needed
@@ -196,8 +212,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
 
+  const clearRecoverySession = () => setIsRecoverySession(false);
+  const requestPasswordChange = () => setIsRecoverySession(true);
+
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, refreshProfile }}>
+    <AuthContext.Provider value={{ session, user, profile, loading, isRecoverySession, clearRecoverySession, requestPasswordChange, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

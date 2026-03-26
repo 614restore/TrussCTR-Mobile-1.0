@@ -72,5 +72,9 @@ export function buildContactPipelineEvents(contact: any, workOrders: any[] = [])
 }
 
 export function getUpcomingPipelineEvents(events: PipelineEvent[], now = new Date()) {
-  return events.filter((event) => new Date(event.date).getTime() >= now.getTime());
+  // Compare against start of today (midnight local time) so:
+  //  - today's events always show even if their scheduled time has passed
+  //  - yesterday's events are always excluded
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return events.filter((event) => new Date(event.date).getTime() >= startOfToday.getTime());
 }
