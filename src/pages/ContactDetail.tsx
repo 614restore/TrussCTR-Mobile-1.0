@@ -1085,7 +1085,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onRefresh }: { con
           .eq('contact_id', contact.id)
           .eq('type', 'video')
           .order('created_at', { ascending: false });
-        if (data) setVideos(data.map((d) => ({ id: d.id, name: d.name, url: d.url })));
+        if (data) setVideos((data as any[]).map((d) => ({ id: d.id, name: d.name, url: d.url })));
       } catch {
         // ignore
       }

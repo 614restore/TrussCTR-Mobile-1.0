@@ -47,11 +47,11 @@ export default function PhotoChecklist() {
     const load = async () => {
       setLoading(true);
       try {
-        const { data: c } = await supabase
+        const { data: c } = await (supabase
           .from('contacts')
           .select('first_name, last_name')
           .eq('id', id)
-          .maybeSingle();
+          .maybeSingle() as any);
         if (c) setContact({ name: `${c.first_name || ''} ${c.last_name || ''}`.trim() });
 
         const { data: docs } = await supabase
@@ -63,12 +63,12 @@ export default function PhotoChecklist() {
 
         if (!docs) { setLoading(false); return; }
 
-        const withUrls: PhotoDoc[] = docs.map((d) => ({
+        const withUrls: PhotoDoc[] = await Promise.all((docs as any[]).map(async (d) => ({
           id:         d.id,
           name:       d.name,
           url:        d.url,
-          displayUrl: buildDocumentDisplayUrl(d.url),
-        }));
+          displayUrl: await buildDocumentDisplayUrl(d.url),
+        })));
 
         const groupMap = new Map<string, PhotoDoc[]>();
         for (const doc of withUrls) {

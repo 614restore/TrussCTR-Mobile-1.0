@@ -153,10 +153,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const cleanEmail = email?.trim();
 
-      // Wrap a Supabase query so it rejects after `ms` milliseconds
-      const withTimeout = <T,>(promise: Promise<T>, ms: number): Promise<T> =>
+      // Wrap a Supabase query so it rejects after `ms` milliseconds.
+      // Using Promise.resolve() converts PostgREST thenables to real Promises.
+      const withTimeout = <T,>(thenable: PromiseLike<T>, ms: number): Promise<T> =>
         Promise.race([
-          promise,
+          Promise.resolve(thenable),
           new Promise<T>((_, reject) =>
             setTimeout(() => reject(new Error('Profile query timed out')), ms)
           ),
