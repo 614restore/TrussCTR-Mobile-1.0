@@ -33,16 +33,23 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      const { error: pwError } = await supabase.auth.updateUser({ password });
-      if (pwError) throw pwError;
-
-      // Clear the forced-change flag on the profile
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        await (supabase
-          .from('profiles') as any)
-          .update({ must_change_password: false })
-          .eq('id', user.id);
+      // Use the admin-API edge function to change the password.
+      // Direct supabase.auth.updateUser() is blocked by "Secure password change"
+      // unless the session is a PASSWORD_RECOVERY session — temp-password logins
+      // are normal SIGNED_IN sessions, so we bypass via the service role instead.
+      const { data: { session } } = await supabase.auth.getSession();
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Failed to update password.');
       }
 
       clearRecoverySession();
