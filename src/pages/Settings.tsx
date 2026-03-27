@@ -6,7 +6,7 @@ import { getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type Insp
 
 export default function Settings() {
   const navigate = useNavigate();
-  const { user, requestPasswordChange } = useAuth();
+  const { user } = useAuth();
   const [inspectionPhotoStorageMode, setMode] = useState<InspectionPhotoStorageMode>(() => getInspectionPhotoStorageMode());
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('notif_enabled') !== 'false');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
@@ -22,11 +22,6 @@ export default function Settings() {
     setDarkMode(next);
     localStorage.setItem('dark_mode', String(next));
     document.documentElement.classList.toggle('dark', next);
-  };
-
-  const handleChangePassword = () => {
-    requestPasswordChange();
-    navigate('/reset-password');
   };
 
   return (
@@ -126,13 +121,23 @@ export default function Settings() {
           <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Account</h2>
           <div className="card divide-y divide-slate-50">
             {/* Change Password */}
-            <button onClick={handleChangePassword} className="w-full p-4 flex items-center justify-between active:bg-slate-50 transition-colors">
-              <div className="flex items-center gap-4">
-                <KeyRound size={20} className="text-rose-500" />
+            <div className="p-4">
+              <div className="flex items-center gap-4 mb-2">
+                <KeyRound size={20} className="text-rose-500 shrink-0" />
                 <span className="text-sm font-bold text-primary">Change Password</span>
               </div>
-              <ChevronRight size={16} className="text-slate-300" />
-            </button>
+              <p className="text-xs text-slate-500 leading-relaxed pl-9">
+                To change your password, please visit the web app at{' '}
+                <a
+                  href="https://crm-kanban-integrate.vercel.app/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary font-semibold underline break-all"
+                >
+                  crm-kanban-integrate.vercel.app
+                </a>
+              </p>
+            </div>
             {/* Privacy Policy */}
             <button onClick={() => navigate('/help')} className="w-full p-4 flex items-center justify-between active:bg-slate-50 transition-colors">
               <div className="flex items-center gap-4">
