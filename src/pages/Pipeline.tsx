@@ -8,7 +8,7 @@ import { formatCurrency, getStatusColor } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
-import { getPipelineStageLabel, toPipelineBoardStage } from '../lib/pipelineStages';
+import { getPipelineStageLabel, normalizePipelineStatus, toPipelineBoardStage } from '../lib/pipelineStages';
 
 type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
 
