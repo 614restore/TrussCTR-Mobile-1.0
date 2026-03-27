@@ -53,7 +53,12 @@ function AppRoutes() {
 
   useEffect(() => {
     if (!loading) {
-      SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {});
+      // Small delay lets React paint the first frame before the splash fades out,
+      // preventing a black flash on cold start.
+      const t = setTimeout(() => {
+        SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {});
+      }, 300);
+      return () => clearTimeout(t);
     }
   }, [loading]);
 

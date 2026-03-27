@@ -19,8 +19,8 @@ const config: CapacitorConfig = {
       presentationOptions: ['badge', 'sound', 'alert'],
     },
     SplashScreen: {
-      launchShowDuration: 0,       // keep splash up until app manually hides it
-      launchAutoHide: false,       // we call SplashScreen.hide() once React is ready
+      launchShowDuration: 3000,    // minimum 3s; SplashScreen.hide() called once React is ready
+      launchAutoHide: false,       // never auto-hide — we control it manually
       backgroundColor: '#1e293b',
       showSpinner: false,
     },
