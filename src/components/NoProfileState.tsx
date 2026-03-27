@@ -18,14 +18,12 @@ export default function NoProfileState() {
   const handleSignOut = async () => {
     try {
       setIsSigningOut(true);
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+      await supabase.auth.signOut();
     } catch (err) {
       console.error('Error signing out:', err);
-      localStorage.clear();
-      window.location.reload();
     } finally {
-      setIsSigningOut(false);
+      localStorage.clear();
+      window.location.href = '/login';
     }
   };
 
