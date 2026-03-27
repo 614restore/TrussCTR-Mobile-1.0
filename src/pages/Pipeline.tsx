@@ -290,7 +290,7 @@ export default function Pipeline() {
             setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
-          style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}
+          style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
         >
           <div className="flex gap-4 min-w-max">
             {pipelineSections.map((section) => {
