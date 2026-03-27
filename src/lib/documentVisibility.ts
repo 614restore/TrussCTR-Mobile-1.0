@@ -32,12 +32,17 @@ export function getSignatureParentName(name: string): string | null {
   return null;
 }
 
+export interface SignedPdfRef {
+  id: string;
+  url: string;
+}
+
 export interface LegalDocStat {
-  latestSignedPdf: string | null;
+  latestSignedPdf: SignedPdfRef | null;
 }
 
 /** Build a map of templateId → { latestSignedPdf } from a list of documents */
-export function buildLegalDocumentStats(documents: Array<{ name?: string | null; url?: string | null; type?: string | null }>): Record<string, LegalDocStat> {
+export function buildLegalDocumentStats(documents: Array<{ id?: string | null; name?: string | null; url?: string | null; type?: string | null }>): Record<string, LegalDocStat> {
   const stats: Record<string, LegalDocStat> = {};
   for (const template of LEGAL_DOCUMENT_TEMPLATES) {
     stats[template.id] = { latestSignedPdf: null };
@@ -45,10 +50,11 @@ export function buildLegalDocumentStats(documents: Array<{ name?: string | null;
   for (const doc of documents) {
     const name = String(doc.name || '').toLowerCase();
     const url = doc.url || null;
-    if (!url) continue;
+    const id = doc.id || null;
+    if (!url || !id) continue;
     for (const template of LEGAL_DOCUMENT_TEMPLATES) {
       if (name.includes(template.id) && (name.includes('sign') || name.includes('complete'))) {
-        stats[template.id] = { latestSignedPdf: url };
+        stats[template.id] = { latestSignedPdf: { id, url } };
       }
     }
   }
