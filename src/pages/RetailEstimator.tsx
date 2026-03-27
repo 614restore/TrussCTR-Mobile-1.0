@@ -145,6 +145,7 @@ export default function RetailEstimator() {
       const estimatePayload: any = {
         contact_id: id,
         company_id: profile.company_id,
+        assigned_to: contact?.assigned_to || null,
         title: estimateTitle,
         items: [
           {

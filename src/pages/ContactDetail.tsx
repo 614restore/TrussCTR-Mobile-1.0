@@ -512,7 +512,7 @@ export default function ContactDetail() {
             setCanScrollTabsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
-          style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}
+          style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
         >
         <div className="flex gap-6 min-w-max">
           {TABS.map((tab) => {

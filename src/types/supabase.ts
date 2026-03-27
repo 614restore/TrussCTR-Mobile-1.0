@@ -116,6 +116,7 @@ export interface Database {
           id: string
           company_id: string
           contact_id: string
+          assigned_to: string | null
           title: string
           items: Json
           subtotal: number
