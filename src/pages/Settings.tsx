@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle } from 'lucide-react';
+import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
 
@@ -11,8 +10,6 @@ export default function Settings() {
   const [inspectionPhotoStorageMode, setMode] = useState<InspectionPhotoStorageMode>(() => getInspectionPhotoStorageMode());
   const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('notif_enabled') !== 'false');
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
-  const [pwResetSent, setPwResetSent] = useState(false);
-  const [pwResetLoading, setPwResetLoading] = useState(false);
 
   const handleToggleNotifications = () => {
     const next = !notificationsEnabled;
@@ -25,21 +22,6 @@ export default function Settings() {
     setDarkMode(next);
     localStorage.setItem('dark_mode', String(next));
     document.documentElement.classList.toggle('dark', next);
-  };
-
-  const handleChangePassword = async () => {
-    if (!user?.email || pwResetLoading) return;
-    setPwResetLoading(true);
-    try {
-      await supabase.auth.resetPasswordForEmail(user.email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      setPwResetSent(true);
-    } catch (err) {
-      console.error('Password reset error:', err);
-    } finally {
-      setPwResetLoading(false);
-    }
   };
 
   return (

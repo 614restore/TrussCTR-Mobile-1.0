@@ -1,5 +1,7 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { SplashScreen } from '@capacitor/splash-screen';
 import Layout from './components/Layout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -25,6 +27,7 @@ import HelpSupport from './pages/HelpSupport';
 import Notifications from './pages/Notifications';
 import Login from './pages/Login';
 import ResetPassword from './pages/ResetPassword';
+import AcceptInvite from './pages/AcceptInvite';
 import DocumentManager from './pages/DocumentManager';
 import DocumentSigner from './pages/DocumentSigner';
 import DocumentViewer from './pages/DocumentViewer';
@@ -35,7 +38,19 @@ import PitchGauge from './pages/PitchGauge';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 function AppRoutes() {
-  const { session, loading } = useAuth();
+  const { session, loading, profile, isRecoverySession } = useAuth();
+
+  // Hide the native splash screen once auth has finished initialising.
+  // autoHide is false in capacitor.config.ts so the splash stays up until
+  // the JS is actually ready — preventing the blank white flash on slow
+  // simulator / device cold starts.
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hide({ fadeOutDuration: 300 }).catch(() => {
+        // Web/browser — SplashScreen plugin not available, ignore.
+      });
+    }
+  }, [loading]);
 
   if (loading) {
     return (
@@ -52,14 +67,23 @@ function AppRoutes() {
     );
   }
 
+  // Show change-password screen for temp-password users or Supabase recovery links
+  const mustChangePassword = session && (
+    (profile as any)?.must_change_password === true || isRecoverySession
+  );
+
   return (
     <Routes>
-      {/* Always-accessible route — must work with or without a session */}
-      <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/accept-invite" element={<AcceptInvite />} />
       {!session ? (
         <>
           <Route path="/login" element={<Login />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
+        </>
+      ) : mustChangePassword ? (
+        <>
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<Navigate to="/reset-password" replace />} />
         </>
       ) : (
         <Route element={<Layout />}>

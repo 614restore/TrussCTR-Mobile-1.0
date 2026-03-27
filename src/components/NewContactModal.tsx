@@ -28,7 +28,11 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!profile?.company_id) return;
+
+    if (!profile?.company_id) {
+      alert('Your account is not linked to a company. Please complete your profile setup.');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -44,9 +48,9 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
       if (error) throw error;
       onSuccess();
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating contact:', err);
-      alert('Failed to create contact');
+      alert(`Failed to create contact: ${err?.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
     }

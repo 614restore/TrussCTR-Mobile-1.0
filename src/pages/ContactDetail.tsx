@@ -1,25 +1,24 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ChevronLeft, Phone, MessageSquare, Mail, Edit2,
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
-  ClipboardList, PenLine, Wrench, TrendingUp
+  ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { CustomerStatus } from '../types/supabase';
 import { formatPhone, formatCurrency } from '../lib/utils';
-import { Capacitor, registerPlugin } from '@capacitor/core';
 import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
 import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
-import { getInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
-import { getNextPipelineStageLabel, getPipelineStageLabel } from '../lib/pipelineStages';
+import { getNextPipelineStageLabel, getPipelineStageLabel, getPipelineStageOrder, getReachedPipelineStatuses, normalizePipelineStatus, toPipelineBoardStage } from '../lib/pipelineStages';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
 import { applyMention, extractMentionHandles, findActiveMentionQuery, getMentionSuggestions, getMentionTargets, parseNoteMentions, serializeNoteMentions, validateMentions } from '../lib/noteMentions';
-
-const MultiShotCamera = registerPlugin<{ open: (options?: { saveMode?: InspectionPhotoStorageMode }) => Promise<{ photos: string[] }> }>('MultiShotCamera');
+import { Capacitor } from '@capacitor/core';
+import { buildLegalDocumentStats, getSignatureParentName, isLegalDocument, LEGAL_DOCUMENT_TEMPLATES } from '../lib/documentVisibility';
+import { compressImageWithLightCompressor, PHOTO_POLICY_PRESETS, validateVideoForCloud } from '../lib/lightCompressor';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -31,16 +30,108 @@ const TABS = [
   { id: 'insurance', label: 'Insurance', icon: Shield },
 ];
 
-const STAGES: CustomerStatus[] = [
-  'lead', 'contacted', 'appointment_set', 'inspected', 'estimate_sent', 
-  'approved', 'scheduled', 'in_progress', 'completed', 'paid'
+const TAB_IDS = new Set(TABS.map((tab) => tab.id));
+
+function normalizeContactTab(value: string | null) {
+  if (!value) return 'overview';
+  return TAB_IDS.has(value) ? value : 'overview';
+}
+
+/** Strips serialization markers and returns the clean human-readable text. */
+function formatTimelineMessage(item: any): string {
+  if (item?.type === 'stage_change') {
+    const content = String(item?.content || '').trim();
+    const match = content.match(/^Stage updated:\s*(.+?)\s*→\s*(.+)$/i);
+    if (match) {
+      return `Job status moved from ${match[1]} to ${match[2]}.`;
+    }
+    return content;
+  }
+
+  const parsedMentions = parseNoteMentions(String(item?.content || ''));
+  const parsedSchedule = parseContactSchedule(parsedMentions.plainContent);
+  // If the content contained a schedule marker, only return plainNotes (never the raw JSON)
+  if (parsedMentions.plainContent.includes('[TRUSSCTR_SCHEDULE]')) {
+    return parsedSchedule.plainNotes || 'Schedule updated.';
+  }
+  // Last-resort strip in case any other serialization marker slipped through
+  const stripped = parsedMentions.plainContent.replace(/\[TRUSSCTR_[A-Z_]+\]\{[\s\S]*$/, '').trim();
+  return parsedSchedule.plainNotes || stripped || 'Activity updated.';
+}
+
+/** Infers a human-readable event label + lucide icon name from the item. */
+function getTimelineEventMeta(item: any): { label: string; iconName: string; color: string } {
+  if (item?.type === 'stage_change') {
+    return { label: 'Stage Change', iconName: 'trending_up', color: 'text-accent bg-accent/10' };
+  }
+  const content = String(item?.content || '').toLowerCase();
+  if (content.startsWith('roof inspection report') || content.includes('smart inspection') || content.includes('inspection report')) {
+    return { label: 'Inspection', iconName: 'shield', color: 'text-blue-600 bg-blue-50' };
+  }
+  if (content.startsWith('work order') || content.includes('work order')) {
+    return { label: 'Work Order', iconName: 'wrench', color: 'text-amber-600 bg-amber-50' };
+  }
+  if (content.includes('estimate signed') || content.includes('signed') || content.includes('document')) {
+    return { label: 'Document', iconName: 'file_signature', color: 'text-violet-600 bg-violet-50' };
+  }
+  if (content.includes('estimate sent') || content.includes('estimate') || content.includes('quote')) {
+    return { label: 'Estimate', iconName: 'file_text', color: 'text-teal-600 bg-teal-50' };
+  }
+  if (content.includes('deposit') || content.includes('payment') || content.includes('paid')) {
+    return { label: 'Payment', iconName: '💵', color: 'bg-green-50' };
+  }
+  if (content.includes('before & after') || content.includes('report saved')) {
+    return { label: 'Report', iconName: '📸', color: 'bg-pink-50' };
+  }
+  if (item?.type === 'call') {
+    return { label: 'Call', iconName: 'phone', color: 'text-slate-500 bg-slate-100' };
+  }
+  if (item?.type === 'sms') {
+    return { label: 'SMS', iconName: 'message_square', color: 'text-slate-500 bg-slate-100' };
+  }
+  return { label: 'Note', iconName: 'file_text', color: 'text-slate-500 bg-slate-100' };
+}
+
+const STAGES: CustomerStatus[] = getPipelineStageOrder();
+
+// All valid statuses available in the status dropdown (includes aliases and terminal stages)
+const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
+  { value: 'lead', label: 'Lead' },
+  { value: 'contacted', label: 'Contacted' },
+  { value: 'appointment_set', label: 'Appointment Set' },
+  { value: 'inspection_scheduled', label: 'Inspection Scheduled' },
+  { value: 'inspected', label: 'Inspection' },
+  { value: 'inspection_complete', label: 'Inspection Complete' },
+  { value: 'estimate_sent', label: 'Follow Up / Negotiating' },
+  { value: 'approved', label: 'Sold' },
+  { value: 'signed_won', label: 'Signed / Won' },
+  { value: 'scheduled', label: 'Scheduled' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'retail', label: 'Retail' },
+  { value: 'lost', label: 'Lost' },
 ];
+
+// Normalize alias statuses to their canonical stage for progress bar positioning
+function normalizeStatusForProgress(status: string): CustomerStatus {
+  const aliases: Record<string, CustomerStatus> = {
+    new_lead: 'lead',
+    inspection_scheduled: 'appointment_set',
+    inspection_complete: 'inspected',
+    signed_won: 'approved',
+    retail: 'approved',
+    lost: 'completed',
+  };
+  return (aliases[status] as CustomerStatus) ?? (status as CustomerStatus);
+}
 
 export default function ContactDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => normalizeContactTab(searchParams.get('tab')));
   const [contact, setContact] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -72,6 +163,25 @@ export default function ContactDetail() {
       fetchDocuments();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    const nextTab = normalizeContactTab(searchParams.get('tab'));
+    setActiveTab((current) => (current === nextTab ? current : nextTab));
+  }, [searchParams]);
+
+  const changeTab = (tabId: string) => {
+    const nextTab = normalizeContactTab(tabId);
+    setActiveTab(nextTab);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (nextTab === 'overview') {
+        next.delete('tab');
+      } else {
+        next.set('tab', nextTab);
+      }
+      return next;
+    }, { replace: true });
+  };
 
   useEffect(() => {
     const updateTabOverflow = () => {
@@ -131,6 +241,45 @@ export default function ContactDetail() {
     }
   };
 
+  // Advance contact to a new pipeline status and log the change in the timeline
+  const advanceStatus = async (newStatus: CustomerStatus, logContent?: string) => {
+    if (!contact || !user?.id) return;
+    const from = contact.status as string;
+    if (from === newStatus) return;
+    const now = new Date().toISOString();
+    try {
+      await (supabase.from('contacts') as any)
+        .update({ status: newStatus, status_changed_at: now })
+        .eq('id', contact.id);
+      await (supabase.from('communications') as any).insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        type: 'stage_change',
+        content: logContent || `Stage updated: ${from.replace(/_/g, ' ')} → ${newStatus.replace(/_/g, ' ')}`,
+        user_id: user.id,
+        direction: 'outbound',
+      });
+      fetchContact();
+      fetchTimeline();
+    } catch (err) {
+      console.error('Error advancing status:', err);
+    }
+  };
+
+  // Handle Call / SMS / Email actions — auto-advance lead → contacted on first outreach
+  const handleContactAction = async (type: 'call' | 'sms' | 'email', value: string | null) => {
+    if (!value) return;
+    if (['new_lead', 'lead'].includes(contact.status as string) && user?.id) {
+      await advanceStatus(
+        'contacted',
+        `Stage updated: ${(contact.status as string).replace(/_/g, ' ')} → contacted (outbound ${type})`,
+      );
+    }
+    if (type === 'call') window.location.href = `tel:${value}`;
+    else if (type === 'sms') window.location.href = `sms:${value}`;
+    else window.location.href = `mailto:${value}`;
+  };
+
   const openEdit = () => {
     const parsed = parseContactSchedule(contact?.notes);
     setEditForm({ ...contact, notes: parsed.plainNotes });
@@ -153,7 +302,9 @@ export default function ContactDetail() {
           updates[f] = Number.isNaN(n) ? null : n;
         }
       });
-      updates.notes = serializeContactSchedule(parsed.schedule, updates.notes || '');
+      // Strip any accidental schedule markers from the plain notes before re-serializing
+      const rawPlainNotes = String(updates.notes || '').replace(/\[TRUSSCTR_SCHEDULE\]\{[\s\S]*$/, '').trim();
+      updates.notes = serializeContactSchedule(parsed.schedule, rawPlainNotes);
       if (statusChanged) {
         updates.status_changed_at = new Date().toISOString();
       }
@@ -197,12 +348,30 @@ export default function ContactDetail() {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     try {
+      const videoError = await validateVideoForCloud(file);
+      if (videoError) {
+        alert(videoError);
+        e.target.value = '';
+        return;
+      }
+
       const isImage = file.type.startsWith('image/');
+      const uploadFile = isImage
+        ? new File(
+            [await compressImageWithLightCompressor(file, {
+              maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
+              maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
+              quality: PHOTO_POLICY_PRESETS.high8mp.quality,
+            })],
+            file.name.replace(/\.[^.]+$/, '') + '.jpg',
+            { type: 'image/jpeg' }
+          )
+        : file;
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${id}/${fileName}`;
       const bucket = isImage ? 'projectceo-photos' : 'documents';
-      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile);
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('documents').insert({
@@ -211,7 +380,7 @@ export default function ContactDetail() {
         name: file.name,
         type: isImage ? 'photo' : 'document',
         url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
-        size: file.size,
+        size: uploadFile.size,
         uploaded_by: user?.id ?? 'unknown',
       } as any);
       if (dbError) throw dbError;
@@ -226,12 +395,30 @@ export default function ContactDetail() {
     const file = e.target.files?.[0];
     if (!file || !id) return;
     try {
+      const videoError = await validateVideoForCloud(file);
+      if (videoError) {
+        alert(videoError);
+        e.target.value = '';
+        return;
+      }
+
       const isImage = file.type.startsWith('image/');
+      const uploadFile = isImage
+        ? new File(
+            [await compressImageWithLightCompressor(file, {
+              maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
+              maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
+              quality: PHOTO_POLICY_PRESETS.high8mp.quality,
+            })],
+            file.name.replace(/\.[^.]+$/, '') + '.jpg',
+            { type: 'image/jpeg' }
+          )
+        : file;
       const fileExt = file.name.split('.').pop();
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${id}/${fileName}`;
       const bucket = isImage ? 'projectceo-photos' : 'documents';
-      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile);
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
       const { error: dbError } = await supabase.from('documents').insert({
@@ -240,7 +427,7 @@ export default function ContactDetail() {
         name: label,
         type: docType as any,
         url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
-        size: file.size,
+        size: uploadFile.size,
         uploaded_by: user?.id ?? 'unknown',
       } as any);
       if (dbError) throw dbError;
@@ -277,9 +464,9 @@ export default function ContactDetail() {
         </div>
         <div className="absolute -bottom-8 left-6 right-6 flex justify-between gap-3">
           {[
-            { icon: Phone, label: 'Call', color: 'bg-emerald-500', action: () => contact.phone1 && (window.location.href = `tel:${contact.phone1}`) },
-            { icon: MessageSquare, label: 'SMS', color: 'bg-accent', action: () => contact.phone1 && (window.location.href = `sms:${contact.phone1}`) },
-            { icon: Mail, label: 'Email', color: 'bg-amber-500', action: () => contact.email && (window.location.href = `mailto:${contact.email}`) },
+            { icon: Phone, label: 'Call', color: 'bg-emerald-500', action: () => handleContactAction('call', contact.phone1) },
+            { icon: MessageSquare, label: 'SMS', color: 'bg-accent', action: () => handleContactAction('sms', contact.phone1) },
+            { icon: Mail, label: 'Email', color: 'bg-amber-500', action: () => handleContactAction('email', contact.email) },
           ].map((action) => (
             <button key={action.label} onClick={action.action} className="flex-1 bg-white p-4 rounded-2xl shadow-lg flex flex-col items-center gap-1 active:scale-95 transition-transform">
               <div className={`${action.color} h-10 w-10 rounded-xl flex items-center justify-center text-white mb-1`}><action.icon size={20} /></div>
@@ -325,15 +512,18 @@ export default function ContactDetail() {
             setCanScrollTabsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
-          style={{ touchAction: 'pan-x pan-y' }}
+          style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}
         >
         <div className="flex gap-6 min-w-max">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
-            const inspectionDone = tab.id === 'inspection' && ['inspection_complete', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'].includes(contact.status);
+            const normalizedContactStatus = normalizePipelineStatus(contact.status);
+            const inspectionDone =
+              tab.id === 'inspection' &&
+              ['inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed'].includes(normalizedContactStatus);
             return (
-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
+              <button key={tab.id} onClick={() => changeTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
                 <Icon size={18} />
                 <span className={`text-sm font-bold whitespace-nowrap ${tab.id === 'inspection' ? (inspectionDone ? 'text-emerald-600' : 'text-rose-500') : ''}`}>{tab.label}</span>
               </button>
@@ -348,7 +538,7 @@ export default function ContactDetail() {
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
             {activeTab === 'overview' && <OverviewTab contact={contact} onRefresh={fetchContact} />}
             {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
-            {activeTab === 'status' && <StatusTab contact={contact} />}
+            {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
             {activeTab === 'documents' && <DocumentsTab contactId={contact.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} />}
             {activeTab === 'financial' && <FinancialTab contact={contact} userId={user?.id} onEdit={openEdit} onRefresh={fetchContact} />}
@@ -390,7 +580,7 @@ export default function ContactDetail() {
               <div>
                 <label className="text-xs font-bold text-slate-400 uppercase">Status</label>
                 <select className="w-full bg-slate-50 rounded-xl p-3 text-sm mt-1" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
-                  {STAGES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+                  {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                 </select>
               </div>
 
@@ -451,7 +641,7 @@ export default function ContactDetail() {
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-5">
               <div className="space-y-3">
                 <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
-                <button onClick={() => { setShowActions(false); setActiveTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
+                <button onClick={() => { setShowActions(false); changeTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
               </div>
             </div>
             <div
@@ -474,6 +664,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   const [plainNotes, setPlainNotes] = useState(parsed.plainNotes);
   const [savingNotes, setSavingNotes] = useState(false);
   const [syncingSchedule, setSyncingSchedule] = useState(false);
+  const [scheduleSyncError, setScheduleSyncError] = useState<string | null>(null);
   const [workOrders, setWorkOrders] = useState<any[]>([]);
 
   useEffect(() => {
@@ -509,8 +700,11 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
     try {
       const { error } = await (supabase.from('contacts') as any).update({ notes: nextNotes }).eq('id', contact.id);
       if (error) throw error;
+      setScheduleSyncError(null);
     } catch (err) {
       console.error('Error syncing customer schedule:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setScheduleSyncError(`Schedule sync failed. ${message}`);
     } finally {
       setSyncingSchedule(false);
     }
@@ -519,14 +713,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   useEffect(() => {
     if (!contact?.id) return;
 
-    const reachedStatuses = new Set<string>();
-    const statusOrder: CustomerStatus[] = ['appointment_set', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'];
-    const currentIndex = statusOrder.indexOf(contact.status);
-    if (currentIndex >= 0) {
-      for (let index = 0; index <= currentIndex; index += 1) {
-        reachedStatuses.add(statusOrder[index]);
-      }
-    }
+    const reachedStatuses = getReachedPipelineStatuses(contact.status);
 
     let nextSchedule = parseContactSchedule(contact?.notes).schedule;
     const statusTimestamp = contact.status_changed_at || contact.updated_at || new Date().toISOString();
@@ -611,6 +798,8 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   const allEvents = buildContactPipelineEvents(contact, workOrders);
   const upcomingEvents = getUpcomingPipelineEvents(allEvents).slice(0, 3);
   const nextEvent = upcomingEvents[0] || allEvents[0] || null;
+  const normalizedStatus = normalizePipelineStatus(contact.status);
+  const boardStatus = toPipelineBoardStage(contact.status);
   const currentStageLabel = getPipelineStageLabel(contact.status);
   const nextStageLabel = getNextPipelineStageLabel(contact.status);
 
@@ -689,6 +878,13 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
           cta: 'Collect Payment',
           detail: 'Open documents to send the final invoice.',
         };
+      case 'paid':
+        return {
+          route: `/contacts/${id}?tab=financial`,
+          icon: DollarSign,
+          cta: 'Review Final Ledger',
+          detail: 'Confirm final payment and close out any remaining balance details.',
+        };
       default:
         return {
           route: `/calendar?contactId=${id}`,
@@ -699,20 +895,22 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
     }
   };
 
-  const nextStepAction = getNextStepAction(contact.status);
+  const nextStepAction = getNextStepAction(normalizedStatus);
   const NextStepIcon = nextStepAction.icon;
+  const currentProgressIndex = STAGES.indexOf(boardStatus);
 
   return (
     <div className="space-y-6">
       <div className="card p-5 space-y-4">
         <div className="flex justify-between items-center">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Current Status</h3>
-          <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">{contact.status.replace(/_/g, ' ')}</span>
+          <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">
+            {currentStageLabel}
+          </span>
         </div>
         <div className="flex gap-1">
           {STAGES.map((stage, i) => {
-            const currentIndex = STAGES.indexOf(contact.status);
-            return <div key={stage} className={`h-1.5 flex-1 rounded-full ${i <= currentIndex ? 'bg-accent' : 'bg-slate-100'}`} />;
+            return <div key={stage} className={`h-1.5 flex-1 rounded-full ${i <= currentProgressIndex ? 'bg-accent' : 'bg-slate-100'}`} />;
           })}
         </div>
       </div>
@@ -754,6 +952,12 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
               </span>
             )}
           </div>
+          {scheduleSyncError && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Sync Error</p>
+              <p className="mt-1 text-xs text-red-700">{scheduleSyncError}</p>
+            </div>
+          )}
           {upcomingEvents.length > 0 ? upcomingEvents.map((event) => (
             <button
               key={event.id}
@@ -765,7 +969,9 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
                 <div>
                   <p className="text-sm font-bold text-primary">{event.title}</p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    {new Date(event.date).toLocaleString()}
+                    {new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {' at '}
+                    {new Date(event.date).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
                   </p>
                 </div>
                 <ChevronRight size={18} className="text-slate-300" />
@@ -822,6 +1028,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
             </div>
           </div>
         </div>
+        <WeatherCard contact={contact} />
         <div className="card p-5 space-y-4">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Quick Notes</h3>
           <textarea
@@ -844,9 +1051,151 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
   );
 }
 
+// WMO weather interpretation codes → label + emoji
+const WMO_LABELS: Record<number, { label: string; icon: string }> = {
+  0:  { label: 'Clear Sky',           icon: '☀️'  },
+  1:  { label: 'Mainly Clear',        icon: '🌤️'  },
+  2:  { label: 'Partly Cloudy',       icon: '⛅'  },
+  3:  { label: 'Overcast',            icon: '☁️'  },
+  45: { label: 'Foggy',               icon: '🌫️'  },
+  48: { label: 'Icy Fog',             icon: '🌫️'  },
+  51: { label: 'Light Drizzle',       icon: '🌦️'  },
+  53: { label: 'Drizzle',             icon: '🌦️'  },
+  55: { label: 'Heavy Drizzle',       icon: '🌧️'  },
+  61: { label: 'Light Rain',          icon: '🌧️'  },
+  63: { label: 'Rain',                icon: '🌧️'  },
+  65: { label: 'Heavy Rain',          icon: '🌧️'  },
+  71: { label: 'Light Snow',          icon: '🌨️'  },
+  73: { label: 'Snow',                icon: '❄️'  },
+  75: { label: 'Heavy Snow',          icon: '❄️'  },
+  77: { label: 'Snow Grains',         icon: '🌨️'  },
+  80: { label: 'Light Showers',       icon: '🌦️'  },
+  81: { label: 'Showers',             icon: '🌧️'  },
+  82: { label: 'Heavy Showers',       icon: '⛈️'  },
+  85: { label: 'Snow Showers',        icon: '🌨️'  },
+  86: { label: 'Heavy Snow Showers',  icon: '❄️'  },
+  95: { label: 'Thunderstorm',        icon: '⛈️'  },
+  96: { label: 'Thunderstorm w/ Hail',icon: '⛈️'  },
+  99: { label: 'Severe Thunderstorm', icon: '🌩️'  },
+};
+
+function wmoLabel(code: number): string {
+  return WMO_LABELS[code]?.label ?? 'Unknown';
+}
+function wmoIcon(code: number): string {
+  return WMO_LABELS[code]?.icon ?? '🌡️';
+}
+
+function WeatherCard({ contact }: { contact: any }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [weather, setWeather] = useState<{
+    city: string;
+    tempF: number;
+    windMph: number;
+    precipChance: number;
+    code: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadWeather = async () => {
+      const queryParts = [contact?.city, contact?.state, contact?.zip].filter(Boolean);
+      if (!queryParts.length) {
+        setError('Add city/state or ZIP to view weather.');
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+      try {
+        const query = encodeURIComponent(queryParts.join(', '));
+        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=1&language=en&format=json`);
+        if (!geoRes.ok) throw new Error(`Geocoding failed (${geoRes.status})`);
+        const geoJson = await geoRes.json();
+        const first = geoJson?.results?.[0];
+        if (!first) throw new Error('Location not found');
+
+        const weatherRes = await fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${first.latitude}&longitude=${first.longitude}&current=temperature_2m,wind_speed_10m,weather_code&hourly=precipitation_probability&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1`
+        );
+        if (!weatherRes.ok) throw new Error(`Weather fetch failed (${weatherRes.status})`);
+        const weatherJson = await weatherRes.json();
+        const current = weatherJson?.current;
+        const precip = Array.isArray(weatherJson?.hourly?.precipitation_probability)
+          ? Math.max(0, ...(weatherJson.hourly.precipitation_probability as number[]).slice(0, 8))
+          : 0;
+
+        if (!cancelled) {
+          setWeather({
+            city: first.name || queryParts[0],
+            tempF: Number(current?.temperature_2m ?? 0),
+            windMph: Number(current?.wind_speed_10m ?? 0),
+            code: Number(current?.weather_code ?? 0),
+            precipChance: Number(precip ?? 0),
+          });
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unable to load weather');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void loadWeather();
+    return () => {
+      cancelled = true;
+    };
+  }, [contact?.city, contact?.state, contact?.zip]);
+
+  return (
+    <div className="card p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Jobsite Weather</h3>
+        <CloudSun size={16} className="text-accent" />
+      </div>
+      {loading && <p className="text-sm text-slate-500">Loading weather...</p>}
+      {!loading && error && <p className="text-sm text-amber-600">{error}</p>}
+      {!loading && !error && weather && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase text-slate-400">Location</p>
+            <p className="text-sm font-bold text-primary">{weather.city}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase text-slate-400">Conditions</p>
+            <p className="text-sm font-bold text-primary">{wmoIcon(weather.code)} {wmoLabel(weather.code)}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase text-slate-400">Temp</p>
+            <p className="text-sm font-bold text-primary">{Math.round(weather.tempF)}°F</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-[10px] font-bold uppercase text-slate-400">Wind</p>
+            <p className="text-sm font-bold text-primary">{Math.round(weather.windMph)} mph</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3 col-span-2">
+            <p className="text-[10px] font-bold uppercase text-slate-400">Precip Chance (Next Hours)</p>
+            <p className="text-sm font-bold text-primary">{Math.round(weather.precipChance)}%</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
   const navigate = useNavigate();
   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
+  const isIosInspectionCapture = Capacitor.getPlatform() === 'ios';
+  const cameraFallbackInputRef = React.useRef<HTMLInputElement | null>(null);
+  const inlineVideoRef = React.useRef<HTMLVideoElement | null>(null);
+  const inlineCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  const inlineStreamRef = React.useRef<MediaStream | null>(null);
+  const pendingCaptureBlobsRef = React.useRef<Blob[]>([]);
   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
@@ -858,8 +1207,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
   const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState('');
+  const [inlineCameraOpen, setInlineCameraOpen] = useState(false);
+  const [inlineCaptureCount, setInlineCaptureCount] = useState(0);
   const [markupIndex, setMarkupIndex] = useState<number | null>(null);
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+  // Synchronous guard — prevents "Lock was stolen by another request" when
+  // the user taps the camera button twice before the async state update re-renders.
+  const cameraOpenRef = React.useRef(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
   const [completedInspection, setCompletedInspection] = useState<any>(null);
@@ -878,6 +1233,169 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const computedFootprint = adjLength && adjWidth ? adjLength * adjWidth : 0;
   const effectiveFootprint = computedFootprint || (footprintArea ? Number(footprintArea) : 0);
   const roofSurfaceArea = effectiveFootprint ? effectiveFootprint * pitchMultiplier : 0;
+
+  const withLockRetry = async <T,>(fn: () => Promise<T>, retries = 2, delayMs = 250): Promise<T> => {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes('Lock was stolen') || attempt === retries) {
+          throw error;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, delayMs * (attempt + 1)));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+  };
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
+    let timeoutId: number | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = window.setTimeout(() => {
+        reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
+      }, ms);
+    });
+
+    try {
+      return await Promise.race([promise, timeoutPromise]);
+    } finally {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
+    }
+  };
+
+  const ensureInspectionSession = async () => {
+    const { data, error } = await withTimeout(supabase.auth.getSession(), 8000, 'Session check');
+    if (error) throw error;
+    if (!data.session) {
+      throw new Error('No active session. Please sign in again.');
+    }
+    return data.session;
+  };
+
+  const stopInlineCamera = () => {
+    inlineStreamRef.current?.getTracks().forEach((track) => track.stop());
+    inlineStreamRef.current = null;
+    if (inlineVideoRef.current) {
+      inlineVideoRef.current.srcObject = null;
+    }
+    pendingCaptureBlobsRef.current = [];
+    setInlineCaptureCount(0);
+    setInlineCameraOpen(false);
+  };
+
+  const attachInlineStream = async (stream: MediaStream) => {
+    const video = inlineVideoRef.current;
+    if (!video) return;
+
+    video.srcObject = stream;
+    video.muted = true;
+    video.autoplay = true;
+    video.playsInline = true;
+
+    await new Promise<void>((resolve) => {
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        resolve();
+        return;
+      }
+
+      const handleLoadedMetadata = () => {
+        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        resolve();
+      };
+
+      video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    });
+
+    await video.play().catch(() => undefined);
+  };
+
+  const startInlineCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      cameraFallbackInputRef.current?.click();
+      return;
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+
+    inlineStreamRef.current = stream;
+    pendingCaptureBlobsRef.current = [];
+    setInlineCaptureCount(0);
+    setInlineCameraOpen(true);
+    window.requestAnimationFrame(() => {
+      void attachInlineStream(stream);
+    });
+  };
+
+  const captureInlineFrame = async () => {
+    const video = inlineVideoRef.current;
+    const canvas = inlineCanvasRef.current;
+    if (!video || !canvas) return;
+
+    const width = video.videoWidth || 1920;
+    const height = video.videoHeight || 1080;
+    canvas.width = width;
+    canvas.height = height;
+
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.drawImage(video, 0, 0, width, height);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, 'image/jpeg', 0.9);
+    });
+    if (!blob) return;
+
+    pendingCaptureBlobsRef.current = [...pendingCaptureBlobsRef.current, blob];
+    setInlineCaptureCount(pendingCaptureBlobsRef.current.length);
+  };
+
+  const finishInlineCamera = async () => {
+    const capturedBlobs = [...pendingCaptureBlobsRef.current];
+    stopInlineCamera();
+
+    if (!capturedBlobs.length) {
+      return;
+    }
+
+    setUploading(true);
+    try {
+      let failed = 0;
+      for (const [index, rawBlob] of capturedBlobs.entries()) {
+        try {
+          setUploadMessage(`Compressing photo ${index + 1} of ${capturedBlobs.length}...`);
+          const blob = await compressImageWithLightCompressor(rawBlob, {
+            maxWidth: PHOTO_POLICY_PRESETS.standard3mp.width,
+            maxHeight: PHOTO_POLICY_PRESETS.standard3mp.height,
+            quality: PHOTO_POLICY_PRESETS.standard3mp.quality,
+          }).catch(() => rawBlob);
+          setUploadMessage(`Uploading photo ${index + 1} of ${capturedBlobs.length}...`);
+          await uploadInspectionBlob(blob, `capture_${Date.now()}_${index + 1}.jpg`);
+        } catch (err) {
+          failed += 1;
+          console.error(`Inline camera upload ${index + 1} failed:`, err);
+        }
+      }
+
+      if (failed > 0) {
+        alert(`${failed} of ${capturedBlobs.length} photo(s) failed to upload. The rest were saved.`);
+      }
+    } finally {
+      setUploading(false);
+      setUploadMessage('');
+    }
+  };
 
   const loadInspectionData = (data: any) => {
     if (!data) return;
@@ -908,6 +1426,15 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     };
     if (contact?.id) fetchInspection();
   }, [contact?.id]);
+
+  useEffect(() => () => {
+    inlineStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  useEffect(() => {
+    if (!inlineCameraOpen || !inlineStreamRef.current) return;
+    void attachInlineStream(inlineStreamRef.current);
+  }, [inlineCameraOpen]);
 
   const toggleDamage = (type: string) => {
     setChecklist((prev) => {
@@ -968,36 +1495,39 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
 
   const uploadInspectionBlob = async (blob: Blob, originalName?: string) => {
     if (!contact?.id || !userId) return;
+    setUploadMessage('Checking session...');
+    await ensureInspectionSession();
+
     const ext = (originalName?.split('.').pop() || blob.type.split('/').pop() || 'jpg').toLowerCase();
-    const fileName = `${activeElevation}_${Date.now()}.${ext}`;
+    const elevation = activeElevation;
+    const fileName = `${elevation}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const filePath = `${contact.id}/${fileName}`;
-    const { error: uploadError } = await supabase.storage
-      .from('projectceo-photos')
-      .upload(filePath, blob, { contentType: blob.type || 'image/jpeg' });
+    const uploadBytes = await blob.arrayBuffer();
+
+    setUploadMessage('Sending photo to cloud...');
+    const { error: uploadError } = await withTimeout(withLockRetry(() =>
+      supabase.storage
+        .from('projectceo-photos')
+        .upload(filePath, uploadBytes, { contentType: blob.type || 'image/jpeg' })
+    ), 30000, 'Photo upload');
     if (uploadError) throw uploadError;
     const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
-    const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
-    let displayUrl = signedData?.signedUrl || publicUrl;
-    try {
-      const resp = await fetch(displayUrl);
-      if (resp.ok) {
-        const fetchedBlob = await resp.blob();
-        displayUrl = URL.createObjectURL(fetchedBlob);
-      }
-    } catch {
-      // fall back to signed/public URL
-    }
-    const { error: dbError } = await supabase.from('documents').insert({
-      contact_id: contact.id,
-      company_id: contact.company_id,
-      name: `${activeElevation} Inspection Photo`,
-      type: 'photo',
-      url: publicUrl,
-      size: blob.size,
-      uploaded_by: userId,
-    } as any);
+    const displayUrl = URL.createObjectURL(blob);
+
+    setUploadMessage('Saving photo record...');
+    const { error: dbError } = await withTimeout(withLockRetry(async () => (
+      await supabase.from('documents').insert({
+        contact_id: contact.id,
+        company_id: contact.company_id,
+        name: `${elevation} Inspection Photo`,
+        type: 'photo',
+        url: publicUrl,
+        size: blob.size,
+        uploaded_by: userId,
+      } as any)
+    )), 15000, 'Photo record save');
     if (dbError) throw dbError;
-    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: blob.size }, ...prev]);
+    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation, size: blob.size }, ...prev]);
     onDocumentsChanged?.();
   };
 
@@ -1005,38 +1535,34 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     const file = e.target.files?.[0];
     if (!file || !contact?.id || !userId) return;
     setUploading(true);
+    setUploadMessage(`Uploading ${activeElevation} photo...`);
     try {
-      await uploadInspectionBlob(file, file.name);
+      const compressed = file.type.startsWith('image/')
+        ? await compressImageWithLightCompressor(file, {
+            maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
+            maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
+            quality: PHOTO_POLICY_PRESETS.high8mp.quality,
+          })
+        : file;
+      await uploadInspectionBlob(compressed, file.name);
     } catch (err) {
       console.error('Photo upload error:', err);
       const message = (err as any)?.message || 'Check Supabase storage bucket and policies.';
       alert(`Photo upload failed. ${message}`);
     } finally {
       setUploading(false);
+      setUploadMessage('');
       e.target.value = '';
     }
   };
 
   const capturePhoto = async () => {
     if (!contact?.id || !userId) return;
-    setUploading(true);
     try {
-      const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
-      const photosToUpload = result?.photos || [];
-      for (const url of photosToUpload) {
-        // Convert file:// path → capacitor://localhost/... so WKWebView can fetch it
-        const webUrl = Capacitor.convertFileSrc(url);
-        const resp = await fetch(webUrl);
-        if (!resp.ok) throw new Error(`Failed to read photo (${resp.status})`);
-        const blob = await resp.blob();
-        await uploadInspectionBlob(blob, url);
-      }
+      await startInlineCamera();
     } catch (err) {
-      console.error('Camera capture error:', err);
-      const message = (err as any)?.message || 'Camera capture failed.';
-      alert(`Camera capture failed. ${message}`);
-    } finally {
-      setUploading(false);
+      console.error('Inline camera error:', err);
+      cameraFallbackInputRef.current?.click();
     }
   };
 
@@ -1129,15 +1655,21 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         direction: 'outbound',
       } as any);
       if (error) throw error;
-      // Try to move pipeline using web-app status; fallback to mobile status if enum blocks it.
+      // Move to canonical inspected status. If DB enum is older, fall back to legacy aliases.
       const now = new Date().toISOString();
       const { error: statusError } = await (supabase.from('contacts') as any)
-        .update({ status: 'inspection_complete', status_changed_at: now })
+        .update({ status: 'inspected', status_changed_at: now })
         .eq('id', contact.id);
       if (statusError) {
-        await (supabase.from('contacts') as any)
-          .update({ status: 'inspected', status_changed_at: now })
-          .eq('id', contact.id);
+        console.error('completeInspection: inspected status failed, trying legacy fallback:', statusError);
+        const fallbackCandidates = ['inspection_complete', 'inspection_completed', 'inspection_scheduled'];
+        for (const fallbackStatus of fallbackCandidates) {
+          const { error: fallbackError } = await (supabase.from('contacts') as any)
+            .update({ status: fallbackStatus, status_changed_at: now })
+            .eq('id', contact.id);
+          if (!fallbackError) break;
+          console.error(`completeInspection: ${fallbackStatus} fallback failed:`, fallbackError);
+        }
       }
       try {
         const { data } = await (supabase.from('inspections') as any).upsert({
@@ -1159,6 +1691,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       } catch {
         // ignore if inspections table missing
       }
+      onDocumentsChanged?.();
       alert('Inspection completed and saved to timeline!');
       setStep('report');
     } catch (err) {
@@ -1324,7 +1857,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
             >
               <span className="text-sm font-bold text-slate-500">
-                {uploading ? 'Uploading...' : `Tap to capture ${activeElevation} photos`}
+                {uploading ? uploadMessage || 'Uploading...' : `Tap to capture ${activeElevation} photos`}
               </span>
               <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that elevation is complete.</span>
             </button>
@@ -1332,7 +1865,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <label className="block w-full cursor-pointer">
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
               <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-                <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
+                <span className="text-sm font-bold text-slate-500">{uploading ? uploadMessage || 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
               </div>
             </label>
           )}
@@ -1342,6 +1875,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               Choose from Library
               <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
             </label>
+            <input
+              ref={cameraFallbackInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handlePhotoUpload}
+            />
           </div>
           <div className="grid grid-cols-2 gap-3">
             {photos.map((p, i) => (
@@ -1357,9 +1898,50 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               </div>
             ))}
           </div>
-          <button onClick={completeInspection} disabled={saving} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
-            {saving ? 'Saving...' : 'Complete Inspection'}
+          <button onClick={completeInspection} disabled={saving || uploading} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
+            {uploading ? (uploadMessage || 'Uploading photos...') : saving ? 'Saving...' : 'Complete Inspection'}
           </button>
+        </div>
+      )}
+
+      {inlineCameraOpen && (
+        <div className="fixed inset-0 z-[120] bg-black flex flex-col">
+          <div
+            className="flex items-center justify-between px-4 pb-3 text-white border-b border-white/10"
+            style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}
+          >
+            <button onClick={stopInlineCamera} className="text-sm font-bold">Cancel</button>
+            <div className="text-center">
+              <p className="text-sm font-bold">{activeElevation} Photos</p>
+              <p className="text-xs text-white/70">{inlineCaptureCount} captured</p>
+            </div>
+            <button onClick={finishInlineCamera} className="text-sm font-bold text-accent">Done</button>
+          </div>
+          <div className="flex-1 relative bg-black">
+            <video
+              ref={inlineVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="h-full w-full object-cover"
+            />
+            <div
+              className="absolute inset-x-0 bottom-0 px-6 pt-6 bg-gradient-to-t from-black/80 to-transparent"
+              style={{ paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}
+            >
+              <div className="flex items-center justify-center gap-6">
+                <button
+                  onClick={captureInlineFrame}
+                  className="h-20 w-20 rounded-full border-4 border-white bg-white/20"
+                  aria-label="Capture photo"
+                />
+              </div>
+              <p className="mt-4 text-center text-xs text-white/80">
+                Keep taking photos, then tap Done to upload this {activeElevation.toLowerCase()} set.
+              </p>
+            </div>
+          </div>
+          <canvas ref={inlineCanvasRef} className="hidden" />
         </div>
       )}
 
@@ -1409,25 +1991,94 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   );
 }
 
-function StatusTab({ contact }: { contact: any }) {
+function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: CustomerStatus) => Promise<void> }) {
+  const [advancing, setAdvancing] = useState(false);
+  const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status) as CustomerStatus);
+  const nextStage = currentIndex >= 0 && currentIndex < STAGES.length - 1 ? STAGES[currentIndex + 1] : null;
+  const nextStageLabel = nextStage ? ALL_STATUSES.find(s => s.value === nextStage)?.label || nextStage.replace(/_/g, ' ') : null;
+
+  const handleAdvance = async (status: CustomerStatus) => {
+    setAdvancing(true);
+    try {
+      await onAdvance(status);
+    } finally {
+      setAdvancing(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <h3 className="text-sm font-bold text-primary">Job Timeline</h3>
-      <div className="space-y-8 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
+      {/* Quick-advance to the very next stage */}
+      {nextStage ? (
+        <button
+          type="button"
+          disabled={advancing}
+          onClick={() => handleAdvance(nextStage)}
+          className="w-full bg-accent text-white py-4 rounded-2xl font-bold text-sm shadow-lg shadow-accent/30 active:scale-95 transition-transform disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <CheckCircle2 size={18} />
+          {advancing ? 'Updating...' : `Move to ${nextStageLabel}`}
+        </button>
+      ) : (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-center">
+          <p className="text-sm font-bold text-emerald-700">Job Complete — Paid</p>
+          <p className="text-xs text-emerald-600 mt-1">This job has reached the final stage.</p>
+        </div>
+      )}
+
+      {/* Full pipeline — past stages show as done, future stages are tappable */}
+      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pipeline Stages</h3>
+      <div className="space-y-1 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
         {STAGES.map((stage, i) => {
-          const currentIndex = STAGES.indexOf(contact.status);
-          const isDone = i <= currentIndex;
+          const isDone = i < currentIndex;
+          const isCurrent = i === currentIndex;
+          const isFuture = i > currentIndex;
+          const stageLabel = ALL_STATUSES.find(s => s.value === stage)?.label || stage.replace(/_/g, ' ');
+
           return (
-            <div key={stage} className="flex gap-6 relative">
-              <div className={`h-8 w-8 rounded-full flex items-center justify-center z-10 ${isDone ? 'bg-accent text-white' : 'bg-white border-2 border-slate-100 text-slate-300'}`}>
-                {isDone ? <CheckCircle2 size={16} /> : <div className="h-2 w-2 rounded-full bg-current" />}
+            <button
+              key={stage}
+              type="button"
+              disabled={advancing || !isFuture}
+              onClick={() => isFuture ? handleAdvance(stage) : undefined}
+              className={`w-full flex gap-4 relative py-2 px-2 rounded-xl text-left transition-colors ${isFuture ? 'active:bg-slate-50' : 'cursor-default'}`}
+            >
+              <div className={`h-8 w-8 rounded-full flex items-center justify-center z-10 flex-shrink-0 ${isCurrent ? 'bg-accent text-white ring-4 ring-accent/20' : isDone ? 'bg-emerald-500 text-white' : 'bg-white border-2 border-slate-100 text-slate-300'}`}>
+                {isDone ? <CheckCircle2 size={16} /> : isCurrent ? <div className="h-2.5 w-2.5 rounded-full bg-white" /> : <div className="h-2 w-2 rounded-full bg-current" />}
               </div>
               <div className="flex-1 pt-1">
-                <p className={`text-sm font-bold ${isDone ? 'text-primary' : 'text-slate-400'}`}>{stage.replace(/_/g, ' ').toUpperCase()}</p>
+                <p className={`text-sm font-bold ${isCurrent ? 'text-accent' : isDone ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {stageLabel}
+                </p>
+                {isCurrent && <p className="text-[10px] text-accent/70 font-medium mt-0.5">Current Stage</p>}
+                {isFuture && <p className="text-[10px] text-slate-400 mt-0.5">Tap to jump here</p>}
               </div>
-            </div>
+              {isFuture && <ChevronRight size={16} className="text-slate-300 mt-2 flex-shrink-0" />}
+            </button>
           );
         })}
+      </div>
+
+      {/* Other outcomes (Retail / Lost) */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Other Outcomes</h3>
+        <div className="grid grid-cols-2 gap-3">
+          {(['retail', 'lost'] as CustomerStatus[]).map(status => {
+            const label = ALL_STATUSES.find(s => s.value === status)?.label || status;
+            const isActive = contact.status === status;
+            return (
+              <button
+                key={status}
+                type="button"
+                disabled={advancing || isActive}
+                onClick={() => !isActive && handleAdvance(status)}
+                className={`py-3 rounded-xl text-xs font-bold border active:scale-95 transition-transform disabled:opacity-50 ${isActive ? 'bg-slate-800 text-white border-slate-800' : 'bg-white border-slate-200 text-slate-600'}`}
+              >
+                {isActive ? `✓ ${label}` : label}
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1607,7 +2258,7 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
             onKeyDown={handleNoteKeyDown}
           />
           {mentionTargets.length > 0 && (
-            <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+            <div className="mt-3 flex gap-2 overflow-x-auto no-scrollbar pb-1" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}>
               {mentionTargets.slice(0, 8).map((member) => (
                 <button
                   key={member.id}
@@ -1644,38 +2295,61 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
         </button>
       </div>
       <div className="space-y-4">
-        {localTimeline.length > 0 ? localTimeline.map((item, i) => (
-          <div key={i} className="card p-4 space-y-2">
+        {localTimeline.length > 0 ? localTimeline.map((item, i) => {
+          const meta = getTimelineEventMeta(item);
+          const message = formatTimelineMessage(item);
+          // Split message into lines, then each line into @mention segments
+          const lines = message.split('\n');
+          const ts = item.created_at ? new Date(item.created_at) : null;
+          const dateStr = ts ? ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+          const timeStr = ts ? ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+
+          return (
+          <div key={item.id || i} className="card p-4 space-y-2.5">
+            {/* Header row */}
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-2">
-                <div className={`h-6 w-6 rounded-md flex items-center justify-center ${item.type === 'stage_change' ? 'bg-accent/10 text-accent' : 'bg-slate-100 text-slate-500'}`}>
-                  {item.type === 'call'         && <Phone      size={12} />}
-                  {item.type === 'note'         && <FileText   size={12} />}
-                  {item.type === 'sms'          && <MessageSquare size={12} />}
-                  {item.type === 'stage_change' && <TrendingUp size={12} />}
+                <div className={`h-6 w-6 rounded-md flex items-center justify-center shrink-0 ${meta.color}`}>
+                  {meta.iconName === 'trending_up'    && <TrendingUp    size={12} />}
+                  {meta.iconName === 'shield'         && <Shield        size={12} />}
+                  {meta.iconName === 'wrench'         && <Wrench        size={12} />}
+                  {meta.iconName === 'file_signature' && <FileText      size={12} />}
+                  {meta.iconName === 'file_text'      && <FileText      size={12} />}
+                  {meta.iconName === 'phone'          && <Phone         size={12} />}
+                  {meta.iconName === 'message_square' && <MessageSquare size={12} />}
+                  {(meta.iconName === '💵' || meta.iconName === '📸') && (
+                    <span className="text-[13px] leading-none">{meta.iconName}</span>
+                  )}
                 </div>
-                <span className={`text-[10px] font-bold uppercase ${item.type === 'stage_change' ? 'text-accent' : 'text-slate-400'}`}>
-                  {item.type === 'stage_change' ? 'Stage Change' : item.type}
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${meta.iconName === 'trending_up' ? 'text-accent' : 'text-slate-500'}`}>
+                  {meta.label}
                 </span>
               </div>
-              <span className="text-[10px] text-slate-400">{new Date(item.created_at).toLocaleDateString()}</span>
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400 font-medium">{dateStr}</p>
+                {timeStr && <p className="text-[10px] text-slate-300">{timeStr}</p>}
+              </div>
             </div>
-            <p className="text-sm text-primary">
-              {(() => {
-                const parsed = parseNoteMentions(item.content);
-                const segments = parsed.plainContent.split(/(@[a-zA-Z0-9_]+)/g);
-                return segments.map((segment, index) => {
-                  const isMention = segment.startsWith('@');
-                  return (
-                    <span key={`${item.id || i}-${index}`} className={isMention ? 'font-bold text-accent' : ''}>
-                      {segment}
-                    </span>
-                  );
-                });
-              })()}
-            </p>
+
+            {/* Message — newlines rendered as real line breaks */}
+            <div className="text-sm text-primary leading-relaxed space-y-1">
+              {lines.map((line, li) => {
+                if (!line.trim()) return null;
+                const segments = line.split(/(@[a-zA-Z0-9_]+)/g);
+                return (
+                  <p key={`${item.id || i}-line-${li}`}>
+                    {segments.map((seg, si) => (
+                      <span key={`${item.id || i}-${li}-${si}`} className={seg.startsWith('@') ? 'font-bold text-accent' : ''}>
+                        {seg}
+                      </span>
+                    ))}
+                  </p>
+                );
+              })}
+            </div>
           </div>
-        )) : (
+          );
+        }) : (
           <div className="text-center py-12 text-slate-400">
             <History size={48} className="mx-auto mb-4 opacity-20" />
             <p className="text-sm">No activity recorded yet</p>
@@ -1689,31 +2363,6 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
 function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { contactId: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
-  const LEGAL_DOCS = [
-    { id: 'contingency', label: 'Contingency Agreement', type: 'other' },
-    { id: 'csa', label: 'Customer Service Agreement', type: 'contract' },
-    { id: 'rescind', label: '3 Day Right to Rescind', type: 'other' },
-    { id: 'completion', label: 'Completion Certificate', type: 'other' },
-    { id: 'change-order', label: 'Change Order', type: 'other' },
-  ];
-  const getLegalTemplateId = (doc: any) => {
-    const name = String(doc?.name || '').toLowerCase();
-    if (name.includes('contingency agreement')) return 'contingency';
-    if (name.includes('customer service agreement')) return 'csa';
-    if (name.includes('notice of cancellation') || name.includes('3 day right to rescind') || name.includes('3-day right to rescind')) return 'rescind';
-    if (name.includes('completion certificate')) return 'completion';
-    if (name.includes('change order')) return 'change-order';
-    return null;
-  };
-  const isLegalDocument = (doc: any) => {
-    return !!getLegalTemplateId(doc);
-  };
-  const getSignatureParentName = (name: string) => {
-    if (name.includes(' Customer Signature - ')) return name.replace(' Customer Signature - ', ' - ');
-    if (name.includes(' Contractor Signature - ')) return name.replace(' Contractor Signature - ', ' - ');
-    if (name.includes(' Signature - ')) return name.replace(' Signature - ', ' - ');
-    return null;
-  };
   const filteredDocs = documents.filter((doc) => {
     if (filter === 'photos') return doc.type === 'photo';
     if (filter === 'docs') return doc.type !== 'photo' && !isLegalDocument(doc);
@@ -1721,17 +2370,14 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
     return true;
   });
   const visibleDocs = filteredDocs.filter((doc) => !getSignatureParentName(String(doc.name || '')));
-  const signedLegalDocs = LEGAL_DOCS.map((legalDoc) => {
-    const matchingPdfs = visibleDocs
-      .filter((doc) => getLegalTemplateId(doc) === legalDoc.id && doc.type === 'contract')
-      .sort((left, right) => new Date(right.created_at || 0).getTime() - new Date(left.created_at || 0).getTime());
-
-    return {
-      ...legalDoc,
-      signedPdf: matchingPdfs[0] || null,
-    };
-  }).filter((entry) => entry.signedPdf);
-  const gridDocs = visibleDocs.filter((doc) => !(filter === 'legal' && doc.type === 'contract' && isLegalDocument(doc)));
+  const legalDocStats = buildLegalDocumentStats(visibleDocs);
+  const signedLegalDocs = LEGAL_DOCUMENT_TEMPLATES.map((template) => ({
+    ...template,
+    signedPdf: legalDocStats[template.id]?.latestSignedPdf || null,
+  })).filter((entry) => entry.signedPdf);
+  const gridDocs = visibleDocs.filter(
+    (doc) => !(filter === 'legal' && doc.type === 'contract' && isLegalDocument(doc))
+  );
   return (
     <div className="space-y-6">
       <div className="flex gap-2">
@@ -1755,10 +2401,10 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
           Open Legal Document Center
         </button>
         <div className="space-y-2">
-          {LEGAL_DOCS.map((doc) => (
-            <div key={doc.label} className="bg-white rounded-xl p-3 border border-slate-100 space-y-3">
+          {LEGAL_DOCUMENT_TEMPLATES.map((doc) => (
+            <div key={doc.id} className="bg-white rounded-xl p-3 border border-slate-100 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-slate-700">{doc.label}</span>
+                <span className="text-xs font-bold text-slate-700">{doc.title}</span>
                 <button
                   type="button"
                   onClick={() => navigate(`/contacts/${contactId}/documents/${doc.id}`)}
@@ -1770,7 +2416,7 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
               <label className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 cursor-pointer">
                 <span className="text-[11px] font-semibold text-slate-500">Upload existing file</span>
                 <span className="text-[10px] text-slate-400 font-bold">Upload</span>
-                <input type="file" className="hidden" onChange={(e) => onLegalUpload(doc.label, doc.type, e)} />
+                <input type="file" className="hidden" onChange={(e) => onLegalUpload(doc.title, 'contract', e)} />
               </label>
             </div>
           ))}
@@ -1784,11 +2430,11 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
           </div>
           {signedLegalDocs.length > 0 ? (
             <div className="space-y-3">
-              {signedLegalDocs.map(({ id, label, signedPdf }) => (
+              {signedLegalDocs.map(({ id, title, signedPdf }) => (
                 <div key={id} className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-bold text-emerald-900">{label}</p>
+                      <p className="text-sm font-bold text-emerald-900">{title}</p>
                       <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Signed and ready to view</p>
                     </div>
                     <button
@@ -1879,23 +2525,32 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
 
 function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; userId?: string; onEdit: () => void; onRefresh: () => void }) {
   const navigate = useNavigate();
+  const [estimates, setEstimates] = useState<any[]>([]);
   const [latestEstimate, setLatestEstimate] = useState<any>(null);
   const [latestWorkOrder, setLatestWorkOrder] = useState<any>(null);
+  const [financialDocuments, setFinancialDocuments] = useState<any[]>([]);
   const [savingField, setSavingField] = useState<'deposit' | 'final' | null>(null);
   const [creatingWorkOrder, setCreatingWorkOrder] = useState(false);
+  const [loadingArtifacts, setLoadingArtifacts] = useState(true);
+
+  const isFinancialDocument = (doc: any) => {
+    const type = String(doc?.type || '').toLowerCase();
+    const name = String(doc?.name || '').toLowerCase();
+    return ['estimate', 'invoice', 'contract'].includes(type) || /(invoice|estimate|contract|payment|receipt|finance)/.test(name);
+  };
 
   useEffect(() => {
     const fetchFinancialArtifacts = async () => {
       if (!contact?.id) return;
+      setLoadingArtifacts(true);
       try {
-        const [{ data: estimate }, { data: workOrder }] = await Promise.all([
+        const [{ data: estimateRows }, { data: workOrder }, { data: documentRows }] = await Promise.all([
           supabase
             .from('estimates')
             .select('*')
             .eq('contact_id', contact.id)
             .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle(),
+            .returns<any[]>(),
           supabase
             .from('work_orders')
             .select('*')
@@ -1903,16 +2558,50 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle(),
+          supabase
+            .from('documents')
+            .select('*')
+            .eq('contact_id', contact.id)
+            .order('created_at', { ascending: false })
+            .returns<any[]>(),
         ]);
-        setLatestEstimate(estimate || null);
+        const allEstimates = estimateRows || [];
+        const allFinancialDocuments = (documentRows || []).filter(isFinancialDocument);
+        setEstimates(allEstimates);
+        setLatestEstimate(allEstimates[0] || null);
         setLatestWorkOrder(workOrder || null);
+        setFinancialDocuments(allFinancialDocuments);
       } catch (err) {
         console.error('Error loading financial data:', err);
+      } finally {
+        setLoadingArtifacts(false);
       }
     };
 
     fetchFinancialArtifacts();
   }, [contact?.id]);
+
+  const paymentEntries = [
+    {
+      key: 'deposit' as const,
+      label: 'Deposit',
+      amount: Number(contact.deposit_amount || 0),
+      paid: !!contact.deposit_paid,
+      date: contact.deposit_date,
+    },
+    {
+      key: 'final' as const,
+      label: 'Final Payment',
+      amount: Number(contact.final_payment_amount || 0),
+      paid: !!contact.final_payment_paid,
+      date: contact.final_payment_date,
+    },
+  ].filter((entry) => entry.amount > 0 || entry.paid || entry.date);
+
+  const contractValue = Number(contact.project_value || latestEstimate?.total || 0);
+  const totalPaid = paymentEntries.reduce((sum, entry) => sum + (entry.paid ? entry.amount : 0), 0);
+  const outstandingBalance = Math.max(contractValue - totalPaid, 0);
+  const deductible = Number(contact.deductible || 0);
 
   const togglePayment = async (kind: 'deposit' | 'final') => {
     setSavingField(kind);
@@ -2001,8 +2690,27 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
         <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Financial & Estimates</p>
         <h3 className="mt-2 text-xl font-black">Customer financial workflow</h3>
         <p className="mt-2 text-sm text-slate-300">
-          Create and review estimates, record deposit and final payment, and jump into work orders without leaving this screen.
+          Review all estimates, financial documents, payment status, and outstanding balance for this customer in one place.
         </p>
+      </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="card p-5 space-y-2">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Contract Value</p>
+          <p className="text-2xl font-black text-primary">{formatCurrency(contractValue)}</p>
+          <p className="text-xs text-slate-500">Project total on file for this customer.</p>
+        </div>
+        <div className="card p-5 space-y-2">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Total Paid</p>
+          <p className="text-2xl font-black text-emerald-600">{formatCurrency(totalPaid)}</p>
+          <p className="text-xs text-slate-500">Combined recorded customer payments.</p>
+        </div>
+        <div className="card p-5 space-y-2">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Outstanding Balance</p>
+          <p className="text-2xl font-black text-rose-600">{formatCurrency(outstandingBalance)}</p>
+          <p className="text-xs text-slate-500">
+            {deductible > 0 ? `Deductible on file: ${formatCurrency(deductible)}` : 'Based on project value minus recorded payments.'}
+          </p>
+        </div>
       </div>
       <div className="grid grid-cols-1 gap-4">
         <div className="card p-5 space-y-4">
@@ -2034,29 +2742,119 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
           </div>
         </div>
         <div className="card p-5 space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Deposit</h3>
-            <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${contact.deposit_paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{contact.deposit_paid ? 'Paid' : 'Pending'}</span>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Payments</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Payments are recorded directly on this customer. An invoice document is optional and does not block payment entry.
+              </p>
+            </div>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase text-slate-500">
+              {paymentEntries.length} tracked
+            </span>
           </div>
-          <span className="text-xl font-bold text-primary">{formatCurrency(contact.deposit_amount)}</span>
-          <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>{contact.deposit_date ? `Updated ${new Date(contact.deposit_date).toLocaleDateString()}` : 'No payment recorded yet'}</span>
-            <button onClick={() => togglePayment('deposit')} disabled={savingField === 'deposit'} className="font-bold text-accent disabled:opacity-50">
-              {savingField === 'deposit' ? 'Saving...' : contact.deposit_paid ? 'Mark Unpaid' : 'Record Deposit'}
-            </button>
+          <div className="space-y-3">
+            {paymentEntries.length > 0 ? paymentEntries.map((entry) => (
+              <div key={entry.key} className="rounded-2xl bg-slate-50 p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="text-sm font-bold text-primary">{entry.label}</h4>
+                    <p className="text-[11px] text-slate-500">
+                      {entry.date ? `Updated ${new Date(entry.date).toLocaleDateString()}` : 'No payment recorded yet'}
+                    </p>
+                  </div>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${entry.paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                    {entry.paid ? 'Paid' : 'Pending'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-xl font-bold text-primary">{formatCurrency(entry.amount)}</span>
+                  <button
+                    onClick={() => togglePayment(entry.key)}
+                    disabled={savingField === entry.key}
+                    className="rounded-xl bg-white border border-slate-200 px-4 py-2 text-xs font-bold text-accent disabled:opacity-50"
+                  >
+                    {savingField === entry.key ? 'Saving...' : entry.paid ? 'Mark Unpaid' : `Record ${entry.label}`}
+                  </button>
+                </div>
+              </div>
+            )) : (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
+                No payment schedule is on file yet. Add the customer financial amounts from the edit screen to start tracking payments here.
+              </div>
+            )}
           </div>
         </div>
         <div className="card p-5 space-y-4">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Final Payment</h3>
-            <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${contact.final_payment_paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{contact.final_payment_paid ? 'Paid' : 'Pending'}</span>
-          </div>
-          <span className="text-xl font-bold text-primary">{formatCurrency(contact.final_payment_amount)}</span>
-          <div className="flex items-center justify-between text-[11px] text-slate-500">
-            <span>{contact.final_payment_date ? `Updated ${new Date(contact.final_payment_date).toLocaleDateString()}` : 'No payment recorded yet'}</span>
-            <button onClick={() => togglePayment('final')} disabled={savingField === 'final'} className="font-bold text-accent disabled:opacity-50">
-              {savingField === 'final' ? 'Saving...' : contact.final_payment_paid ? 'Mark Unpaid' : 'Record Final'}
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Financial Documents</h3>
+              <p className="text-sm text-slate-600">Estimates, invoices, contracts, receipts, and money-related files for this customer.</p>
+            </div>
+            <button onClick={() => navigate(`/documents?contactId=${contact.id}`)} className="text-accent text-xs font-bold">
+              View All Docs
             </button>
+          </div>
+          <div className="space-y-3">
+            {loadingArtifacts ? (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading financial documents...</div>
+            ) : financialDocuments.length > 0 ? financialDocuments.map((doc) => (
+              <button
+                key={doc.id}
+                onClick={() => navigate(`/documents/view/${doc.id}`)}
+                className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left transition-colors hover:bg-white"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-bold text-primary">{doc.name}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {String(doc.type || 'document').toUpperCase()} • {new Date(doc.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <span className="text-[11px] font-bold text-accent">Open</span>
+                </div>
+              </button>
+            )) : (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
+                No customer financial documents have been saved yet.
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Estimate History</h3>
+              <p className="text-sm text-slate-600">All saved estimates for this customer, newest first.</p>
+            </div>
+            <button onClick={() => navigate(`/estimates-list?contactId=${contact.id}`)} className="text-accent text-xs font-bold">
+              View Estimates
+            </button>
+          </div>
+          <div className="space-y-3">
+            {loadingArtifacts ? (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading estimate history...</div>
+            ) : estimates.length > 0 ? estimates.map((estimate) => (
+              <button
+                key={estimate.id}
+                onClick={() => navigate(`/estimates/${estimate.id}`)}
+                className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left transition-colors hover:bg-white"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-bold text-primary">{estimate.title}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {String(estimate.status || 'draft').replace('_', ' ')} • {new Date(estimate.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold text-accent">{formatCurrency(estimate.total)}</span>
+                </div>
+              </button>
+            )) : (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
+                No estimates have been created for this customer yet.
+              </div>
+            )}
           </div>
         </div>
         <div className="card p-5 space-y-4">

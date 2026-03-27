@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User, ChevronLeft, ChevronRight, Shield, FileText, Briefcase, Calendar, ClipboardList } from 'lucide-react';
+import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User, ChevronLeft, ChevronRight, Shield, FileText, Briefcase, Calendar, ClipboardList, Phone, Zap, StickyNote, CalendarPlus, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -8,28 +8,24 @@ import { formatCurrency, getStatusColor } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
-import { getPipelineStageLabel } from '../lib/pipelineStages';
+import { getPipelineStageLabel, toPipelineBoardStage } from '../lib/pipelineStages';
 
-const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
-  { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
-  { id: 'contacted', label: 'Contacted', color: 'bg-sky-500' },
-  { id: 'appointment_set', label: 'Appt Set', color: 'bg-indigo-500' },
-  { id: 'inspected', label: 'Inspected', color: 'bg-amber-500' },
-  { id: 'estimate_sent', label: 'Est. Sent', color: 'bg-orange-500' },
-  { id: 'approved', label: 'Approved', color: 'bg-emerald-500' },
-  { id: 'scheduled', label: 'Scheduled', color: 'bg-teal-500' },
-  { id: 'in_progress', label: 'In Progress', color: 'bg-primary' },
-  { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
+type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
+
+const STAGES: StageConfig[] = [
+  { statuses: ['new_lead', 'lead'], label: 'Leads', color: 'bg-blue-500' },
+  { statuses: ['contacted'], label: 'Contacted', color: 'bg-sky-500' },
+  { statuses: ['appointment_set', 'inspection_scheduled'], label: 'Appointment Set', color: 'bg-indigo-500' },
+  { statuses: ['inspected', 'inspection_complete'], label: 'Inspection', color: 'bg-amber-500' },
+  { statuses: ['estimate_sent'], label: 'Follow Up / Negotiating', color: 'bg-orange-500' },
+  { statuses: ['approved', 'signed_won'], label: 'Sold', color: 'bg-emerald-500' },
+  { statuses: ['scheduled'], label: 'Scheduled', color: 'bg-teal-500' },
+  { statuses: ['in_progress'], label: 'In Progress', color: 'bg-primary' },
+  { statuses: ['completed'], label: 'Completed', color: 'bg-slate-800' },
+  { statuses: ['paid'], label: 'Paid', color: 'bg-green-600' },
+  { statuses: ['retail'], label: 'Retail', color: 'bg-purple-500' },
+  { statuses: ['lost'], label: 'Lost', color: 'bg-red-400' },
 ];
-
-function normalizePipelineStatus(status?: string | null): CustomerStatus {
-  if (status === 'new_lead') return 'lead';
-  if (status === 'inspection_scheduled') return 'appointment_set';
-  if (status === 'inspection_complete') return 'inspected';
-  if (status === 'signed_won') return 'approved';
-  if (status === 'paid') return 'completed';
-  return (status as CustomerStatus) || 'lead';
-}
 
 export default function Pipeline() {
   const navigate = useNavigate();
@@ -38,7 +34,9 @@ export default function Pipeline() {
   const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'map'>('kanban');
   const [searchQuery, setSearchQuery] = useState('');
   const [contacts, setContacts] = useState<any[]>([]);
+  const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [quickMenuContactId, setQuickMenuContactId] = useState<string | null>(null);
   const sectionScrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollSectionsLeft, setCanScrollSectionsLeft] = useState(false);
   const [canScrollSectionsRight, setCanScrollSectionsRight] = useState(false);
@@ -104,19 +102,58 @@ export default function Pipeline() {
 
   const fetchContacts = async () => {
     try {
-      const { data, error } = await supabase
-        .from('contacts')
-        .select('*')
-        .eq('company_id', profile.company_id)
-        .order('updated_at', { ascending: false });
-      
+      const [{ data, error }, { data: apptData }] = await Promise.all([
+        supabase.from('contacts').select('*').eq('company_id', profile.company_id).order('updated_at', { ascending: false }),
+        supabase.from('appointments').select('id,contact_id,date,time,title,status').eq('company_id', profile.company_id).eq('status', 'scheduled'),
+      ]);
       if (error) throw error;
       setContacts(data || []);
+      setAppointments(apptData || []);
     } catch (err) {
       console.error('Error fetching contacts:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Returns the next upcoming scheduled appointment for a contact
+  const getNextAppt = (contactId: string) => {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const upcoming = appointments.filter((apt) => {
+      if (apt.contact_id !== contactId) return false;
+      const raw = apt.date?.trim();
+      if (!raw) return false;
+      const d = new Date(`${raw}T${apt.time?.trim() || '00:00'}`);
+      return !isNaN(d.getTime()) && d >= today;
+    });
+    if (!upcoming.length) return null;
+    return upcoming.sort((a: any, b: any) =>
+      new Date(`${a.date}T${a.time || '00:00'}`).getTime() - new Date(`${b.date}T${b.time || '00:00'}`).getTime()
+    )[0];
+  };
+
+  const formatApptLabel = (apt: any): string => {
+    if (!apt?.date) return '';
+    const d = new Date(`${apt.date}T${apt.time?.trim() || '00:00'}`);
+    if (isNaN(d.getTime())) return '';
+    const today = new Date(); today.setHours(0,0,0,0);
+    const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+    const dayLabel = d.getTime() === today.getTime() ? 'Today' :
+      d.getTime() === tomorrow.getTime() ? 'Tomorrow' :
+      d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeLabel = apt.time
+      ? new Date(`1970-01-01T${apt.time}`).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      : '';
+    return timeLabel ? `${dayLabel} · ${timeLabel}` : dayLabel;
+  };
+
+  const openNavigation = (e: React.MouseEvent, address: string, city?: string, state?: string, zip?: string) => {
+    e.stopPropagation();
+    const parts = [address, city, state, zip].filter(Boolean);
+    if (!parts.length) return;
+    const query = encodeURIComponent(parts.join(', '));
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    window.open(isIOS ? `maps://maps.apple.com/?q=${query}` : `https://maps.google.com/?q=${query}`, '_blank', 'noopener');
   };
 
   if (loadingAuth) return (
@@ -253,7 +290,7 @@ export default function Pipeline() {
             setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
-          style={{ touchAction: 'pan-y' }}
+          style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}
         >
           <div className="flex gap-4 min-w-max">
             {pipelineSections.map((section) => {
@@ -284,11 +321,11 @@ export default function Pipeline() {
             ))}
           </div>
         ) : viewMode === 'kanban' ? (
-          <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x">
+          <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}>
             {STAGES.map((stage) => {
-              const stageContacts = filteredContacts.filter((contact) => normalizePipelineStatus(contact.status) === stage.id);
+              const stageContacts = filteredContacts.filter(c => stage.statuses.includes(normalizePipelineStatus(c.status)));
               return (
-                <div key={stage.id} className="min-w-[280px] flex flex-col gap-4 snap-center">
+                <div key={stage.statuses[0]} className="min-w-[280px] flex flex-col gap-4 snap-center">
                   <div className="flex items-center justify-between px-2">
                     <div className="flex items-center gap-2">
                       <div className={`h-2 w-2 rounded-full ${stage.color}`} />
@@ -308,19 +345,68 @@ export default function Pipeline() {
                         className="card p-4 space-y-3 active:scale-[0.98] transition-transform cursor-pointer"
                       >
                         <div className="flex justify-between items-start">
-                          <h4 className="font-bold text-primary leading-tight">
+                          <h4 className="font-bold text-primary leading-tight flex-1 min-w-0 truncate pr-2">
                             {contact.first_name} {contact.last_name}
                           </h4>
-                          <span className="text-[10px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-md">
-                            {contact.project_type || 'Roofing'}
-                          </span>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <span className="text-[10px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-md">
+                              {contact.project_type || 'Roofing'}
+                            </span>
+                            <div className="relative" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setQuickMenuContactId(quickMenuContactId === contact.id ? null : contact.id); }}
+                                className="p-1 rounded-md active:bg-slate-100 transition-colors"
+                                title="Quick Actions"
+                              >
+                                <Zap size={13} className="text-amber-400" />
+                              </button>
+                              {quickMenuContactId === contact.id && (
+                                <>
+                                  <div className="fixed inset-0 z-40" onClick={() => setQuickMenuContactId(null)} />
+                                  <div className="absolute right-0 top-7 z-50 bg-white rounded-xl shadow-lg border border-slate-200 py-1 w-48">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setQuickMenuContactId(null); navigate(`/contacts/${contact.id}?tab=notes`); }}
+                                      className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 active:bg-slate-50 transition-colors"
+                                    >
+                                      <StickyNote size={14} className="text-blue-500" />Add Note
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setQuickMenuContactId(null); navigate(`/calendar?contact=${contact.id}`); }}
+                                      className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-slate-700 active:bg-slate-50 transition-colors"
+                                    >
+                                      <CalendarPlus size={14} className="text-green-500" />Create Calendar Event
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
                         
                         <div className="space-y-1.5">
-                          <div className="flex items-center gap-2 text-slate-500">
-                            <MapPin size={12} />
+                          <div
+                            className="flex items-center gap-2 text-slate-500 active:text-blue-600 transition-colors"
+                            onClick={(e) => openNavigation(e, contact.address, contact.city, contact.state, contact.zip)}
+                          >
+                            <MapPin size={12} className="flex-shrink-0" />
                             <span className="text-[11px] truncate">{contact.address || 'No address'}</span>
                           </div>
+                          {contact.phone1 && (
+                            <div className="flex items-center gap-2 text-slate-500">
+                              <Phone size={12} className="flex-shrink-0" />
+                              <span className="text-[11px]">{contact.phone1}</span>
+                            </div>
+                          )}
+                          {(() => {
+                            const nextAppt = getNextAppt(contact.id);
+                            if (!nextAppt) return null;
+                            return (
+                              <div className="flex items-center gap-2 text-indigo-500 font-medium">
+                                <Clock size={12} className="flex-shrink-0" />
+                                <span className="text-[11px]">{formatApptLabel(nextAppt)}</span>
+                              </div>
+                            );
+                          })()}
                           <div className="flex items-center gap-2 text-slate-500">
                             <DollarSign size={12} />
                             <span className="text-[11px] font-bold text-slate-700">
@@ -366,15 +452,12 @@ export default function Pipeline() {
                   <p className="text-xs text-slate-500 truncate">{contact.address}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find((stage) => stage.id === normalizePipelineStatus(contact.status))?.color || 'bg-slate-400'} text-white`}>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.statuses.includes(normalizePipelineStatus(contact.status)))?.color || 'bg-slate-400'} text-white`}>
                     {getPipelineStageLabel(contact.status)}
                   </span>
-                  <button 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.address)}`, '_blank');
-                    }}
-                    className="p-1.5 bg-slate-100 rounded-lg text-slate-400 hover:text-accent"
+                  <button
+                    onClick={(e) => openNavigation(e, contact.address, contact.city, contact.state, contact.zip)}
+                    className="p-1.5 bg-slate-100 rounded-lg text-slate-400 active:text-accent transition-colors"
                   >
                     <MapPin size={14} />
                   </button>
@@ -407,7 +490,7 @@ export default function Pipeline() {
                       <p className="text-xs text-slate-500">{contact.address}</p>
                     </div>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find((stage) => stage.id === normalizePipelineStatus(contact.status))?.color || 'bg-slate-400'} text-white`}>
+                  <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${STAGES.find(s => s.statuses.includes(normalizePipelineStatus(contact.status)))?.color || 'bg-slate-400'} text-white`}>
                     {getPipelineStageLabel(contact.status)}
                   </span>
                 </div>
@@ -418,8 +501,8 @@ export default function Pipeline() {
                   >
                     View Details
                   </button>
-                  <button 
-                    onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.address)}`, '_blank')}
+                  <button
+                    onClick={(e) => openNavigation(e, contact.address, contact.city, contact.state, contact.zip)}
                     className="flex-1 bg-accent text-white py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform"
                   >
                     <MapPin size={14} />
