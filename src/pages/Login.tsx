@@ -120,8 +120,19 @@ export default function Login() {
                 <span className="font-medium">{error}</span>
               </div>
             )}
+            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-center space-y-2">
+              <p className="text-amber-800 text-sm font-medium">Please reset your password from the web browser.</p>
+              <a
+                href="https://crm-kanban-integrate.vercel.app/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent text-xs font-bold underline underline-offset-2"
+              >
+                crm-kanban-integrate.vercel.app
+              </a>
+            </div>
             <p className="text-slate-500 text-sm text-center">
-              Enter your email and we'll send you a link to reset your password.
+              Or enter your email below to receive a temporary password.
             </p>
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
