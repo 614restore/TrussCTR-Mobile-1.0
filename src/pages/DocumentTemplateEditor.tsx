@@ -12,14 +12,20 @@ import {
 const TEMPLATE_IDS = ['contingency', 'csa', 'rescind', 'completion', 'change-order'] as const;
 
 const PLACEHOLDERS = [
-  { key: '{today}', label: "Today's date" },
-  { key: '{cancelDeadline}', label: '3-day cancellation deadline' },
-  { key: '{propertyAddress}', label: 'Customer property address' },
-  { key: '{companyAddress}', label: 'Your company address' },
-  { key: '{companyState}', label: 'Your company state' },
-  { key: '{projectValue}', label: 'Project value / contract amount' },
-  { key: '{deductible}', label: 'Insurance deductible' },
+  { key: '{today}',           label: "Today's date" },
+  { key: '{cancelDeadline}',  label: '3-day cancellation deadline (business days, excl. weekends)' },
+  { key: '{propertyAddress}', label: 'Customer property address (street, city, state, zip)' },
+  { key: '{propertyState}',   label: "Customer's state code — drives state-specific legal language (e.g. OH)" },
+  { key: '{companyAddress}',  label: 'Your company address' },
+  { key: '{companyState}',    label: 'Your company state code' },
+  { key: '{projectValue}',    label: 'Project value / contract amount' },
+  { key: '{deductible}',      label: 'Insurance deductible amount' },
+  { key: '{contractorName}',  label: 'Contractor / company name (from Company Profile)' },
+  { key: '{contractorPhone}', label: 'Contractor phone number (from Company Profile)' },
 ];
+
+/** Templates that use dynamic state-specific content and can't be fully overridden here */
+const STATE_AWARE_TEMPLATES = new Set(['rescind']);
 
 function getDefaultSections(templateId: string): string[] {
   const def = DEFAULT_DOC_CONTENT[templateId];
@@ -205,6 +211,24 @@ export default function DocumentTemplateEditor() {
 
               {isOpen && (
                 <div className="border-t border-slate-100 p-4 space-y-4">
+                  {/* State-aware notice for rescind / Notice of Cancellation */}
+                  {STATE_AWARE_TEMPLATES.has(templateId) && (
+                    <div className="flex items-start gap-3 bg-blue-50 border border-blue-100 rounded-2xl p-4">
+                      <Info size={16} className="text-blue-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-xs font-bold text-blue-800">State-Specific Template</p>
+                        <p className="text-[11px] text-blue-700 mt-1 leading-relaxed">
+                          This document uses <strong>state-specific legal language</strong> driven by the customer's
+                          state (<code className="bg-blue-100 px-1 rounded font-mono">{'{propertyState}'}</code>).
+                          Ohio customers automatically receive Ohio HSSA (R.C. §1345.21) all-caps language.
+                          All other states receive the generic multi-state version below.
+                          Custom text entered here will override the state-specific language — only edit
+                          if your attorney has reviewed the changes.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Reset button */}
                   {isCustomized && (
                     <button

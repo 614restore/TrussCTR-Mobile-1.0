@@ -692,27 +692,40 @@ export default function DocumentSigner() {
             </p>
           )}
           {signed && pdfUrl && (
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  if (savedDocumentId) {
-                    navigate(`/documents/view/${savedDocumentId}`);
-                    return;
-                  }
-                  window.open(pdfUrl, '_blank', 'noopener,noreferrer');
-                }}
-                className="w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-primary"
-              >
-                View Signed PDF
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(`/contacts/${id}`)}
-                className="w-full rounded-2xl bg-primary/10 py-3 text-sm font-bold text-primary"
-              >
-                Back To Customer
-              </button>
+            <div className="space-y-3">
+              {/* After contingency or CSA, prompt to sign the 3-Day Notice next */}
+              {(docType === 'contingency' || docType === 'csa') && (
+                <button
+                  type="button"
+                  onClick={() => navigate(`/contacts/${id}/documents/rescind`)}
+                  className="w-full rounded-2xl bg-emerald-600 py-4 text-sm font-bold text-white flex items-center justify-center gap-2 shadow active:scale-95 transition-transform"
+                >
+                  <Shield size={16} />
+                  Next: Sign 3-Day Notice of Cancellation →
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (savedDocumentId) {
+                      navigate(`/documents/view/${savedDocumentId}`);
+                      return;
+                    }
+                    window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+                  }}
+                  className="w-full rounded-2xl bg-slate-100 py-3 text-sm font-bold text-primary"
+                >
+                  View Signed PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/contacts/${id}`)}
+                  className="w-full rounded-2xl bg-primary/10 py-3 text-sm font-bold text-primary"
+                >
+                  Back To Customer
+                </button>
+              </div>
             </div>
           )}
         </div>
