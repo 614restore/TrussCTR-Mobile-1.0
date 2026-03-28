@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -17,6 +17,83 @@ export default function ResetPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const clearRecoveryParamsFromUrl = () => {
+      window.history.replaceState({}, document.title, window.location.pathname);
+    };
+
+    const establishRecoverySession = async () => {
+      const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+      const searchParams = new URLSearchParams(window.location.search);
+
+      try {
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        const code = searchParams.get('code');
+        const tokenHash = searchParams.get('token_hash');
+        const type = searchParams.get('type');
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+          clearRecoveryParamsFromUrl();
+          if (isMounted) setSessionReady(true);
+          return;
+        }
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          clearRecoveryParamsFromUrl();
+          if (isMounted) setSessionReady(true);
+          return;
+        }
+
+        if (tokenHash && type === 'recovery') {
+          const { error } = await supabase.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: 'recovery',
+          });
+          if (error) throw error;
+          clearRecoveryParamsFromUrl();
+          if (isMounted) setSessionReady(true);
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        if (isMounted) setSessionReady(!!session);
+      } catch (err: any) {
+        console.error('Error establishing password recovery session:', err);
+        if (isMounted) {
+          setError(err?.message || 'Failed to validate reset link. Please request a new reset link.');
+          setSessionReady(false);
+        }
+      } finally {
+        if (isMounted) setCheckingSession(false);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setSessionReady(true);
+      }
+    });
+
+    void establishRecoverySession();
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,7 +160,21 @@ export default function ResetPassword() {
           <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 p-6 rounded-2xl flex flex-col items-center gap-3 text-center">
             <CheckCircle size={32} className="text-emerald-500" />
             <p className="font-bold text-sm">Password updated successfully!</p>
-            <p className="text-xs text-emerald-600">Taking you to the app…</p>
+            <p className="text-xs text-emerald-600">Redirecting you to sign in...</p>
+          </div>
+        ) : checkingSession ? (
+          <div className="bg-slate-100 border border-slate-200 text-slate-600 p-5 rounded-2xl flex items-center gap-3 text-sm">
+            <div className="h-5 w-5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0"></div>
+            <span className="font-medium">
+              Validating your reset link...
+            </span>
+          </div>
+        ) : !sessionReady ? (
+          <div className="bg-amber-50 border border-amber-100 text-amber-700 p-5 rounded-2xl flex items-center gap-3 text-sm">
+            <AlertCircle size={18} className="shrink-0" />
+            <span className="font-medium">
+              No recovery session found. Please use the password reset link from your email.
+            </span>
           </div>
         ) : (
           <form onSubmit={handleReset} className="space-y-6">

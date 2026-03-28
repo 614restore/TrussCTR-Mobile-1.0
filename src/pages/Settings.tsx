@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle, FileText } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 import { getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
 import { registerPushToken, checkPushPermission } from '../lib/pushNotifications';
 import { Capacitor } from '@capacitor/core';
@@ -12,6 +13,8 @@ export default function Settings() {
   const { user, requestPasswordChange, profile } = useAuth();
   const [inspectionPhotoStorageMode, setMode] = useState<InspectionPhotoStorageMode>(() => getInspectionPhotoStorageMode());
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
+  const [pwResetLoading, setPwResetLoading] = useState(false);
+  const [pwResetSent, setPwResetSent] = useState(false);
 
   // Push notification state
   const isNative = Capacitor.isNativePlatform();

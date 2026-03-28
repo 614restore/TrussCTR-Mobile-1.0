@@ -54,29 +54,31 @@ export default function Reports() {
     setLoading(true);
     const since = getStartDate(selectedRange.days);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = supabase as any;
     try {
       // Total revenue from signed estimates
-      const { data: estimates } = await supabase
+      const { data: estimates } = await db
         .from('estimates')
         .select('total, created_at, status')
         .eq('company_id', profile.company_id)
         .gte('created_at', since);
 
-      const allEstimates = estimates || [];
-      const revenue = allEstimates.reduce((sum, e) => sum + (Number(e.total) || 0), 0);
+      const allEstimates: any[] = estimates || [];
+      const revenue = allEstimates.reduce((sum: number, e: any) => sum + (Number(e.total) || 0), 0);
       setTotalRevenue(revenue);
       setAvgJobSize(allEstimates.length > 0 ? revenue / allEstimates.length : 0);
 
       // Revenue by day (last 7 days regardless of range for the chart)
       const sevenDaysAgo = getStartDate(7);
-      const { data: recentEstimates } = await supabase
+      const { data: recentEstimates } = await db
         .from('estimates')
         .select('total, created_at')
         .eq('company_id', profile.company_id)
         .gte('created_at', sevenDaysAgo);
 
       const byDay = [0, 0, 0, 0, 0, 0, 0];
-      (recentEstimates || []).forEach((e) => {
+      ((recentEstimates as any[]) || []).forEach((e: any) => {
         const dayIndex = new Date(e.created_at).getDay();
         byDay[dayIndex] = (byDay[dayIndex] || 0) + (Number(e.total) || 0);
       });
@@ -84,7 +86,7 @@ export default function Reports() {
       setRevenueByDay(byDay.map((v) => Math.round((v / maxVal) * 100)));
 
       // New leads
-      const { count: leadsCount } = await supabase
+      const { count: leadsCount } = await db
         .from('contacts')
         .select('id', { count: 'exact', head: true })
         .eq('company_id', profile.company_id)
@@ -92,47 +94,48 @@ export default function Reports() {
       setNewLeads(leadsCount || 0);
 
       // Close rate: contacts that have at least one estimate
-      const { count: totalContacts } = await supabase
+      const { count: totalContacts } = await db
         .from('contacts')
         .select('id', { count: 'exact', head: true })
         .eq('company_id', profile.company_id)
         .gte('created_at', since);
 
-      const { data: uniqueEstimateContacts } = await supabase
+      const { data: uniqueEstimateContacts } = await db
         .from('estimates')
         .select('contact_id')
         .eq('company_id', profile.company_id)
         .gte('created_at', since);
 
-      const uniqueContactIds = new Set((uniqueEstimateContacts || []).map((e) => e.contact_id));
+      const uniqueContactIds = new Set(((uniqueEstimateContacts as any[]) || []).map((e: any) => e.contact_id));
       const rate = totalContacts && totalContacts > 0
         ? Math.round((uniqueContactIds.size / totalContacts) * 100)
         : 0;
       setCloseRate(rate);
 
       // Top performers by # of contacts created
-      const { data: profiles } = await supabase
+      const { data: profiles } = await db
         .from('profiles')
         .select('id, first_name, last_name')
         .eq('company_id', profile.company_id);
 
-      if (profiles && profiles.length > 0) {
+      const profileList: any[] = profiles || [];
+      if (profileList.length > 0) {
         const performerData = await Promise.all(
-          profiles.slice(0, 5).map(async (p) => {
-            const { count: leads } = await supabase
+          profileList.slice(0, 5).map(async (p: any) => {
+            const { count: leads } = await db
               .from('contacts')
               .select('id', { count: 'exact', head: true })
               .eq('company_id', profile.company_id)
               .eq('assigned_to', p.id)
               .gte('created_at', since);
 
-            const { data: estData } = await supabase
+            const { data: estData } = await db
               .from('estimates')
               .select('total')
               .eq('company_id', profile.company_id)
               .gte('created_at', since);
 
-            const rev = (estData || []).reduce((s, e) => s + (Number(e.total) || 0), 0);
+            const rev = ((estData as any[]) || []).reduce((s: number, e: any) => s + (Number(e.total) || 0), 0);
             return {
               name: `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Team Member',
               leads: leads || 0,

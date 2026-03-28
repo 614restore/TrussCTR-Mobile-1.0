@@ -3,12 +3,12 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, FileText, CheckCircle2, Clock, ChevronRight, LayoutTemplate } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { cn } from '../lib/utils';
-import { buildLegalDocumentStats, LEGAL_DOCUMENT_TEMPLATES } from '../lib/documentVisibility';
+import { buildLegalDocumentStats, LEGAL_DOCUMENT_TEMPLATES, type LegalDocumentStats } from '../lib/documentVisibility';
 
 export default function DocumentManager() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [signedDocDetails, setSignedDocDetails] = useState<Record<string, { isSigned: boolean; pdfCount: number; signatureCount: number }>>({});
+  const [signedDocDetails, setSignedDocDetails] = useState<Record<string, LegalDocumentStats>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
