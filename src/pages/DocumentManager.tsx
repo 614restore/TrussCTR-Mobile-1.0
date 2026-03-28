@@ -1,23 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, FileText, CheckCircle2, Clock, ChevronRight } from 'lucide-react';
+import { ArrowLeft, FileText, CheckCircle2, Clock, ChevronRight, LayoutTemplate } from 'lucide-react';
 import { supabase } from '../lib/supabase';
-import type { Database } from '../types/supabase';
 import { cn } from '../lib/utils';
-
-const DOCUMENT_TYPES = [
-  { id: 'contingency', title: 'Contingency Agreement', description: 'Insurance claim representation' },
-  { id: 'csa', title: 'Customer Service Agreement', description: 'Retail sales & work order' },
-  { id: 'rescind', title: '3-Day Right to Rescind', description: 'Legal cancellation period' },
-  { id: 'completion', title: 'Completion Certificate', description: 'Work satisfaction sign-off' },
-  { id: 'change-order', title: 'Change Order', description: 'Scope or price adjustments' },
-];
+import { buildLegalDocumentStats, LEGAL_DOCUMENT_TEMPLATES } from '../lib/documentVisibility';
 
 export default function DocumentManager() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [signedDocs, setSignedDocs] = useState<string[]>([]);
-  const [signedDocDetails, setSignedDocDetails] = useState<Record<string, { pdfCount: number; signatureCount: number }>>({});
+  const [signedDocDetails, setSignedDocDetails] = useState<Record<string, { isSigned: boolean; pdfCount: number; signatureCount: number }>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -28,38 +19,11 @@ export default function DocumentManager() {
     try {
       const { data, error } = await supabase
         .from('documents')
-        .select('name,type')
+        .select('id,name,type,created_at')
         .eq('contact_id', id);
 
       if (error) throw error;
-      const documentRows = ((data || []) as Array<Pick<Database['public']['Tables']['documents']['Row'], 'name' | 'type'>>);
-      const signed = documentRows.flatMap((d) => {
-        const name = String(d.name || '').toLowerCase();
-        const matches: string[] = [];
-        if (name.includes('contingency')) matches.push('contingency');
-        if (name.includes('customer service agreement')) matches.push('csa');
-        if (name.includes('notice of cancellation') || name.includes('3-day')) matches.push('rescind');
-        if (name.includes('completion')) matches.push('completion');
-        if (name.includes('change order')) matches.push('change-order');
-        return matches;
-      });
-      const details: Record<string, { pdfCount: number; signatureCount: number }> = {};
-      for (const doc of DOCUMENT_TYPES) {
-        const related = documentRows.filter((entry) => {
-          const name = String(entry.name || '').toLowerCase();
-          if (doc.id === 'contingency') return name.includes('contingency');
-          if (doc.id === 'csa') return name.includes('customer service agreement');
-          if (doc.id === 'rescind') return name.includes('notice of cancellation') || name.includes('3-day');
-          if (doc.id === 'completion') return name.includes('completion');
-          if (doc.id === 'change-order') return name.includes('change order');
-          return false;
-        });
-        details[doc.id] = {
-          pdfCount: related.filter((entry) => entry.type === 'contract').length,
-          signatureCount: related.filter((entry) => String(entry.name || '').toLowerCase().includes('signature')).length,
-        };
-      }
-      setSignedDocs(signed);
+      const details = buildLegalDocumentStats((data || []) as any[]);
       setSignedDocDetails(details);
     } catch (err) {
       console.error('Error fetching signed docs:', err);
@@ -83,9 +47,9 @@ export default function DocumentManager() {
             <div key={i} className="h-20 bg-white rounded-2xl animate-pulse border border-slate-100" />
           ))
         ) : (
-          DOCUMENT_TYPES.map((doc) => {
-            const isSigned = signedDocs.includes(doc.id);
+          LEGAL_DOCUMENT_TEMPLATES.map((doc) => {
             const detail = signedDocDetails[doc.id];
+            const isSigned = !!detail?.isSigned;
             return (
               <button
                 key={doc.id}
@@ -128,6 +92,34 @@ export default function DocumentManager() {
           <button className="w-full py-3 bg-white/20 rounded-xl text-sm font-bold border border-white/30">
             Request New Template
           </button>
+        </div>
+
+        {/* Project Quick-Start Templates */}
+        <div className="space-y-3 pt-2">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.18em] ml-1">Project Quick-Start</p>
+          <p className="text-xs text-slate-500 ml-1">Jump straight to a pre-built estimate for common project types.</p>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: 'Roof Replacement', preset: 'roof_replacement', emoji: '🏠' },
+              { label: 'Siding', preset: 'siding', emoji: '🏗️' },
+              { label: 'Gutters', preset: 'gutters', emoji: '🌧️' },
+              { label: 'Windows', preset: 'windows', emoji: '🪟' },
+              { label: 'Interior Work', preset: 'interior', emoji: '🎨' },
+              { label: 'Roof Repair', preset: 'repair', emoji: '🔧' },
+            ].map((item) => (
+              <button
+                key={item.preset}
+                onClick={() => navigate(`/contacts/${id}/estimate?preset=${item.preset}`)}
+                className="flex items-center gap-3 p-4 bg-white border border-slate-100 rounded-2xl shadow-sm active:bg-slate-50 transition-colors text-left"
+              >
+                <span className="text-2xl">{item.emoji}</span>
+                <div>
+                  <p className="text-xs font-bold text-primary leading-tight">{item.label}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Estimate</p>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

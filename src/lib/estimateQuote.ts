@@ -3,6 +3,8 @@ export type EstimatePresetId =
   | 'repair'
   | 'gutters'
   | 'siding'
+  | 'windows'
+  | 'interior'
   | 'custom';
 
 export type EstimateLineItemInput = {
@@ -81,6 +83,34 @@ export const ESTIMATE_PRESETS: EstimatePreset[] = [
       { name: 'House Wrap', qty: 1800, unit: 'SF', rate: 0.6 },
       { name: 'Trim & Corners', qty: 1, unit: 'Lot', rate: 1250 },
       { name: 'Labor', qty: 1800, unit: 'SF', rate: 2.15 },
+    ],
+  },
+  {
+    id: 'windows',
+    label: 'Windows',
+    scopeSummary: 'Replacement of windows with energy-efficient units including installation, trim, and disposal.',
+    defaultItems: [
+      { name: 'Double-Hung Windows', qty: 10, unit: 'EA', rate: 285 },
+      { name: 'Low-E Glass Upgrade', qty: 10, unit: 'EA', rate: 55 },
+      { name: 'Interior Trim & Casing', qty: 10, unit: 'EA', rate: 45 },
+      { name: 'Exterior Caulk & Seal', qty: 10, unit: 'EA', rate: 25 },
+      { name: 'Installation Labor', qty: 10, unit: 'EA', rate: 165 },
+      { name: 'Haul-Away & Disposal', qty: 1, unit: 'Lot', rate: 250 },
+    ],
+  },
+  {
+    id: 'interior',
+    label: 'Interior',
+    scopeSummary: 'Interior restoration scope including drywall, paint, flooring, and related finish work.',
+    defaultItems: [
+      { name: 'Drywall – Supply & Hang', qty: 500, unit: 'SF', rate: 3.25 },
+      { name: 'Drywall Tape, Mud & Sand', qty: 500, unit: 'SF', rate: 2.1 },
+      { name: 'Prime & Paint (2 Coats)', qty: 500, unit: 'SF', rate: 1.75 },
+      { name: 'Ceiling Texture', qty: 500, unit: 'SF', rate: 1.15 },
+      { name: 'Flooring – LVP', qty: 400, unit: 'SF', rate: 6.5 },
+      { name: 'Baseboard & Trim', qty: 120, unit: 'LF', rate: 4.75 },
+      { name: 'Interior Doors', qty: 3, unit: 'EA', rate: 425 },
+      { name: 'Haul-Away & Disposal', qty: 1, unit: 'Lot', rate: 450 },
     ],
   },
   {

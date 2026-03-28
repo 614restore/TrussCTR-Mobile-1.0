@@ -53,21 +53,25 @@ const DOC_CONTENT: Record<string, DocDefinition> = {
     ],
   },
   rescind: {
-    title: 'Notice of Cancellation',
-    subtitle: 'Three-Day Right To Cancel',
+    title: '3-Day Right to Rescind',
+    subtitle: 'Notice of Cancellation — Federal Truth in Lending Act',
     sections: ({ companyAddress, companyState, today, cancelDeadline }) => [
-      `You may cancel this transaction, without any penalty or obligation, within three business days from ${today}. If you cancel, any property traded in, any payments made by you under the contract or sale, and any negotiable instrument executed by you will be returned within the time required by law.`,
-      `To cancel this transaction, mail or deliver a signed and dated copy of any written notice of cancellation to the Contractor at ${companyAddress}, in the state of ${companyState}, not later than midnight of ${cancelDeadline}.`,
-      `I hereby cancel this transaction.\n\nBuyer / Homeowner: ____________________\nDate of transaction: ${today}\nCancellation deadline: ${cancelDeadline}`,
+      `NOTICE OF RIGHT TO CANCEL\n\nYou may cancel this transaction, without any penalty or obligation, within three (3) business days from ${today}. If you cancel, any property traded in, any payments made by you under the contract or sale, and any negotiable instrument executed by you will be returned within 20 calendar days following receipt by the Contractor of your cancellation notice.`,
+      `YOUR RIGHT TO CANCEL\n\nYou are entering into a transaction that will result in a lien, mortgage, or other security interest in your home. You have a legal right under federal law to cancel this transaction, without cost, within three (3) business days from whichever of the following events occurs last: (1) the date of the transaction, which is ${today}; (2) the date you received your Truth in Lending disclosures; or (3) the date you received this notice of your right to cancel.`,
+      `CANCELLATION DEADLINE\n\nTo cancel this transaction, mail or deliver a signed and dated copy of this notice, or any other written notice, to the Contractor at ${companyAddress}, in the state of ${companyState}, not later than midnight of ${cancelDeadline}.`,
+      `HOW TO CANCEL\n\nIf you decide to cancel, you may do so by notifying the Contractor in writing at the address shown above. You may use any written statement that is signed and dated by you and states your intention to cancel. We recommend sending your cancellation notice via certified mail, return receipt requested, to ensure proof of delivery.`,
+      `EFFECT OF CANCELLATION\n\nIf you cancel this transaction: (1) the lien, mortgage, or other security interest in your home is also cancelled; (2) any property or money given to us in connection with this transaction will be returned within 20 calendar days; and (3) we must take the steps necessary to reflect the fact that the lien or security interest in your home has been cancelled. You are not required to provide any reason for your cancellation.\n\nBy signing below, I/we acknowledge receipt of this Notice of Right to Cancel and understand my/our right to cancel this transaction within three (3) business days.\n\nDate of transaction: ${today}\nCancellation deadline: ${cancelDeadline}`,
     ],
   },
   completion: {
     title: 'Completion Certificate',
     subtitle: 'Project Completion & Satisfaction Acknowledgment',
     sections: ({ propertyAddress, projectValue, today }) => [
-      `The Customer acknowledges that the work performed by the Contractor at ${propertyAddress} has been substantially completed as of ${today}.`,
-      `The customer confirms that the project area has been reviewed and that the contractor may proceed with project closeout and final billing, subject to any separately documented warranty or punch-list obligations.`,
-      `The parties acknowledge a final contract value of ${projectValue}, unless further revised by signed change order or final insurance supplementation.`,
+      `CERTIFICATE OF COMPLETION\n\nThis certifies that the work performed by the Contractor at ${propertyAddress} has been substantially completed as of ${today}, in accordance with the contract specifications and to the satisfaction of all parties involved.`,
+      `SCOPE CONFIRMATION\n\nThe customer confirms that the project area has been reviewed and that all contracted work has been completed in a professional and workmanlike manner. The Contractor may proceed with project closeout and final billing, subject to any separately documented warranty or punch-list obligations.`,
+      `FINAL CONTRACT VALUE\n\nThe parties acknowledge a final contract value of ${projectValue}, unless further revised by signed change order or final insurance supplementation. All outstanding balance is due and payable upon execution of this Certificate.`,
+      `WARRANTY ACKNOWLEDGMENT\n\nThe Contractor warrants workmanship for the period stated in the original contract or work order. Material warranties are passed through to the customer per manufacturer terms. This warranty does not cover damage caused by acts of nature, customer modification, or pre-existing conditions outside the contracted scope.`,
+      `By signing below, the customer acknowledges that all contracted work has been completed satisfactorily, accepts the final deliverables, and authorizes the Contractor to submit for any remaining insurance proceeds and final payment.`,
     ],
   },
   'change-order': {

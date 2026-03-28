@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Minus, Save, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -38,19 +38,29 @@ function buildPresetItems(presetId: EstimatePresetId): LineItem[] {
 export default function RetailEstimator() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { profile } = useAuth();
   const [contact, setContact] = useState<any>(null);
-  const [presetId, setPresetId] = useState<EstimatePresetId>('roof_replacement');
+
+  // Honor ?preset= query param from Document Manager quick-start links
+  const urlPreset = searchParams.get('preset') as EstimatePresetId | null;
+  const validPresetIds = new Set(ESTIMATE_PRESETS.map((p) => p.id));
+  const initialPreset: EstimatePresetId =
+    urlPreset && validPresetIds.has(urlPreset) ? urlPreset : 'roof_replacement';
+
+  const [presetId, setPresetId] = useState<EstimatePresetId>(initialPreset);
   const [squares, setSquares] = useState(25);
   const [waste, setWaste] = useState(15);
   const [shinglePrice, setShinglePrice] = useState(150);
   const [estimateTitle, setEstimateTitle] = useState('Retail Estimate');
-  const [scopeSummary, setScopeSummary] = useState(buildDefaultQuoteMeta(0).scopeSummary);
+  const [scopeSummary, setScopeSummary] = useState(
+    ESTIMATE_PRESETS.find((p) => p.id === initialPreset)?.scopeSummary || buildDefaultQuoteMeta(0).scopeSummary
+  );
   const [customerMessage, setCustomerMessage] = useState(buildDefaultQuoteMeta(0).customerMessage);
   const [paymentTerms, setPaymentTerms] = useState(buildDefaultQuoteMeta(0).paymentTerms);
   const [warrantyPeriod, setWarrantyPeriod] = useState(buildDefaultQuoteMeta(0).warrantyPeriod);
   const [additionalNotes, setAdditionalNotes] = useState('');
-  const [items, setItems] = useState<LineItem[]>(buildPresetItems('roof_replacement'));
+  const [items, setItems] = useState<LineItem[]>(buildPresetItems(initialPreset));
   const [showLineItems, setShowLineItems] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -123,6 +133,7 @@ export default function RetailEstimator() {
 
     const { data: sessionData } = await supabase.auth.getSession();
     const session = sessionData?.session;
+    const companyId = profile?.company_id || contact?.company_id;
 
     if (!id) {
       setSaveError('No contact ID. Open this estimator from a contact.');
@@ -132,8 +143,8 @@ export default function RetailEstimator() {
       setSaveError('Not logged in. Restart the app and try again.');
       return;
     }
-    if (!profile) {
-      setSaveError('Profile not loaded yet. Wait a moment and try again.');
+    if (!companyId) {
+      setSaveError('Company details are still loading. Wait a moment and try again.');
       return;
     }
 
@@ -144,8 +155,7 @@ export default function RetailEstimator() {
       // Only include columns that exist in your estimates table
       const estimatePayload: any = {
         contact_id: id,
-        company_id: profile.company_id,
-        assigned_to: contact?.assigned_to || null,
+        company_id: companyId,
         title: estimateTitle,
         items: [
           {
@@ -158,6 +168,8 @@ export default function RetailEstimator() {
           ...activeItems,
         ],
         subtotal: grandTotal,
+        tax_rate: 0,
+        tax_amount: 0,
         total: grandTotal,
         notes: serializeEstimateNotes(
           {
@@ -187,10 +199,10 @@ export default function RetailEstimator() {
 
       await (supabase.from('communications') as any).insert({
         contact_id: id,
-        company_id: profile.company_id,
+        company_id: companyId,
         type: 'note',
         content: `Retail quote created in mobile app: ${estimateTitle} (${estimateNumber}) for ${formatCurrency(grandTotal)}`,
-        user_id: profile.id,
+        user_id: profile?.id || session.user.id,
         direction: 'outbound',
       });
 
