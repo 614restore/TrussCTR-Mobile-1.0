@@ -19,6 +19,8 @@ import { applyMention, extractMentionHandles, findActiveMentionQuery, getMention
 import { Capacitor } from '@capacitor/core';
 import { buildLegalDocumentStats, getSignatureParentName, isLegalDocument, LEGAL_DOCUMENT_TEMPLATES } from '../lib/documentVisibility';
 import { compressImageWithLightCompressor, PHOTO_POLICY_PRESETS, validateVideoForCloud } from '../lib/lightCompressor';
+import EagleViewPanel from '../components/EagleViewPanel';
+import RoofrPanel from '../components/RoofrPanel';
 
 const TABS = [
   { id: 'overview', label: 'Overview', icon: Info },
@@ -540,7 +542,7 @@ export default function ContactDetail() {
             {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
             {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
-            {activeTab === 'documents' && <DocumentsTab contactId={contact.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} />}
+            {activeTab === 'documents' && <DocumentsTab contactId={contact.id} companyId={contact.company_id ?? profile?.company_id ?? ''} address={contact.address ?? ''} city={contact.city ?? ''} state={contact.state ?? ''} zip={contact.zip ?? ''} contactName={[contact.first_name, contact.last_name].filter(Boolean).join(' ')} userId={user?.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} onDocumentSaved={fetchDocuments} />}
             {activeTab === 'financial' && <FinancialTab contact={contact} userId={user?.id} onEdit={openEdit} onRefresh={fetchContact} />}
             {activeTab === 'insurance' && <InsuranceTab contact={contact} />}
           </motion.div>
@@ -2360,7 +2362,7 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
   );
 }
 
-function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { contactId: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void }) {
+function DocumentsTab({ contactId, companyId, address, city, state, zip, contactName, userId, documents, onUpload, onLegalUpload, onDocumentSaved }: { contactId: string; companyId: string; address: string; city: string; state: string; zip: string; contactName?: string; userId?: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void; onDocumentSaved?: () => void }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
   const filteredDocs = documents.filter((doc) => {
@@ -2455,13 +2457,29 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
           )}
         </div>
       )}
-      <div className="bg-primary/5 border border-primary/10 rounded-2xl p-5 space-y-3">
-        <div className="flex justify-between items-center">
-          <h4 className="text-xs font-bold text-primary uppercase tracking-wider">EagleView Report</h4>
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Not Requested</span>
-        </div>
-        <button className="w-full bg-primary text-white py-3 rounded-xl text-xs font-bold active:scale-95 transition-transform">Order Aerial Measurement</button>
-      </div>
+      {/* ── Aerial Measurement Reports ── */}
+      <EagleViewPanel
+        contactId={contactId}
+        companyId={companyId}
+        address={address}
+        city={city}
+        state={state}
+        zip={zip}
+        contactName={contactName}
+        userId={userId}
+        onDocumentSaved={onDocumentSaved}
+      />
+      <RoofrPanel
+        contactId={contactId}
+        companyId={companyId}
+        address={address}
+        city={city}
+        state={state}
+        zip={zip}
+        contactName={contactName}
+        userId={userId}
+        onDocumentSaved={onDocumentSaved}
+      />
       <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 space-y-3">
         <div className="flex justify-between items-center">
           <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Before & After Report</h4>
