@@ -2,10 +2,16 @@ export type DocumentContext = {
   companyAddress: string;
   companyState: string;
   propertyAddress: string;
+  /** Two-letter state code derived from the contact/property address (e.g. "OH"). */
+  propertyState: string;
   projectValue: string;
   deductible: string;
   today: string;
   cancelDeadline: string;
+  /** Company/contractor display name — defaults to "614 Restore LLC" */
+  contractorName?: string;
+  /** Contractor phone number — defaults to "(614) 808-8899" */
+  contractorPhone?: string;
 };
 
 export type DocDefinition = {
@@ -19,17 +25,59 @@ export const PLACEHOLDER_CTX: DocumentContext = {
   companyAddress: '{companyAddress}',
   companyState: '{companyState}',
   propertyAddress: '{propertyAddress}',
+  propertyState: '{propertyState}',
   projectValue: '{projectValue}',
   deductible: '{deductible}',
   today: '{today}',
   cancelDeadline: '{cancelDeadline}',
+  contractorName: '{contractorName}',
+  contractorPhone: '{contractorPhone}',
 };
+
+/**
+ * Whether this document type requires the customer to check a
+ * "I understand I am responsible for my deductible" box before signing.
+ * Required for insurance restoration docs under Ohio anti-rebating law.
+ */
+export function requiresDeductibleAck(docType: string): boolean {
+  return docType === 'contingency' || docType === 'rescind';
+}
+
+// ---------------------------------------------------------------------------
+// State-specific Notice of Cancellation builder
+// ---------------------------------------------------------------------------
+
+function getRescindSections(ctx: DocumentContext): string[] {
+  const state = (ctx.propertyState || ctx.companyState || '').trim().toUpperCase();
+
+  if (state === 'OH') {
+    // Ohio Home Solicitation Sales Act — R.C. §1345.21 et seq.
+    // Statute requires all-caps text, bold minimum 10pt, and duplicate delivery.
+    return [
+      `NOTICE OF CANCELLATION\n\nDate of Transaction: ${ctx.today}`,
+      `YOU MAY CANCEL THIS TRANSACTION, WITHOUT ANY PENALTY OR OBLIGATION, WITHIN THREE BUSINESS DAYS FROM THE ABOVE DATE.\n\nIF YOU CANCEL, ANY PROPERTY TRADED IN, ANY PAYMENTS MADE BY YOU UNDER THE CONTRACT OR SALE, AND ANY NEGOTIABLE INSTRUMENT EXECUTED BY YOU WILL BE RETURNED WITHIN TEN BUSINESS DAYS FOLLOWING RECEIPT BY THE SELLER OF YOUR CANCELLATION NOTICE. ANY SECURITY INTEREST ARISING OUT OF THE TRANSACTION WILL BE CANCELLED.`,
+      `TO CANCEL THIS TRANSACTION, MAIL OR DELIVER A SIGNED AND DATED COPY OF THIS CANCELLATION NOTICE, OR SEND AN EMAIL TO:\n\nSeller: ${ctx.contractorName || '614 Restore LLC'}\nAddress: ${ctx.companyAddress}\nPhone: ${ctx.contractorPhone || '(614) 808-8899'}\n\nNOT LATER THAN MIDNIGHT OF: ${ctx.cancelDeadline}`,
+      `I HEREBY CANCEL THIS TRANSACTION.\n\nBuyer / Homeowner Signature: ____________________\n\nDate of Transaction: ${ctx.today}\nCancellation Deadline: ${ctx.cancelDeadline}`,
+    ];
+  }
+
+  // Generic multi-state default (HSSA-style language)
+  return [
+    `NOTICE OF RIGHT TO CANCEL\n\nYou may cancel this transaction, without any penalty or obligation, within three (3) business days from ${ctx.today}. If you cancel, any property traded in, any payments made by you under the contract or sale, and any negotiable instrument executed by you will be returned within 20 calendar days following receipt by the Contractor of your cancellation notice.`,
+    `YOUR RIGHT TO CANCEL\n\nYou are entering into a transaction that will result in a lien, mortgage, or other security interest in your home. You have a legal right under federal law to cancel this transaction, without cost, within three (3) business days from whichever of the following events occurs last: (1) the date of the transaction, which is ${ctx.today}; (2) the date you received your Truth in Lending disclosures; or (3) the date you received this notice of your right to cancel.`,
+    `CANCELLATION DEADLINE\n\nTo cancel this transaction, mail or deliver a signed and dated copy of this notice, or any other written notice, to the Contractor at ${ctx.companyAddress}, in the state of ${ctx.companyState}, not later than midnight of ${ctx.cancelDeadline}.`,
+    `HOW TO CANCEL\n\nIf you decide to cancel, you may do so by notifying the Contractor in writing at the address shown above. You may use any written statement that is signed and dated by you and states your intention to cancel. We recommend sending your cancellation notice via certified mail, return receipt requested, to ensure proof of delivery.`,
+    `EFFECT OF CANCELLATION\n\nIf you cancel this transaction: (1) the lien, mortgage, or other security interest in your home is also cancelled; (2) any property or money given to us in connection with this transaction will be returned within 20 calendar days; and (3) we must take the steps necessary to reflect the fact that the lien or security interest in your home has been cancelled. You are not required to provide any reason for your cancellation.\n\nBy signing below, I/we acknowledge receipt of this Notice of Right to Cancel and understand my/our right to cancel this transaction within three (3) business days.\n\nDate of transaction: ${ctx.today}\nCancellation deadline: ${ctx.cancelDeadline}`,
+  ];
+}
 
 export const DEFAULT_DOC_CONTENT: Record<string, DocDefinition> = {
   contingency: {
     title: 'Contingency Agreement',
     subtitle: 'Insurance Restoration Authorization',
-    sections: ({ companyAddress, propertyAddress, deductible, today }) => [
+    sections: ({ companyAddress, propertyAddress, deductible, today, contractorName, contractorPhone }) => [
+      // ── Required initial line: RCV / deductible / supplements ────────────
+      `Scope of Work and Payment: Contractor (${contractorName || '614 Restore LLC'}) agrees to perform the repairs approved by the Owner's insurance carrier for the total replacement cost value (RCV). The total contract price shall be the sum of the initial insurance proceeds, the applicable policy deductible, and any supplemental insurance proceeds approved for required code upgrades or unforeseen items. Owner acknowledges they are responsible for the payment of the full deductible as required by applicable state law. Contact ${contractorName || '614 Restore LLC'} at ${contractorPhone || '(614) 808-8899'} with any questions regarding this scope.`,
       `This Contingency Agreement is entered into on ${today} between the Contractor, located at ${companyAddress}, and the Customer for the property located at ${propertyAddress}.`,
       `The Customer authorizes the Contractor to inspect the property, meet with the insurance carrier or adjuster, and prepare pricing and scope documents for storm-related restoration work. The Contractor may pursue supplements that are reasonably necessary to restore the property to pre-loss condition.`,
       `This agreement is contingent upon approval of the insurance claim in sufficient scope and value to perform the work. If the claim is denied in full and no retail agreement is executed, this contingency agreement is void. The customer remains responsible for the deductible of ${deductible} and any elective upgrades outside the approved scope.`,
@@ -47,15 +95,10 @@ export const DEFAULT_DOC_CONTENT: Record<string, DocDefinition> = {
     ],
   },
   rescind: {
-    title: '3-Day Right to Rescind',
-    subtitle: 'Notice of Cancellation — Federal Truth in Lending Act',
-    sections: ({ companyAddress, companyState, today, cancelDeadline }) => [
-      `NOTICE OF RIGHT TO CANCEL\n\nYou may cancel this transaction, without any penalty or obligation, within three (3) business days from ${today}. If you cancel, any property traded in, any payments made by you under the contract or sale, and any negotiable instrument executed by you will be returned within 20 calendar days following receipt by the Contractor of your cancellation notice.`,
-      `YOUR RIGHT TO CANCEL\n\nYou are entering into a transaction that will result in a lien, mortgage, or other security interest in your home. You have a legal right under federal law to cancel this transaction, without cost, within three (3) business days from whichever of the following events occurs last: (1) the date of the transaction, which is ${today}; (2) the date you received your Truth in Lending disclosures; or (3) the date you received this notice of your right to cancel.`,
-      `CANCELLATION DEADLINE\n\nTo cancel this transaction, mail or deliver a signed and dated copy of this notice, or any other written notice, to the Contractor at ${companyAddress}, in the state of ${companyState}, not later than midnight of ${cancelDeadline}.`,
-      `HOW TO CANCEL\n\nIf you decide to cancel, you may do so by notifying the Contractor in writing at the address shown above. You may use any written statement that is signed and dated by you and states your intention to cancel. We recommend sending your cancellation notice via certified mail, return receipt requested, to ensure proof of delivery.`,
-      `EFFECT OF CANCELLATION\n\nIf you cancel this transaction: (1) the lien, mortgage, or other security interest in your home is also cancelled; (2) any property or money given to us in connection with this transaction will be returned within 20 calendar days; and (3) we must take the steps necessary to reflect the fact that the lien or security interest in your home has been cancelled. You are not required to provide any reason for your cancellation.\n\nBy signing below, I/we acknowledge receipt of this Notice of Right to Cancel and understand my/our right to cancel this transaction within three (3) business days.\n\nDate of transaction: ${today}\nCancellation deadline: ${cancelDeadline}`,
-    ],
+    title: 'Notice of Cancellation',
+    subtitle: 'Three-Day Right To Cancel',
+    // Sections are state-specific — see getRescindSections() above.
+    sections: (ctx) => getRescindSections(ctx),
   },
   completion: {
     title: 'Completion Certificate',
@@ -88,10 +131,13 @@ export function interpolateTemplate(template: string, ctx: DocumentContext): str
     .replace(/\{today\}/g, ctx.today)
     .replace(/\{cancelDeadline\}/g, ctx.cancelDeadline)
     .replace(/\{propertyAddress\}/g, ctx.propertyAddress)
+    .replace(/\{propertyState\}/g, ctx.propertyState)
     .replace(/\{companyAddress\}/g, ctx.companyAddress)
     .replace(/\{companyState\}/g, ctx.companyState)
     .replace(/\{projectValue\}/g, ctx.projectValue)
-    .replace(/\{deductible\}/g, ctx.deductible);
+    .replace(/\{deductible\}/g, ctx.deductible)
+    .replace(/\{contractorName\}/g, ctx.contractorName || '614 Restore LLC')
+    .replace(/\{contractorPhone\}/g, ctx.contractorPhone || '(614) 808-8899');
 }
 
 /** Load saved custom templates for a company. Returns null if none saved. */

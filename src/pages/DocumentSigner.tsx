@@ -14,7 +14,7 @@ import { handleAutoMove } from '../lib/store';
 import { generateAndDownloadPdf, uploadToAvailableBucket } from '../lib/pdfService';
 import { jsPDF } from 'jspdf';
 import { buildStoredDocumentUrl } from '../lib/documentAccess';
-import { DEFAULT_DOC_CONTENT, getDocSections, type DocumentContext } from '../lib/documentTemplates';
+import { DEFAULT_DOC_CONTENT, getDocSections, requiresDeductibleAck, type DocumentContext } from '../lib/documentTemplates';
 
 function addBusinessDays(date: Date, days: number) {
   const next = new Date(date);
@@ -289,10 +289,12 @@ export default function DocumentSigner() {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [savedDocumentId, setSavedDocumentId] = useState<string | null>(null);
   const [additionalTerms, setAdditionalTerms] = useState('');
+  const [deductibleAcknowledged, setDeductibleAcknowledged] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const printableRef = useRef<HTMLDivElement>(null);
   const doc = DEFAULT_DOC_CONTENT[docType || ''];
   const canEditTerms = profile?.role === 'owner' || profile?.role === 'admin';
+  const needsDeductibleAck = requiresDeductibleAck(docType || '');
 
   useEffect(() => {
     const fetchContact = async () => {
@@ -321,6 +323,10 @@ export default function DocumentSigner() {
     .join(', ');
   const companyAddress = profile?.companies?.address || 'Company address pending';
   const companyState = extractState(companyAddress);
+  // Use the contact's state for state-specific compliance (e.g. Ohio HSSA)
+  const propertyState = (contact?.state || extractState(propertyAddress)).toUpperCase();
+  const contractorName = (profile as any)?.companies?.name || '614 Restore LLC';
+  const contractorPhone = (profile as any)?.companies?.phone || '(614) 808-8899';
   const todayDate = new Date();
   const today = todayDate.toLocaleDateString();
   const cancelDeadline = addBusinessDays(todayDate, 3).toLocaleDateString();
@@ -330,10 +336,13 @@ export default function DocumentSigner() {
     companyAddress,
     companyState,
     propertyAddress: propertyAddress || 'Property address pending',
+    propertyState,
     projectValue,
     deductible,
     today,
     cancelDeadline,
+    contractorName,
+    contractorPhone,
   });
 
   const handleScroll = () => {
@@ -631,6 +640,41 @@ export default function DocumentSigner() {
           </div>
         </div>
 
+        {/* Deductible acknowledgment — required for contingency & rescind */}
+        {needsDeductibleAck && (
+          <button
+            type="button"
+            onClick={() => setDeductibleAcknowledged((v) => !v)}
+            className={`w-full flex items-start gap-4 p-5 rounded-3xl border-2 text-left transition-colors ${
+              deductibleAcknowledged
+                ? 'border-emerald-500 bg-emerald-50'
+                : 'border-amber-400 bg-amber-50'
+            }`}
+          >
+            <div
+              className={`mt-0.5 flex-shrink-0 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-colors ${
+                deductibleAcknowledged
+                  ? 'border-emerald-500 bg-emerald-500'
+                  : 'border-amber-400 bg-white'
+              }`}
+            >
+              {deductibleAcknowledged && (
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M2 7l3.5 3.5L12 3" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </div>
+            <div>
+              <p className={`text-sm font-bold ${deductibleAcknowledged ? 'text-emerald-800' : 'text-amber-900'}`}>
+                Deductible Acknowledgment — Required
+              </p>
+              <p className={`text-xs mt-1 leading-relaxed ${deductibleAcknowledged ? 'text-emerald-700' : 'text-amber-800'}`}>
+                I understand that I am responsible for the full payment of my insurance deductible ({deductible}) and that it cannot be waived, discounted, or absorbed by the contractor under applicable state law.
+              </p>
+            </div>
+          </button>
+        )}
+
         <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4">
           <SignaturePad
             title="Customer Signature"
@@ -677,7 +721,7 @@ export default function DocumentSigner() {
       <div className="bg-white p-6 border-t border-slate-100 shadow-[0_-4px_10px_rgba(0,0,0,0.04)]">
         <button
           type="button"
-          disabled={!hasReadToBottom || !customerSignatureDataUrl || !contractorSignatureDataUrl || saving || signed}
+          disabled={!hasReadToBottom || !customerSignatureDataUrl || !contractorSignatureDataUrl || saving || signed || (needsDeductibleAck && !deductibleAcknowledged)}
           onClick={handleFinalSign}
           className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50"
         >
