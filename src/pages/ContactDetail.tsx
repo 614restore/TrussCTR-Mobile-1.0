@@ -1031,6 +1031,22 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
           </div>
         </div>
         <WeatherCard contact={contact} />
+        <button
+          type="button"
+          onClick={() => navigate(`/contacts/${contact.id}/tools`)}
+          className="card p-5 w-full text-left flex items-center justify-between active:scale-[0.98] transition-transform"
+        >
+          <div className="flex items-center gap-4">
+            <div className="h-11 w-11 rounded-2xl bg-primary/10 flex items-center justify-center">
+              <Wrench size={20} className="text-primary" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-primary">Field Tools</p>
+              <p className="text-[11px] text-slate-400 font-medium">Work orders, estimates, crew & more</p>
+            </div>
+          </div>
+          <ChevronRight size={18} className="text-slate-300" />
+        </button>
         <div className="card p-5 space-y-4">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Quick Notes</h3>
           <textarea
@@ -2365,178 +2381,389 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
 function DocumentsTab({ contactId, companyId, address, city, state, zip, contactName, userId, documents, onUpload, onLegalUpload, onDocumentSaved }: { contactId: string; companyId: string; address: string; city: string; state: string; zip: string; contactName?: string; userId?: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void; onDocumentSaved?: () => void }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
-  const filteredDocs = documents.filter((doc) => {
-    if (filter === 'photos') return doc.type === 'photo';
-    if (filter === 'docs') return doc.type !== 'photo' && !isLegalDocument(doc);
-    if (filter === 'legal') return isLegalDocument(doc);
-    return true;
-  });
-  const visibleDocs = filteredDocs.filter((doc) => !getSignatureParentName(String(doc.name || '')));
-  const legalDocStats = buildLegalDocumentStats(visibleDocs);
-  const signedLegalDocs = LEGAL_DOCUMENT_TEMPLATES.map((template) => ({
-    ...template,
-    signedPdf: legalDocStats[template.id]?.latestSignedPdf || null,
-  })).filter((entry) => entry.signedPdf);
-  const gridDocs = visibleDocs.filter(
-    (doc) => !(filter === 'legal' && doc.type === 'contract' && isLegalDocument(doc))
-  );
+
+  // Base document lists — strip signature attachments from visible set
+  const allVisible = documents.filter((doc) => !getSignatureParentName(String(doc.name || '')));
+  const photos = allVisible
+    .filter((doc) => doc.type === 'photo')
+    .sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+  const nonLegalDocs = allVisible.filter((doc) => doc.type !== 'photo' && !isLegalDocument(doc));
+  const legalDocStats = buildLegalDocumentStats(allVisible);
+  const signedLegalDocs = LEGAL_DOCUMENT_TEMPLATES
+    .map((t) => ({ ...t, signedPdf: legalDocStats[t.id]?.latestSignedPdf || null }))
+    .filter((e) => e.signedPdf);
+  // Docs tab: signed docs rise to the top
+  const sortedDocs = [
+    ...nonLegalDocs.filter((d) => d.type === 'contract' || d.type === 'signed'),
+    ...nonLegalDocs.filter((d) => d.type !== 'contract' && d.type !== 'signed'),
+  ];
+
+  const TABS_CONFIG = [
+    { id: 'all',    label: 'All' },
+    { id: 'photos', label: `Photos${photos.length ? ` (${photos.length})` : ''}` },
+    { id: 'docs',   label: `Docs${nonLegalDocs.length ? ` (${nonLegalDocs.length})` : ''}` },
+    { id: 'legal',  label: `Legal${signedLegalDocs.length ? ` ✓` : ''}` },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="flex gap-2">
-        {['all','photos','docs','legal'].map((f) => (
-          <button key={f} onClick={() => setFilter(f as any)} className={`px-3 py-2 rounded-lg text-xs font-bold ${filter === f ? 'bg-accent text-white' : 'bg-slate-100 text-slate-600'}`}>
-            {f === 'all' ? 'All' : f === 'photos' ? 'Photos' : f === 'docs' ? 'Docs' : 'Legal'}
+    <div className="space-y-5">
+      {/* ── Filter tabs ── */}
+      <div className="flex gap-2 overflow-x-auto pb-0.5">
+        {TABS_CONFIG.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setFilter(id as any)}
+            className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+              filter === id ? 'bg-accent text-white shadow-sm' : 'bg-slate-100 text-slate-600'
+            }`}
+          >
+            {label}
           </button>
         ))}
       </div>
 
-      <div className="bg-primary/5 border border-primary/10 rounded-2xl p-5 space-y-3">
-        <div className="flex justify-between items-center">
-          <h4 className="text-xs font-bold text-primary uppercase tracking-wider">Legal Documents</h4>
-          <span className="text-[10px] font-bold text-slate-400 uppercase">Signable Templates</span>
-        </div>
-        <button
-          type="button"
-          onClick={() => navigate(`/contacts/${contactId}/documents`)}
-          className="w-full rounded-xl bg-primary py-3 text-xs font-bold text-white"
-        >
-          Open Legal Document Center
-        </button>
-        <div className="space-y-2">
-          {LEGAL_DOCUMENT_TEMPLATES.map((doc) => (
-            <div key={doc.id} className="bg-white rounded-xl p-3 border border-slate-100 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-bold text-slate-700">{doc.title}</span>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/contacts/${contactId}/documents/${doc.id}`)}
-                  className="text-[10px] font-bold uppercase tracking-wider text-accent"
-                >
-                  Sign In App
-                </button>
+      {/* ══════════════════════════════════
+          ALL TAB
+      ══════════════════════════════════ */}
+      {filter === 'all' && (
+        <div className="space-y-5">
+          {/* Photos summary */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Photos</h3>
+              <button onClick={() => setFilter('photos')} className="text-[10px] font-bold text-accent uppercase tracking-widest">
+                {photos.length > 0 ? `View all ${photos.length}` : 'View'}
+              </button>
+            </div>
+            {photos.length > 0 ? (
+              <div className="grid grid-cols-3 gap-2">
+                {photos.slice(0, 6).map((doc, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => navigate(`/documents/view/${doc.id}`)}
+                    className="aspect-square rounded-xl overflow-hidden bg-slate-100 active:opacity-80"
+                  >
+                    <img src={doc.displayUrl || doc.url} alt={doc.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  </button>
+                ))}
               </div>
-              <label className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 cursor-pointer">
-                <span className="text-[11px] font-semibold text-slate-500">Upload existing file</span>
-                <span className="text-[10px] text-slate-400 font-bold">Upload</span>
-                <input type="file" className="hidden" onChange={(e) => onLegalUpload(doc.title, 'contract', e)} />
+            ) : (
+              <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-400">No photos yet</div>
+            )}
+          </div>
+
+          {/* Docs summary */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Docs</h3>
+              <button onClick={() => setFilter('docs')} className="text-[10px] font-bold text-accent uppercase tracking-widest">
+                {nonLegalDocs.length > 0 ? `View all ${nonLegalDocs.length}` : 'View'}
+              </button>
+            </div>
+            {nonLegalDocs.length > 0 ? (
+              <div className="space-y-2">
+                {nonLegalDocs.slice(0, 3).map((doc, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => navigate(`/documents/view/${doc.id}`)}
+                    className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl text-left active:bg-slate-50"
+                  >
+                    <div className="h-10 w-10 rounded-lg bg-slate-50 flex items-center justify-center shrink-0">
+                      <FileText size={18} className="text-slate-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                      <p className="text-[10px] text-slate-400">{(doc.size / 1024 / 1024).toFixed(1)} MB</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-xl bg-slate-50 px-4 py-3 text-xs text-slate-400">No documents yet</div>
+            )}
+          </div>
+
+          {/* Legal summary */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Legal</h3>
+              <button onClick={() => setFilter('legal')} className="text-[10px] font-bold text-accent uppercase tracking-widest">
+                Open Legal Center
+              </button>
+            </div>
+            <div className="space-y-2">
+              {LEGAL_DOCUMENT_TEMPLATES.map((doc) => {
+                const stat = legalDocStats[doc.id];
+                const isSigned = !!stat?.isSigned;
+                return (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => navigate(`/contacts/${contactId}/documents/${doc.id}`)}
+                    className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl text-left active:bg-slate-50"
+                  >
+                    <div className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${isSigned ? 'bg-emerald-50' : 'bg-slate-50'}`}>
+                      <CheckCircle2 size={16} className={isSigned ? 'text-emerald-500' : 'text-slate-300'} />
+                    </div>
+                    <p className="flex-1 text-xs font-bold text-primary truncate">{doc.title}</p>
+                    <span className={`text-[10px] font-bold uppercase tracking-wide ${isSigned ? 'text-emerald-600' : 'text-slate-400'}`}>
+                      {isSigned ? 'Signed' : 'Pending'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Upload button */}
+          <label className="flex items-center justify-center gap-2 w-full py-3 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 cursor-pointer active:bg-slate-200">
+            <Plus size={16} />
+            Upload File or Photo
+            <input type="file" className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
+          </label>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          PHOTOS TAB
+      ══════════════════════════════════ */}
+      {filter === 'photos' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              {photos.length} photo{photos.length !== 1 ? 's' : ''} on file
+            </p>
+            <label className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-xl text-[11px] font-bold cursor-pointer active:opacity-80">
+              <Plus size={14} />
+              Add Photo
+              <input type="file" className="hidden" onChange={onUpload} accept="image/*" />
+            </label>
+          </div>
+
+          {photos.length > 0 ? (
+            <div className="grid grid-cols-3 gap-2">
+              {photos.map((doc, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => navigate(`/documents/view/${doc.id}`)}
+                  className="aspect-square rounded-xl overflow-hidden bg-slate-100 active:opacity-80 relative"
+                >
+                  <img
+                    src={doc.displayUrl || doc.url}
+                    alt={doc.name}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                  {doc.name && (
+                    <div className="absolute bottom-0 inset-x-0 bg-black/40 px-1.5 py-1">
+                      <p className="text-[8px] font-bold text-white truncate">{doc.name}</p>
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-16 space-y-3">
+              <ImageIcon size={48} className="mx-auto text-slate-200" />
+              <div>
+                <p className="text-sm font-bold text-slate-400">No photos yet</p>
+                <p className="text-xs text-slate-300 mt-1">Photos taken during inspection will appear here</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          DOCS TAB
+      ══════════════════════════════════ */}
+      {filter === 'docs' && (
+        <div className="space-y-5">
+          {/* Aerial Measurement Reports */}
+          <EagleViewPanel
+            contactId={contactId}
+            companyId={companyId}
+            address={address}
+            city={city}
+            state={state}
+            zip={zip}
+            contactName={contactName}
+            userId={userId}
+            onDocumentSaved={onDocumentSaved}
+          />
+          <RoofrPanel
+            contactId={contactId}
+            companyId={companyId}
+            address={address}
+            city={city}
+            state={state}
+            zip={zip}
+            contactName={contactName}
+            userId={userId}
+            onDocumentSaved={onDocumentSaved}
+          />
+
+          {/* Before & After Report */}
+          <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 space-y-3">
+            <div className="flex justify-between items-center">
+              <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Before & After Report</h4>
+              <span className="text-[10px] font-bold text-emerald-600 uppercase">Shareable PDF</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => navigate(`/contacts/${contactId}/report`)}
+                className="rounded-xl bg-emerald-600 py-3 text-xs font-bold text-white"
+              >
+                Build Report
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/documents?contactId=${contactId}`)}
+                className="rounded-xl border border-emerald-200 bg-white py-3 text-xs font-bold text-emerald-700"
+              >
+                View Saved PDFs
+              </button>
+            </div>
+          </div>
+
+          {/* Files list — signed docs first */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                Files ({sortedDocs.length})
+              </h3>
+              <label className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-xl text-[11px] font-bold cursor-pointer active:opacity-80">
+                <Plus size={14} />
+                Upload
+                <input type="file" className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
               </label>
             </div>
-          ))}
-        </div>
-      </div>
-      {(filter === 'all' || filter === 'legal') && (
-        <div className="bg-white border border-slate-100 rounded-2xl p-5 space-y-3">
-          <div className="flex justify-between items-center">
-            <h4 className="text-xs font-bold text-primary uppercase tracking-wider">Signed Legal PDFs</h4>
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Customer View</span>
+            {sortedDocs.length > 0 ? (
+              <div className="space-y-2">
+                {sortedDocs.map((doc, i) => {
+                  const isSigned = doc.type === 'contract' || doc.type === 'signed';
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => navigate(`/documents/view/${doc.id}`)}
+                      className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left active:opacity-80 ${
+                        isSigned ? 'bg-emerald-50 border-emerald-100' : 'bg-white border-slate-100'
+                      }`}
+                    >
+                      <div className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${isSigned ? 'bg-emerald-100' : 'bg-slate-50'}`}>
+                        <FileText size={18} className={isSigned ? 'text-emerald-600' : 'text-slate-400'} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {isSigned ? '✓ Signed · ' : ''}{(doc.size / 1024 / 1024).toFixed(1)} MB
+                        </p>
+                      </div>
+                      <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-center py-12 space-y-3">
+                <FileText size={40} className="mx-auto text-slate-200" />
+                <p className="text-sm text-slate-400">No documents yet</p>
+              </div>
+            )}
           </div>
-          {signedLegalDocs.length > 0 ? (
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          LEGAL TAB
+      ══════════════════════════════════ */}
+      {filter === 'legal' && (
+        <div className="space-y-5">
+          {/* Signed legal PDFs — shown first and prominently */}
+          {signedLegalDocs.length > 0 && (
             <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Signed Documents</h3>
               {signedLegalDocs.map(({ id, title, signedPdf }) => (
                 <div key={id} className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-emerald-900">{title}</p>
-                      <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Signed and ready to view</p>
+                      <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Signed ✓</p>
                     </div>
                     <button
                       type="button"
-                      onClick={() => navigate(`/documents/view/${signedPdf.id}`)}
-                      className="rounded-xl bg-emerald-600 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white"
+                      onClick={() => navigate(`/documents/view/${(signedPdf as any).id}`)}
+                      className="rounded-xl bg-emerald-600 px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white shrink-0"
                     >
-                      View Signed PDF
+                      View PDF
                     </button>
                   </div>
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">
-              Signed legal documents will appear here after they are completed in the app.
+          )}
+
+          {/* Legal document templates */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Legal Templates</h3>
+              <button
+                type="button"
+                onClick={() => navigate(`/contacts/${contactId}/documents`)}
+                className="text-[10px] font-bold text-accent uppercase tracking-widest"
+              >
+                Open All
+              </button>
+            </div>
+            <div className="space-y-2">
+              {LEGAL_DOCUMENT_TEMPLATES.map((doc) => {
+                const stat = legalDocStats[doc.id];
+                const isSigned = !!stat?.isSigned;
+                return (
+                  <div key={doc.id} className={`rounded-xl border p-4 space-y-3 ${isSigned ? 'bg-emerald-50 border-emerald-100' : 'bg-white border-slate-100'}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-primary">{doc.title}</p>
+                        <p className="text-[10px] text-slate-400">{doc.description}</p>
+                      </div>
+                      {isSigned
+                        ? <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide shrink-0">✓ Signed</span>
+                        : <button
+                            type="button"
+                            onClick={() => navigate(`/contacts/${contactId}/documents/${doc.id}`)}
+                            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[10px] font-bold text-white uppercase tracking-wide"
+                          >
+                            Sign Now
+                          </button>
+                      }
+                    </div>
+                    {!isSigned && (
+                      <label className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 cursor-pointer">
+                        <span className="text-[11px] font-semibold text-slate-500">Upload existing signed copy</span>
+                        <span className="text-[10px] text-slate-400 font-bold">Upload</span>
+                        <input type="file" className="hidden" onChange={(e) => onLegalUpload(doc.title, 'contract', e)} />
+                      </label>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {signedLegalDocs.length === 0 && (
+            <div className="rounded-xl bg-slate-50 px-4 py-4 text-center space-y-1">
+              <p className="text-xs font-bold text-slate-500">No signed documents yet</p>
+              <p className="text-[11px] text-slate-400">Tap "Sign Now" on any template above to get a signature in the app.</p>
             </div>
           )}
         </div>
       )}
-      {/* ── Aerial Measurement Reports ── */}
-      <EagleViewPanel
-        contactId={contactId}
-        companyId={companyId}
-        address={address}
-        city={city}
-        state={state}
-        zip={zip}
-        contactName={contactName}
-        userId={userId}
-        onDocumentSaved={onDocumentSaved}
-      />
-      <RoofrPanel
-        contactId={contactId}
-        companyId={companyId}
-        address={address}
-        city={city}
-        state={state}
-        zip={zip}
-        contactName={contactName}
-        userId={userId}
-        onDocumentSaved={onDocumentSaved}
-      />
-      <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-5 space-y-3">
-        <div className="flex justify-between items-center">
-          <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Before & After Report</h4>
-          <span className="text-[10px] font-bold text-emerald-600 uppercase">Shareable PDF</span>
-        </div>
-        <p className="text-sm text-emerald-800">
-          Build a saved progress/completion report using customer photos for homeowners, adjusters, and future file reference.
-        </p>
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => navigate(`/contacts/${contactId}/report`)}
-            className="rounded-xl bg-emerald-600 py-3 text-xs font-bold text-white"
-          >
-            Build Report
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate(`/documents?contactId=${contactId}`)}
-            className="rounded-xl border border-emerald-200 bg-white py-3 text-xs font-bold text-emerald-700"
-          >
-            View Saved PDFs
-          </button>
-        </div>
-      </div>
-      <div className="flex justify-between items-center">
-        <h3 className="text-sm font-bold text-primary">Files & Photos</h3>
-        <label className="bg-accent text-white p-2 rounded-xl cursor-pointer active:scale-95 transition-transform">
-          <Plus size={18} />
-          <input type="file" className="hidden" onChange={onUpload} accept="image/*" />
-        </label>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {gridDocs.length > 0 ? gridDocs.map((doc, i) => (
-          <button
-            key={i}
-            type="button"
-            className="card p-3 space-y-2 text-left"
-            onClick={() => navigate(`/documents/view/${doc.id}`)}
-          >
-            <div>
-              <div className="h-24 bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center text-slate-300">
-                {doc.type === 'photo' ? <img src={doc.displayUrl || doc.url} alt={doc.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" /> : <FileText size={32} />}
-              </div>
-              <div>
-                <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
-                <p className="text-[10px] text-slate-400">{(doc.size / 1024 / 1024).toFixed(1)} MB</p>
-              </div>
-            </div>
-          </button>
-        )) : (
-          <div className="col-span-2 text-center py-12 text-slate-400">
-            <FileText size={48} className="mx-auto mb-4 opacity-20" />
-            <p className="text-sm">{filter === 'legal' ? 'No signed legal PDFs yet' : 'No documents uploaded yet'}</p>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

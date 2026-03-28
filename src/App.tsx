@@ -37,6 +37,7 @@ const RetailEstimator = lazy(() => import('./pages/RetailEstimator'));
 const SmartInspection = lazy(() => import('./pages/SmartInspection'));
 const PitchGauge = lazy(() => import('./pages/PitchGauge'));
 const DocumentTemplateEditor = lazy(() => import('./pages/DocumentTemplateEditor'));
+const ContactFieldTools = lazy(() => import('./pages/ContactFieldTools'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -98,6 +99,7 @@ function AppRoutes() {
             <Route path="/contacts/:id" element={<ContactDetail />} />
 
             {/* Contact sub-routes */}
+            <Route path="/contacts/:id/tools" element={<ContactFieldTools />} />
             <Route path="/contacts/:id/documents" element={<DocumentManager />} />
             <Route path="/contacts/:id/documents/:docType" element={<DocumentSigner />} />
             <Route path="/documents/view/:documentId" element={<DocumentViewer />} />

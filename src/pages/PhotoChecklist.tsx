@@ -1,10 +1,26 @@
-import React, { useState } from 'react';
-import { Camera, ChevronLeft, CheckCircle2, Circle, Image as ImageIcon, Plus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Camera, ChevronLeft, CheckCircle2, Circle, Image as ImageIcon } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 import { motion } from 'framer-motion';
 
 export default function PhotoChecklist() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const contactId = searchParams.get('contactId');
+  const [contactName, setContactName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!contactId) return;
+    (supabase as any)
+      .from('contacts')
+      .select('first_name, last_name')
+      .eq('id', contactId)
+      .single()
+      .then(({ data }: { data: any }) => {
+        if (data) setContactName(`${data.first_name || ''} ${data.last_name || ''}`.trim());
+      });
+  }, [contactId]);
   const [items, setItems] = useState([
     { id: 1, label: 'Front Elevation', completed: true, photo: 'https://picsum.photos/seed/front/400/300' },
     { id: 2, label: 'Rear Elevation', completed: true, photo: 'https://picsum.photos/seed/rear/400/300' },
@@ -30,7 +46,10 @@ export default function PhotoChecklist() {
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
             <ChevronLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-primary">Photo Checklist</h1>
+          <div>
+            <h1 className="text-xl font-bold text-primary">Photo Checklist</h1>
+            {contactName && <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{contactName}</p>}
+          </div>
         </div>
       </div>
 
@@ -86,7 +105,10 @@ export default function PhotoChecklist() {
       </div>
 
       {/* Action Bar */}
-      <div className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-100 p-4 flex gap-3 z-20">
+      <div
+        className="fixed inset-x-0 bg-white border-t border-slate-100 p-4 flex gap-3 z-20"
+        style={{ bottom: 'calc(4.75rem + env(safe-area-inset-bottom))' }}
+      >
         <button className="flex-1 bg-primary text-white py-4 rounded-2xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-transform flex items-center justify-center gap-2">
           <ImageIcon size={18} />
           Upload All

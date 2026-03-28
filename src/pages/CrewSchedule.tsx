@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { HardHat, ChevronLeft, Calendar as CalendarIcon, ChevronRight, MapPin, Clock, User } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 
 export default function CrewSchedule() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const contactId = searchParams.get('contactId');
   const { profile } = useAuth();
   const [scheduledJobs, setScheduledJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,31 +18,32 @@ export default function CrewSchedule() {
     if (profile?.company_id) {
       fetchScheduledJobs();
     }
-  }, [profile?.company_id, selectedDate]);
+  }, [profile?.company_id, selectedDate, contactId]);
 
   const fetchScheduledJobs = async () => {
     try {
-      const startOfDay = new Date(selectedDate);
-      startOfDay.setHours(0, 0, 0, 0);
-      
-      const endOfDay = new Date(selectedDate);
-      endOfDay.setHours(23, 59, 59, 999);
-
-      const { data, error } = await supabase
+      const db = supabase as any;
+      let query = db
         .from('work_orders')
-        .select(`
-          *,
-          contacts (
-            first_name,
-            last_name,
-            address
-          )
-        `)
-        .eq('company_id', profile.company_id)
-        .gte('scheduled_date', startOfDay.toISOString())
-        .lte('scheduled_date', endOfDay.toISOString())
+        .select(`*, contacts (first_name, last_name, address)`)
+        .eq('company_id', profile!.company_id)
         .order('scheduled_date', { ascending: true });
-      
+
+      if (contactId) {
+        // When filtered to a contact, show all their scheduled jobs (any date)
+        query = query.eq('contact_id', contactId).not('scheduled_date', 'is', null);
+      } else {
+        // Default: filter to selected day
+        const startOfDay = new Date(selectedDate);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(selectedDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        query = query
+          .gte('scheduled_date', startOfDay.toISOString())
+          .lte('scheduled_date', endOfDay.toISOString());
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       setScheduledJobs(data || []);
     } catch (err) {
@@ -64,7 +67,10 @@ export default function CrewSchedule() {
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
             <ChevronLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold text-primary">Crew Schedule</h1>
+          <div>
+            <h1 className="text-xl font-bold text-primary">Crew Schedule</h1>
+            {contactId && <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Filtered to this contact</p>}
+          </div>
         </div>
 
         <div className="flex items-center justify-between bg-slate-100 p-2 rounded-2xl">
