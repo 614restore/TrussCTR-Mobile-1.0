@@ -115,9 +115,10 @@ export default function EagleViewPanel({
           .eq('is_active', true)
           .single();
         if (error && error.code !== 'PGRST116') { setConfigStatus('missing'); return; }
-        const apiKey = data?.credentials?.apiKey;
-        const clientId = data?.credentials?.clientId;
-        const env = data?.credentials?.environment ?? 'production';
+        const credentials = data != null ? (data as any).credentials : null;
+        const apiKey = credentials?.apiKey;
+        const clientId = credentials?.clientId;
+        const env = credentials?.environment ?? 'production';
         if (!apiKey || !clientId) { setConfigStatus('missing'); return; }
         const ev = new EagleViewClient(apiKey, clientId, env);
         setClient(ev);

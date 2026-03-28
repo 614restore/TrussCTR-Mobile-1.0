@@ -112,7 +112,8 @@ export default function RoofrPanel({
           .eq('is_active', true)
           .single();
         if (error && error.code !== 'PGRST116') { setConfigStatus('missing'); return; }
-        const apiKey = data?.credentials?.apiKey;
+        const credentials = data != null ? (data as any).credentials : null;
+        const apiKey = credentials?.apiKey;
         if (!apiKey) { setConfigStatus('missing'); return; }
         setClient(new RoofrClient(apiKey));
         setConfigStatus('ok');
