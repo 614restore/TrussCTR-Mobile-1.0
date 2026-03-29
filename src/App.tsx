@@ -38,6 +38,7 @@ const SmartInspection = lazy(() => import('./pages/SmartInspection'));
 const PitchGauge = lazy(() => import('./pages/PitchGauge'));
 const DocumentTemplateEditor = lazy(() => import('./pages/DocumentTemplateEditor'));
 const ContactFieldTools = lazy(() => import('./pages/ContactFieldTools'));
+const PublicDocumentSigner = lazy(() => import('./pages/PublicDocumentSigner'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -85,8 +86,10 @@ function AppRoutes() {
   return (
     <Suspense fallback={<AppLoadingScreen message="Loading screen..." />}>
       <Routes>
-        {/* Always-accessible route — must work with or without a session */}
+        {/* Always-accessible routes — work with or without a session */}
         <Route path="/reset-password" element={<ResetPassword />} />
+        {/* Public e-signature page — homeowners open this in their browser, no auth needed */}
+        <Route path="/sign/:token" element={<PublicDocumentSigner />} />
         {!session ? (
           <>
             <Route path="/login" element={<Login />} />

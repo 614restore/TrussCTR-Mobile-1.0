@@ -161,10 +161,21 @@ export default function ContactDetail() {
   }, [id]);
 
   useEffect(() => {
-    if (activeTab === 'documents') {
-      fetchDocuments();
-    }
+    if (activeTab === 'documents') fetchDocuments();
+    // Always pull fresh contact when the status tab opens — the status may have
+    // been updated by handleAutoMove (signing docs, submitting inspection) while
+    // the user was on another route, leaving local state stale.
+    if (activeTab === 'status') fetchContact();
   }, [activeTab]);
+
+  // Re-sync contact when the app returns to the foreground (e.g. after signing a
+  // document which calls handleAutoMove in a different route and then navigating
+  // back here while the component was kept alive in the hash-router tree).
+  useEffect(() => {
+    const handleFocus = () => fetchContact();
+    document.addEventListener('visibilitychange', handleFocus);
+    return () => document.removeEventListener('visibilitychange', handleFocus);
+  }, [id]);
 
   useEffect(() => {
     const nextTab = normalizeContactTab(searchParams.get('tab'));
@@ -261,6 +272,9 @@ export default function ContactDetail() {
         user_id: user.id,
         direction: 'outbound',
       });
+      // Optimistic update — reflect the new status instantly so the stage
+      // buttons re-render correctly without waiting for the async fetchContact.
+      setContact((c: any) => c ? { ...c, status: newStatus, status_changed_at: now } : c);
       fetchContact();
       fetchTimeline();
     } catch (err) {
@@ -540,10 +554,10 @@ export default function ContactDetail() {
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
             {activeTab === 'overview' && <OverviewTab contact={contact} onRefresh={fetchContact} />}
             {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
-            {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} />}
+            {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} canUndo={profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager'} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
             {activeTab === 'documents' && <DocumentsTab contactId={contact.id} companyId={contact.company_id ?? profile?.company_id ?? ''} address={contact.address ?? ''} city={contact.city ?? ''} state={contact.state ?? ''} zip={contact.zip ?? ''} contactName={[contact.first_name, contact.last_name].filter(Boolean).join(' ')} userId={user?.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} onDocumentSaved={fetchDocuments} />}
-            {activeTab === 'financial' && <FinancialTab contact={contact} userId={user?.id} onEdit={openEdit} onRefresh={fetchContact} />}
+            {activeTab === 'financial' && <FinancialTab contact={contact} userId={user?.id} onEdit={openEdit} onRefresh={fetchContact} canUndo={profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager'} />}
             {activeTab === 'insurance' && <InsuranceTab contact={contact} />}
           </motion.div>
         </AnimatePresence>
@@ -2009,8 +2023,9 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   );
 }
 
-function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: CustomerStatus) => Promise<void> }) {
+function StatusTab({ contact, onAdvance, canUndo }: { contact: any; onAdvance: (status: CustomerStatus) => Promise<void>; canUndo?: boolean }) {
   const [advancing, setAdvancing] = useState(false);
+  const [revertTarget, setRevertTarget] = useState<CustomerStatus | null>(null);
   const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status) as CustomerStatus);
   const nextStage = currentIndex >= 0 && currentIndex < STAGES.length - 1 ? STAGES[currentIndex + 1] : null;
   const nextStageLabel = nextStage ? ALL_STATUSES.find(s => s.value === nextStage)?.label || nextStage.replace(/_/g, ' ') : null;
@@ -2022,6 +2037,13 @@ function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: C
     } finally {
       setAdvancing(false);
     }
+  };
+
+  const confirmRevert = async () => {
+    if (!revertTarget) return;
+    const target = revertTarget;
+    setRevertTarget(null);
+    await handleAdvance(target);
   };
 
   return (
@@ -2046,20 +2068,29 @@ function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: C
 
       {/* Full pipeline — past stages show as done, future stages are tappable */}
       <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pipeline Stages</h3>
+      {canUndo && (
+        <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest -mt-4">
+          Tap any past stage to revert
+        </p>
+      )}
       <div className="space-y-1 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
         {STAGES.map((stage, i) => {
           const isDone = i < currentIndex;
           const isCurrent = i === currentIndex;
           const isFuture = i > currentIndex;
           const stageLabel = ALL_STATUSES.find(s => s.value === stage)?.label || stage.replace(/_/g, ' ');
+          const canRevert = isDone && canUndo;
 
           return (
             <button
               key={stage}
               type="button"
-              disabled={advancing || !isFuture}
-              onClick={() => isFuture ? handleAdvance(stage) : undefined}
-              className={`w-full flex gap-4 relative py-2 px-2 rounded-xl text-left transition-colors ${isFuture ? 'active:bg-slate-50' : 'cursor-default'}`}
+              disabled={advancing || (!isFuture && !canRevert)}
+              onClick={() => {
+                if (isFuture) handleAdvance(stage);
+                else if (canRevert) setRevertTarget(stage);
+              }}
+              className={`w-full flex gap-4 relative py-2 px-2 rounded-xl text-left transition-colors ${isFuture ? 'active:bg-slate-50' : canRevert ? 'active:bg-amber-50' : 'cursor-default'}`}
             >
               <div className={`h-8 w-8 rounded-full flex items-center justify-center z-10 flex-shrink-0 ${isCurrent ? 'bg-accent text-white ring-4 ring-accent/20' : isDone ? 'bg-emerald-500 text-white' : 'bg-white border-2 border-slate-100 text-slate-300'}`}>
                 {isDone ? <CheckCircle2 size={16} /> : isCurrent ? <div className="h-2.5 w-2.5 rounded-full bg-white" /> : <div className="h-2 w-2 rounded-full bg-current" />}
@@ -2070,6 +2101,7 @@ function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: C
                 </p>
                 {isCurrent && <p className="text-[10px] text-accent/70 font-medium mt-0.5">Current Stage</p>}
                 {isFuture && <p className="text-[10px] text-slate-400 mt-0.5">Tap to jump here</p>}
+                {canRevert && <p className="text-[10px] text-amber-500 mt-0.5">Tap to revert</p>}
               </div>
               {isFuture && <ChevronRight size={16} className="text-slate-300 mt-2 flex-shrink-0" />}
             </button>
@@ -2098,6 +2130,45 @@ function StatusTab({ contact, onAdvance }: { contact: any; onAdvance: (status: C
           })}
         </div>
       </div>
+
+      {/* Revert stage confirmation bottom sheet */}
+      {revertTarget && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={() => setRevertTarget(null)}>
+          <div className="w-full bg-white rounded-t-3xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto h-1 w-10 rounded-full bg-slate-200 mb-2" />
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-amber-600 text-lg">↩</span>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-primary">Revert Job Stage?</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Move this job back to{' '}
+                  <span className="font-bold text-primary">
+                    {ALL_STATUSES.find(s => s.value === revertTarget)?.label || revertTarget.replace(/_/g, ' ')}
+                  </span>
+                  . This will be logged in the timeline.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                onClick={() => setRevertTarget(null)}
+                className="py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRevert}
+                disabled={advancing}
+                className="py-3 rounded-xl bg-amber-500 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {advancing ? 'Reverting...' : 'Yes, Revert'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2768,7 +2839,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
   );
 }
 
-function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; userId?: string; onEdit: () => void; onRefresh: () => void }) {
+function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact: any; userId?: string; onEdit: () => void; onRefresh: () => void; canUndo?: boolean }) {
   const navigate = useNavigate();
   const [estimates, setEstimates] = useState<any[]>([]);
   const [latestEstimate, setLatestEstimate] = useState<any>(null);
@@ -2777,6 +2848,7 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
   const [savingField, setSavingField] = useState<'deposit' | 'final' | null>(null);
   const [creatingWorkOrder, setCreatingWorkOrder] = useState(false);
   const [loadingArtifacts, setLoadingArtifacts] = useState(true);
+  const [undoPaymentTarget, setUndoPaymentTarget] = useState<'deposit' | 'final' | null>(null);
 
   const isFinancialDocument = (doc: any) => {
     const type = String(doc?.type || '').toLowerCase();
@@ -2861,11 +2933,29 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
         })
         .eq('id', contact.id);
       if (error) throw error;
+
+      // Auto-advance job status when payments are marked paid:
+      //   deposit paid  → move to 'in_progress' (work has started)
+      //   final payment → move to 'paid'        (job is fully closed)
+      if (nextPaid) {
+        const currentStatus = contact.status as string;
+        const PIPELINE = ['lead','contacted','appointment_set','inspected','estimate_sent','approved','scheduled','in_progress','completed','paid'];
+        const currentIdx = PIPELINE.indexOf(currentStatus);
+        const targetStatus = kind === 'final' ? 'paid' : 'in_progress';
+        const targetIdx = PIPELINE.indexOf(targetStatus);
+        // Only advance — never move backwards
+        if (targetIdx > currentIdx) {
+          await (supabase.from('contacts') as any)
+            .update({ status: targetStatus, status_changed_at: new Date().toISOString() })
+            .eq('id', contact.id);
+        }
+      }
+
       if (userId) {
         await (supabase.from('communications') as any).insert({
           contact_id: contact.id,
           company_id: contact.company_id,
-          type: 'note',
+          type: 'stage_change',
           content: `${kind === 'deposit' ? 'Deposit' : 'Final payment'} ${nextPaid ? 'recorded' : 'marked unpaid'} in mobile app.`,
           user_id: userId,
           direction: 'outbound',
@@ -3015,11 +3105,18 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
                 <div className="flex items-center justify-between gap-4">
                   <span className="text-xl font-bold text-primary">{formatCurrency(entry.amount)}</span>
                   <button
-                    onClick={() => togglePayment(entry.key)}
-                    disabled={savingField === entry.key}
-                    className="rounded-xl bg-white border border-slate-200 px-4 py-2 text-xs font-bold text-accent disabled:opacity-50"
+                    onClick={() => {
+                      if (entry.paid) {
+                        // Undo direction — require admin confirmation
+                        if (canUndo) setUndoPaymentTarget(entry.key);
+                      } else {
+                        togglePayment(entry.key);
+                      }
+                    }}
+                    disabled={savingField === entry.key || (entry.paid && !canUndo)}
+                    className={`rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50 ${entry.paid ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-white border border-slate-200 text-accent'}`}
                   >
-                    {savingField === entry.key ? 'Saving...' : entry.paid ? 'Mark Unpaid' : `Record ${entry.label}`}
+                    {savingField === entry.key ? 'Saving...' : entry.paid ? (canUndo ? 'Undo Payment' : 'Paid ✓') : `Record ${entry.label}`}
                   </button>
                 </div>
               </div>
@@ -3153,6 +3250,49 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
           </div>
         </div>
       </div>
+
+      {/* Undo payment confirmation bottom sheet */}
+      {undoPaymentTarget && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/50" onClick={() => setUndoPaymentTarget(null)}>
+          <div className="w-full bg-white rounded-t-3xl p-6 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mx-auto h-1 w-10 rounded-full bg-slate-200 mb-2" />
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-amber-600 text-lg">↩</span>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-primary">Undo Payment?</h3>
+                <p className="text-sm text-slate-500 mt-1">
+                  Mark the{' '}
+                  <span className="font-bold text-primary">
+                    {undoPaymentTarget === 'deposit' ? 'deposit' : 'final payment'}
+                  </span>{' '}
+                  as unpaid. This will be logged in the timeline and the job status may need to be adjusted manually.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                onClick={() => setUndoPaymentTarget(null)}
+                className="py-3 rounded-xl border border-slate-200 text-sm font-bold text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const target = undoPaymentTarget;
+                  setUndoPaymentTarget(null);
+                  togglePayment(target);
+                }}
+                disabled={savingField !== null}
+                className="py-3 rounded-xl bg-amber-500 text-white text-sm font-bold disabled:opacity-50"
+              >
+                {savingField !== null ? 'Saving...' : 'Yes, Mark Unpaid'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
