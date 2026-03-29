@@ -313,17 +313,13 @@ export async function fetchLiveNoaaFeed(companyId: string): Promise<{
   events: LiveNoaaEvent[];
   fetchedAt: Date;
 }> {
-  const [allEvents, company] = await Promise.all([
+  const [allEvents, companyRes] = await Promise.all([
     fetchEventsFromEdgeFunction(),
-    supabase.from('companies').select('city, state, zip').eq('id', companyId).single(),
+    (supabase.from('companies').select('city, state, zip').eq('id', companyId).single() as unknown as Promise<{ data: { city: string; state: string; zip: string } | null }>),
   ]);
 
-  const geo = company.data
-    ? await geocodeAddress(
-        (company.data as any).city,
-        (company.data as any).state,
-        (company.data as any).zip,
-      )
+  const geo = companyRes.data
+    ? await geocodeAddress(companyRes.data.city, companyRes.data.state, companyRes.data.zip)
     : null;
 
   const todayStr = new Date().toISOString().slice(0, 10);
