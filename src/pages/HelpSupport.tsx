@@ -38,17 +38,24 @@ export default function HelpSupport() {
         <div className="space-y-3">
           <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Contact Support</h2>
           <div className="grid grid-cols-2 gap-3">
-            <button className="card p-4 flex flex-col items-center gap-2 active:scale-95 transition-transform">
-              <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-500">
+            {/* Live Chat — Coming Soon */}
+            <div className="card p-4 flex flex-col items-center gap-2 opacity-60">
+              <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-400">
                 <MessageCircle size={20} />
               </div>
               <span className="text-xs font-bold text-primary">Live Chat</span>
-            </button>
-            <button className="card p-4 flex flex-col items-center gap-2 active:scale-95 transition-transform">
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-0.5 rounded-full">Coming Soon</span>
+            </div>
+            {/* Email Us — live */}
+            <button
+              className="card p-4 flex flex-col items-center gap-2 active:scale-95 transition-transform"
+              onClick={() => { window.location.href = 'mailto:support@trussctr.com'; }}
+            >
               <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-500">
                 <Mail size={20} />
               </div>
               <span className="text-xs font-bold text-primary">Email Us</span>
+              <span className="text-[9px] text-slate-400">support@trussctr.com</span>
             </button>
           </div>
         </div>

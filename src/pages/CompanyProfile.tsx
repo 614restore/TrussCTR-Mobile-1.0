@@ -13,6 +13,9 @@ export default function CompanyProfile() {
     email: profile?.companies?.email || '',
     phone: profile?.companies?.phone || '',
     address: profile?.companies?.address || '',
+    city: (profile?.companies as any)?.city || '',
+    state: (profile?.companies as any)?.state || '',
+    zip: (profile?.companies as any)?.zip || '',
     google_review_url: profile?.companies?.google_review_url || '',
   });
 
@@ -117,16 +120,54 @@ export default function CompanyProfile() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Address</label>
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Street Address</label>
             <div className="relative">
               <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-              <input 
+              <input
                 type="text"
+                placeholder="123 Main St"
                 className="w-full bg-white border border-slate-200 rounded-2xl py-4 pl-12 pr-4 text-sm focus:ring-2 focus:ring-accent/20"
                 value={formData.address}
                 onChange={(e) => setFormData({ ...formData, address: e.target.value })}
               />
             </div>
+          </div>
+
+          {/* City / State / Zip row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2 col-span-2 sm:col-span-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">City</label>
+              <input
+                type="text"
+                placeholder="Denver"
+                className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20"
+                value={formData.city}
+                onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">State</label>
+              <input
+                type="text"
+                placeholder="CO"
+                maxLength={2}
+                className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20 uppercase"
+                value={formData.state}
+                onChange={(e) => setFormData({ ...formData, state: e.target.value.toUpperCase() })}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">ZIP Code</label>
+            <input
+              type="text"
+              placeholder="80201"
+              maxLength={10}
+              className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20"
+              value={formData.zip}
+              onChange={(e) => setFormData({ ...formData, zip: e.target.value })}
+            />
           </div>
 
           <div className="space-y-2">
