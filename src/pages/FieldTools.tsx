@@ -9,7 +9,7 @@ import NoProfileState from '../components/NoProfileState';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 
-type PickerMode = 'estimates' | 'calculator' | 'checklist' | null;
+type PickerMode = 'estimates' | 'calculator' | 'checklist' | 'workorders' | 'materialorders' | null;
 
 export default function FieldTools() {
   const navigate = useNavigate();
@@ -66,6 +66,8 @@ export default function FieldTools() {
     if (pickerMode === 'estimates') navigate(`/estimates-list?contactId=${contactId}`);
     else if (pickerMode === 'calculator') navigate(`/contacts/${contactId}/estimate`);
     else if (pickerMode === 'checklist') navigate(`/photo-checklist?contactId=${contactId}`);
+    else if (pickerMode === 'workorders') navigate(`/work-orders?contactId=${contactId}`);
+    else if (pickerMode === 'materialorders') navigate(`/material-orders?contactId=${contactId}`);
   };
 
   const filteredContacts = contacts.filter((c) => {
@@ -81,6 +83,8 @@ export default function FieldTools() {
     pickerMode === 'estimates' ? 'Select Contact — Estimates'
     : pickerMode === 'calculator' ? 'Select Contact — Estimate Calculator'
     : pickerMode === 'checklist' ? 'Select Contact — Photo Checklist'
+    : pickerMode === 'workorders' ? 'Select Contact — Work Orders'
+    : pickerMode === 'materialorders' ? 'Select Contact — Material Orders'
     : '';
 
   if (loadingAuth) return (
@@ -103,7 +107,7 @@ export default function FieldTools() {
       <div className="grid grid-cols-2 gap-4">
         {/* Work Orders */}
         <button
-          onClick={() => navigate('/work-orders')}
+          onClick={() => openPicker('workorders')}
           className="card p-5 flex flex-col items-start gap-4 text-left active:scale-95 transition-transform"
         >
           <div className="bg-blue-500 h-12 w-12 rounded-2xl flex items-center justify-center text-white shadow-lg">
@@ -111,13 +115,13 @@ export default function FieldTools() {
           </div>
           <div className="space-y-1">
             <p className="font-bold text-primary text-sm">Work Orders</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">—</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">By Contact</p>
           </div>
         </button>
 
         {/* Material Orders */}
         <button
-          onClick={() => navigate('/material-orders')}
+          onClick={() => openPicker('materialorders')}
           className="card p-5 flex flex-col items-start gap-4 text-left active:scale-95 transition-transform"
         >
           <div className="bg-amber-500 h-12 w-12 rounded-2xl flex items-center justify-center text-white shadow-lg">
@@ -125,7 +129,7 @@ export default function FieldTools() {
           </div>
           <div className="space-y-1">
             <p className="font-bold text-primary text-sm">Material Orders</p>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">—</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">By Contact</p>
           </div>
         </button>
 

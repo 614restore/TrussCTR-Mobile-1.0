@@ -402,7 +402,8 @@ export default function MaterialOrders() {
       {/* FAB */}
       <button
         onClick={() => { resetForm(); setSheetOpen(true); }}
-        className="fixed bottom-24 right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10"
+        className="fixed right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10"
+        style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
       >
         <Plus size={28} />
       </button>
