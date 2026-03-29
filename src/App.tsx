@@ -39,6 +39,7 @@ const PitchGauge = lazy(() => import('./pages/PitchGauge'));
 const DocumentTemplateEditor = lazy(() => import('./pages/DocumentTemplateEditor'));
 const ContactFieldTools = lazy(() => import('./pages/ContactFieldTools'));
 const PublicDocumentSigner = lazy(() => import('./pages/PublicDocumentSigner'));
+const InspectionReportBuilder = lazy(() => import('./pages/InspectionReportBuilder'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -103,6 +104,7 @@ function AppRoutes() {
 
             {/* Contact sub-routes */}
             <Route path="/contacts/:id/tools" element={<ContactFieldTools />} />
+            <Route path="/contacts/:id/inspection-report" element={<InspectionReportBuilder />} />
             <Route path="/contacts/:id/documents" element={<DocumentManager />} />
             <Route path="/contacts/:id/documents/:docType" element={<DocumentSigner />} />
             <Route path="/documents/view/:documentId" element={<DocumentViewer />} />

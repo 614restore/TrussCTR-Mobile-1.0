@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle, FileText } from 'lucide-react';
+import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle, FileText, CreditCard, Plus, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -15,6 +15,59 @@ export default function Settings() {
   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
   const [pwResetLoading, setPwResetLoading] = useState(false);
   const [pwResetSent, setPwResetSent] = useState(false);
+
+  // Financing links state
+  const [financingLinks, setFinancingLinks] = useState<{ name: string; url: string }[]>([]);
+  const [financingLoading, setFinancingLoading] = useState(false);
+  const [financingSaving, setFinancingSaving] = useState(false);
+  const [newLinkName, setNewLinkName] = useState('');
+  const [newLinkUrl, setNewLinkUrl] = useState('');
+
+  const canManageFinancing = profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager';
+
+  useEffect(() => {
+    if (!canManageFinancing || !profile?.company_id) return;
+    setFinancingLoading(true);
+    (supabase.from('companies') as any)
+      .select('financing_links')
+      .eq('id', profile.company_id)
+      .single()
+      .then(({ data }: any) => {
+        if (data?.financing_links) setFinancingLinks(data.financing_links);
+      })
+      .finally(() => setFinancingLoading(false));
+  }, [profile?.company_id, canManageFinancing]);
+
+  const saveFinancingLinks = async (links: { name: string; url: string }[]) => {
+    if (!profile?.company_id) return;
+    setFinancingSaving(true);
+    try {
+      await (supabase.from('companies') as any)
+        .update({ financing_links: links })
+        .eq('id', profile.company_id);
+      setFinancingLinks(links);
+    } catch (err) {
+      console.error('Error saving financing links:', err);
+      alert('Unable to save financing links.');
+    } finally {
+      setFinancingSaving(false);
+    }
+  };
+
+  const addFinancingLink = () => {
+    const name = newLinkName.trim();
+    const url = newLinkUrl.trim();
+    if (!name || !url) return;
+    const updated = [...financingLinks, { name, url }];
+    setNewLinkName('');
+    setNewLinkUrl('');
+    saveFinancingLinks(updated);
+  };
+
+  const removeFinancingLink = (index: number) => {
+    const updated = financingLinks.filter((_, i) => i !== index);
+    saveFinancingLinks(updated);
+  };
 
   // Push notification state
   const isNative = Capacitor.isNativePlatform();
@@ -222,6 +275,76 @@ export default function Settings() {
               </div>
               <ChevronRight size={18} className="text-slate-300" />
             </button>
+          </div>
+        )}
+
+        {/* Financing Links — owner/admin/manager only */}
+        {canManageFinancing && (
+          <div className="space-y-3">
+            <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Financing</h2>
+            <div className="card p-4 space-y-4">
+              <div className="flex items-start gap-3">
+                <CreditCard size={20} className="text-emerald-500 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-bold text-primary">Financing Links</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Add your lender application links (GoodLeap, Hearth, Wisetack, etc.). Your team can send them to homeowners directly from a contact record.
+                  </p>
+                </div>
+              </div>
+
+              {financingLoading ? (
+                <p className="text-xs text-slate-400">Loading...</p>
+              ) : (
+                <div className="space-y-2">
+                  {financingLinks.map((link, i) => (
+                    <div key={i} className="flex items-center gap-3 bg-slate-50 rounded-xl p-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-primary truncate">{link.name}</p>
+                        <p className="text-[11px] text-slate-400 truncate">{link.url}</p>
+                      </div>
+                      <button
+                        onClick={() => removeFinancingLink(i)}
+                        disabled={financingSaving}
+                        className="p-1.5 text-rose-400 active:scale-90 transition-transform disabled:opacity-50"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  {financingLinks.length === 0 && (
+                    <p className="text-xs text-slate-400 text-center py-2">No financing links added yet.</p>
+                  )}
+                </div>
+              )}
+
+              {/* Add new link form */}
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Add a Lender</p>
+                <input
+                  className="w-full bg-slate-50 rounded-xl p-3 text-sm border border-slate-100"
+                  placeholder="Label (e.g. GoodLeap — Acme Roofing)"
+                  value={newLinkName}
+                  onChange={(e) => setNewLinkName(e.target.value)}
+                />
+                <input
+                  className="w-full bg-slate-50 rounded-xl p-3 text-sm border border-slate-100"
+                  placeholder="Application URL"
+                  value={newLinkUrl}
+                  onChange={(e) => setNewLinkUrl(e.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                />
+                <button
+                  onClick={addFinancingLink}
+                  disabled={!newLinkName.trim() || !newLinkUrl.trim() || financingSaving}
+                  className="w-full bg-emerald-500 text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-transform"
+                >
+                  <Plus size={16} />
+                  {financingSaving ? 'Saving...' : 'Add Lender'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

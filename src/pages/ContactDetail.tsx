@@ -5,7 +5,7 @@ import {
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
   ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
-  Trash2, Camera, RefreshCw, X, Star,
+  Trash2, Camera, RefreshCw, X, Star, CreditCard,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -31,6 +31,7 @@ const TABS = [
   { id: 'documents', label: 'Docs', icon: FileText },
   { id: 'financial', label: 'Financial', icon: DollarSign },
   { id: 'insurance', label: 'Insurance', icon: Shield },
+  { id: 'financing', label: 'Financing', icon: CreditCard },
 ];
 
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
@@ -4307,6 +4308,206 @@ function InsuranceTab({ contact }: { contact: any }) {
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Financing Tab ────────────────────────────────────────────────────────────
+
+function calcMonthlyPayment(principal: number, annualRate: number, months: number): number {
+  if (principal <= 0 || months <= 0) return 0;
+  const r = annualRate / 100 / 12;
+  if (r === 0) return principal / months;
+  return principal * (r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
+}
+
+const FINANCING_TERMS = [36, 60, 84, 120];
+const FINANCING_STATUSES = [
+  { value: 'not_offered', label: 'Not Offered', color: 'bg-slate-100 text-slate-500' },
+  { value: 'offered', label: 'Link Sent', color: 'bg-blue-100 text-blue-700' },
+  { value: 'applied', label: 'Applied', color: 'bg-amber-100 text-amber-700' },
+  { value: 'approved', label: 'Approved', color: 'bg-emerald-100 text-emerald-700' },
+  { value: 'funded', label: 'Funded', color: 'bg-violet-100 text-violet-700' },
+];
+
+function FinancingTab({ contact, userId, companyId, onRefresh }: { contact: any; userId?: string; companyId: string; onRefresh: () => void }) {
+  const [financingLinks, setFinancingLinks] = useState<{ name: string; url: string }[]>([]);
+  const [loadingLinks, setLoadingLinks] = useState(true);
+  const [projectAmount, setProjectAmount] = useState<string>(String(contact.project_value || ''));
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  useEffect(() => {
+    if (!companyId) return;
+    setLoadingLinks(true);
+    (supabase.from('companies') as any)
+      .select('financing_links')
+      .eq('id', companyId)
+      .single()
+      .then(({ data }: any) => {
+        setFinancingLinks(data?.financing_links || []);
+      })
+      .finally(() => setLoadingLinks(false));
+  }, [companyId]);
+
+  const principal = parseFloat(projectAmount.replace(/[^0-9.]/g, '')) || 0;
+
+  const updateFinancingStatus = async (status: string) => {
+    setUpdatingStatus(true);
+    try {
+      await (supabase.from('contacts') as any)
+        .update({
+          financing_status: status,
+          ...(status === 'offered' ? { financing_offered_at: new Date().toISOString() } : {}),
+        })
+        .eq('id', contact.id);
+      if (userId && status === 'offered') {
+        await (supabase.from('communications') as any).insert({
+          contact_id: contact.id,
+          company_id: contact.company_id,
+          type: 'note',
+          content: 'Financing link sent to homeowner.',
+          user_id: userId,
+          direction: 'outbound',
+        });
+      }
+      await onRefresh();
+    } catch (err) {
+      console.error('Error updating financing status:', err);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  };
+
+  const sendLink = (link: { name: string; url: string }, via: 'sms' | 'email') => {
+    const name = [contact.first_name, contact.last_name].filter(Boolean).join(' ');
+    const amount = principal > 0 ? ` for your $${principal.toLocaleString()} project` : '';
+    const body = `Hi ${name}, here is your financing application link${amount}: ${link.url}`;
+    if (via === 'sms') {
+      window.location.href = `sms:${contact.phone1}?body=${encodeURIComponent(body)}`;
+    } else {
+      const subject = encodeURIComponent(`Financing Option — ${link.name}`);
+      window.location.href = `mailto:${contact.email}?subject=${subject}&body=${encodeURIComponent(body)}`;
+    }
+    if (contact.financing_status === 'not_offered' || !contact.financing_status) {
+      updateFinancingStatus('offered');
+    }
+  };
+
+  const currentStatus = FINANCING_STATUSES.find(s => s.value === (contact.financing_status || 'not_offered')) || FINANCING_STATUSES[0];
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl bg-slate-900 p-5 text-white">
+        <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Homeowner Financing</p>
+        <h3 className="mt-2 text-xl font-black">Offer financing in seconds</h3>
+        <p className="mt-2 text-sm text-slate-300">
+          Send your lender's application link straight to the homeowner via SMS or email. No app needed on their end.
+        </p>
+      </div>
+
+      <div className="card p-5 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Financing Status</h3>
+          <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${currentStatus.color}`}>
+            {currentStatus.label}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {FINANCING_STATUSES.map((s) => (
+            <button
+              key={s.value}
+              disabled={updatingStatus || s.value === (contact.financing_status || 'not_offered')}
+              onClick={() => updateFinancingStatus(s.value)}
+              className={`px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all active:scale-95 disabled:opacity-50 ${
+                s.value === (contact.financing_status || 'not_offered')
+                  ? `${s.color} border-transparent`
+                  : 'bg-white border-slate-200 text-slate-500'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        {contact.financing_offered_at && (
+          <p className="text-[11px] text-slate-400">
+            Link sent {new Date(contact.financing_offered_at).toLocaleDateString()}
+          </p>
+        )}
+      </div>
+
+      <div className="card p-5 space-y-4">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Payment Estimator</h3>
+        <p className="text-[11px] text-slate-400">Estimates only — actual rate depends on homeowner credit. No credit pull required.</p>
+        <div className="flex items-center gap-3">
+          <span className="text-slate-400 font-bold text-lg">$</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            className="flex-1 bg-slate-50 rounded-xl p-3 text-sm font-bold border border-slate-100"
+            placeholder="Project amount"
+            value={projectAmount}
+            onChange={(e) => setProjectAmount(e.target.value)}
+          />
+        </div>
+        {principal > 0 && (
+          <div className="space-y-2">
+            {FINANCING_TERMS.map((months) => {
+              const low = calcMonthlyPayment(principal, 6.99, months);
+              const high = calcMonthlyPayment(principal, 19.99, months);
+              return (
+                <div key={months} className="flex items-center justify-between bg-slate-50 rounded-xl px-4 py-3">
+                  <span className="text-sm font-bold text-slate-600">{months} mo</span>
+                  <span className="text-sm font-bold text-primary">
+                    ~${Math.round(low).toLocaleString()}–${Math.round(high).toLocaleString()}<span className="text-slate-400 font-normal">/mo</span>
+                  </span>
+                </div>
+              );
+            })}
+            <p className="text-[10px] text-slate-400 text-center">Range based on 6.99–19.99% APR. Actual terms vary by lender and credit.</p>
+          </div>
+        )}
+      </div>
+
+      <div className="card p-5 space-y-4">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Your Lenders</h3>
+        {loadingLinks ? (
+          <p className="text-sm text-slate-400">Loading...</p>
+        ) : financingLinks.length === 0 ? (
+          <div className="bg-slate-50 rounded-xl p-4 text-center space-y-1">
+            <p className="text-sm font-bold text-slate-500">No lenders configured</p>
+            <p className="text-xs text-slate-400">Add your financing links in Settings → Financing.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {financingLinks.map((link, i) => (
+              <div key={i} className="bg-slate-50 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <CreditCard size={16} className="text-emerald-500 flex-shrink-0" />
+                  <p className="text-sm font-bold text-primary">{link.name}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => sendLink(link, 'sms')}
+                    disabled={!contact.phone1}
+                    className="bg-accent text-white py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-95 transition-transform"
+                  >
+                    <MessageSquare size={13} />
+                    Send via SMS
+                  </button>
+                  <button
+                    onClick={() => sendLink(link, 'email')}
+                    disabled={!contact.email}
+                    className="bg-white border border-slate-200 text-slate-700 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 disabled:opacity-40 active:scale-95 transition-transform"
+                  >
+                    <Mail size={13} />
+                    Send via Email
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
