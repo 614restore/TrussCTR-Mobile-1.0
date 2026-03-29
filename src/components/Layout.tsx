@@ -1,9 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Users, Calendar, Wrench, MoreHorizontal } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { registerPushToken } from '../lib/pushNotifications';
+import { useAuth } from '../context/AuthContext';
+import { checkForHailAlerts } from '../lib/hailAlertService';
+import { checkForNoaaStorms } from '../lib/noaaStormService';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -11,10 +14,41 @@ function cn(...inputs: ClassValue[]) {
 
 export default function Layout() {
   const location = useLocation();
+  const { profile } = useAuth();
+  const companyId = profile?.company_id;
+  // Track last foreground check to avoid duplicate calls on rapid tab switches
+  const lastForegroundCheck = useRef(0);
 
   useEffect(() => {
     registerPushToken();
   }, []);
+
+  // Run storm checks on app foreground (visibility change)
+  useEffect(() => {
+    if (!companyId) return;
+
+    const runChecks = () => {
+      const now = Date.now();
+      // Debounce: ignore visibility events within 5 s of each other
+      if (now - lastForegroundCheck.current < 5_000) return;
+      lastForegroundCheck.current = now;
+      // Both checks are internally rate-limited to 15 min — safe to call here
+      checkForHailAlerts(companyId).catch(() => {});
+      checkForNoaaStorms(companyId).catch(() => {});
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') runChecks();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    // Also run once on mount so the first app open triggers a check
+    runChecks();
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [companyId]);
 
   const navItems = [
     { icon: LayoutDashboard, label: 'Dashboard', path: '/' },

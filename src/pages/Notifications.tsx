@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronLeft, Bell, MessageSquare, Calendar, AlertCircle, Check } from 'lucide-react';
+import { ChevronLeft, Bell, MessageSquare, Calendar, AlertCircle, Check, CloudRain, Wind } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -88,11 +88,18 @@ export default function Notifications() {
     }
   };
 
-  const getNotificationIcon = (type: string) => {
+  const getNotificationIcon = (type: string, metadata?: any) => {
     switch (type) {
       case 'mention':               return { icon: MessageSquare, color: 'bg-emerald-500' };
       case 'unassigned_appointment': return { icon: Calendar,     color: 'bg-amber-500'   };
       case 'lead_assignment':        return { icon: Bell,         color: 'bg-blue-500'    };
+      case 'hail_alert':             return { icon: CloudRain,    color: 'bg-red-500'     };
+      case 'storm_alert': {
+        const evType = metadata?.event_type;
+        return evType === 'WIND'
+          ? { icon: Wind,      color: 'bg-blue-600' }
+          : { icon: CloudRain, color: 'bg-red-500'  };
+      }
       default:                       return { icon: AlertCircle,  color: 'bg-slate-800'   };
     }
   };
@@ -119,7 +126,7 @@ export default function Notifications() {
           ))
         ) : notifications.length > 0 ? (
           notifications.map((n) => {
-            const { icon: Icon, color } = getNotificationIcon(String(n.type || ''));
+            const { icon: Icon, color } = getNotificationIcon(String(n.type || ''), n.metadata);
             return (
               <div key={n.id} className={`card p-4 flex items-start gap-4 active:bg-slate-50 transition-colors ${n.read ? 'opacity-60' : ''}`}>
                 <div className={`${color} h-10 w-10 rounded-xl flex items-center justify-center text-white shrink-0`}>

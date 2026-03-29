@@ -41,6 +41,7 @@ const ContactFieldTools = lazy(() => import('./pages/ContactFieldTools'));
 const PublicDocumentSigner = lazy(() => import('./pages/PublicDocumentSigner'));
 const InspectionReportBuilder = lazy(() => import('./pages/InspectionReportBuilder'));
 const Landing = lazy(() => import('./pages/Landing'));
+const StormHistory = lazy(() => import('./pages/StormHistory'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -133,6 +134,7 @@ function AppRoutes() {
             <Route path="/settings/document-templates" element={<DocumentTemplateEditor />} />
             <Route path="/help" element={<HelpSupport />} />
             <Route path="/notifications" element={<Notifications />} />
+            <Route path="/storm-history" element={<StormHistory />} />
             <Route path="/pitch-gauge" element={<PitchGauge />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
