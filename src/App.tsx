@@ -40,6 +40,7 @@ const DocumentTemplateEditor = lazy(() => import('./pages/DocumentTemplateEditor
 const ContactFieldTools = lazy(() => import('./pages/ContactFieldTools'));
 const PublicDocumentSigner = lazy(() => import('./pages/PublicDocumentSigner'));
 const InspectionReportBuilder = lazy(() => import('./pages/InspectionReportBuilder'));
+const Landing = lazy(() => import('./pages/Landing'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -93,8 +94,9 @@ function AppRoutes() {
         <Route path="/sign/:token" element={<PublicDocumentSigner />} />
         {!session ? (
           <>
+            <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
-            <Route path="*" element={<Navigate to="/login" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
           </>
         ) : (
           <Route element={<Layout />}>
