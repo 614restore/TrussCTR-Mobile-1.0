@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { Mail, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
+import { getPasswordResetRedirectUrl } from '../lib/authRedirect';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -51,21 +52,14 @@ export default function Login() {
     setForgotLoading(true);
     setError(null);
     try {
-      // Call the temp-password-reset edge function. It generates a temporary
-      // password, emails it to the user, and sets must_change_password = true
-      // in the profile. No redirect link is involved, so it works from any
-      // device or email client without PKCE / cross-context issues.
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const res = await fetch(`${supabaseUrl}/functions/v1/temp-password-reset`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': anonKey },
-        body: JSON.stringify({ email }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Failed to send temporary password.');
+      const redirectTo = getPasswordResetRedirectUrl();
+      if (!redirectTo) {
+        throw new Error('Password reset is not configured for this app build. Set VITE_APP_URL to your deployed app URL.');
       }
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo,
+      });
+      if (error) throw error;
       setForgotSent(true);
     } catch (err: any) {
       const msg: string = err?.message || '';

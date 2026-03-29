@@ -5,6 +5,7 @@ import {
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
   ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
+  Trash2, Camera, RefreshCw, X, Star,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -37,6 +38,19 @@ const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 function normalizeContactTab(value: string | null) {
   if (!value) return 'overview';
   return TAB_IDS.has(value) ? value : 'overview';
+}
+
+function sortPhotosForDisplay<T extends { starred?: boolean | null; created_at?: string | null }>(photos: T[]) {
+  return [...photos].sort((a, b) => {
+    const starDelta = Number(Boolean(b.starred)) - Number(Boolean(a.starred));
+    if (starDelta !== 0) return starDelta;
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
+}
+
+function pickCoverPhoto(photos: Array<{ starred?: boolean | null; displayUrl?: string | null; url?: string | null }>) {
+  const preferred = sortPhotosForDisplay(photos)[0];
+  return preferred ? preferred.displayUrl || preferred.url || null : null;
 }
 
 /** Strips serialization markers and returns the clean human-readable text. */
@@ -140,6 +154,7 @@ export default function ContactDetail() {
   const [documentsWithUrls, setDocumentsWithUrls] = useState<any[]>([]);
   const [timeline, setTimeline] = useState<any[]>([]);
   const [isEditing, setIsEditing] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState<any>(null);
   const [showActions, setShowActions] = useState(false);
   const tabScrollerRef = useRef<HTMLDivElement | null>(null);
@@ -289,10 +304,11 @@ export default function ContactDetail() {
   };
 
   const saveEdit = async () => {
-    if (!editForm?.id) return;
+    if (!editForm?.id || isSavingEdit) return;
     const statusChanged = editForm.status !== contact?.status;
     const prevStatus: string = contact?.status ?? '';
     const nextStatus: string = editForm.status ?? '';
+    setIsSavingEdit(true);
     try {
       const parsed = parseContactSchedule(contact?.notes);
       const updates = { ...editForm };
@@ -310,7 +326,13 @@ export default function ContactDetail() {
       if (statusChanged) {
         updates.status_changed_at = new Date().toISOString();
       }
-      const { error } = await (supabase.from('contacts') as any).update(updates).eq('id', editForm.id);
+
+      // Race the Supabase call against a 15-second timeout so it never hangs forever on iOS
+      const updatePromise = (supabase.from('contacts') as any).update(updates).eq('id', editForm.id);
+      const timeoutPromise = new Promise<{ error: Error }>((_resolve, reject) =>
+        setTimeout(() => reject(new Error('Save timed out — check your connection and try again.')), 15000)
+      );
+      const { error } = await Promise.race([updatePromise, timeoutPromise]);
       if (error) throw error;
 
       // Auto-log the stage transition to the timeline
@@ -332,7 +354,9 @@ export default function ContactDetail() {
       fetchContact();
     } catch (err) {
       console.error('Error saving contact:', err);
-      alert('Failed to save contact changes.');
+      alert(err instanceof Error ? err.message : 'Failed to save contact changes.');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -347,16 +371,15 @@ export default function ContactDetail() {
   };
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !id) return;
-    try {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !id) return;
+
+    const uploadOne = async (file: File) => {
       const videoError = await validateVideoForCloud(file);
       if (videoError) {
         alert(videoError);
-        e.target.value = '';
-        return;
+        return false;
       }
-
       const isImage = file.type.startsWith('image/');
       const uploadFile = isImage
         ? new File(
@@ -386,10 +409,102 @@ export default function ContactDetail() {
         uploaded_by: user?.id ?? 'unknown',
       } as any);
       if (dbError) throw dbError;
-      fetchDocuments();
+      return true;
+    };
+
+    let failed = 0;
+    for (let i = 0; i < files.length; i++) {
+      try {
+        await uploadOne(files[i]);
+      } catch (err) {
+        failed++;
+        console.error(`Error uploading file ${i + 1}/${files.length}:`, err);
+      }
+    }
+    fetchDocuments();
+    e.target.value = '';
+    if (failed > 0) {
+      alert(`${failed} of ${files.length} file(s) failed to upload. The rest were saved.`);
+    }
+  };
+
+  const uploadContactPhoto = async (file: File) => {
+    if (!id || !contact?.company_id) return;
+
+    const uploadFile = new File(
+      [await compressImageWithLightCompressor(file, {
+        maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
+        maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
+        quality: PHOTO_POLICY_PRESETS.high8mp.quality,
+      })],
+      file.name.replace(/\.[^.]+$/, '') + '.jpg',
+      { type: 'image/jpeg' }
+    );
+
+    const fileName = `${Math.random()}.jpg`;
+    const filePath = `${id}/${fileName}`;
+    const bucket = 'projectceo-photos';
+    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile);
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    const { error: dbError } = await supabase.from('documents').insert({
+      contact_id: id,
+      company_id: contact.company_id,
+      name: `Contact photo ${new Date().toLocaleDateString()}`,
+      type: 'photo',
+      url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
+      size: uploadFile.size,
+      uploaded_by: user?.id ?? 'unknown',
+      starred: true,
+    } as any);
+    if (dbError) throw dbError;
+  };
+
+  const handleEditPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await uploadContactPhoto(file);
+      await fetchDocuments();
     } catch (err) {
-      console.error('Error uploading:', err);
-      alert('Upload failed. Make sure "documents" bucket exists in Supabase.');
+      console.error('Error uploading contact photo:', err);
+      alert('Failed to upload contact photo.');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string, storedUrl: string) => {
+    try {
+      // Parse bucket and path from the stored URL (supports both #hash metadata and plain public URLs)
+      const parseBucketAndPath = (url: string): { bucket: string; path: string } | null => {
+        try {
+          const parsed = new URL(url);
+          // Try #bucket=...&path=... hash format first
+          const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+          const b = hashParams.get('bucket');
+          const p = hashParams.get('path');
+          if (b && p) return { bucket: b, path: decodeURIComponent(p.replace(/^\/+/, '').trim()) };
+          // Fallback: find bucket name in pathname
+          for (const bkt of ['documents', 'projectceo-photos']) {
+            const marker = `/object/public/${bkt}/`;
+            const idx = parsed.pathname.indexOf(marker);
+            if (idx !== -1) return { bucket: bkt, path: decodeURIComponent(parsed.pathname.slice(idx + marker.length).split('?')[0]) };
+          }
+        } catch { /* ignore */ }
+        return null;
+      };
+
+      const metadata = parseBucketAndPath(storedUrl);
+      if (metadata) {
+        await supabase.storage.from(metadata.bucket).remove([metadata.path]);
+      }
+      await supabase.from('documents').delete().eq('id', docId);
+      await fetchDocuments();
+    } catch (err) {
+      console.error('[handleDeleteDocument]', err);
+      alert('Failed to delete. Please try again.');
     }
   };
 
@@ -448,6 +563,8 @@ export default function ContactDetail() {
     </div>
   );
 
+  const coverPhotoUrl = pickCoverPhoto((documentsWithUrls.length ? documentsWithUrls : documents).filter((doc) => doc.type === 'photo'));
+
   return (
     <div className="h-full flex flex-col bg-slate-50">
       <div className="bg-primary text-white p-6 pb-20 relative">
@@ -460,9 +577,23 @@ export default function ContactDetail() {
             <button onClick={() => setShowActions(true)} className="p-2 hover:bg-white/10 rounded-full transition-colors"><MoreVertical size={20} /></button>
           </div>
         </div>
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
-          <p className="text-slate-300 text-sm flex items-center gap-1.5"><MapPin size={14} />{contact.address}, {contact.city}</p>
+        <div className="flex items-center gap-4">
+          <div className="h-20 w-20 overflow-hidden rounded-3xl border border-white/15 bg-white/10 shadow-lg">
+            {coverPhotoUrl ? (
+              <img src={coverPhotoUrl} alt={`${contact.first_name} ${contact.last_name}`} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-2xl font-black text-white/85">
+                {(contact.first_name?.[0] || '').toUpperCase()}{(contact.last_name?.[0] || '').toUpperCase()}
+              </div>
+            )}
+          </div>
+          <div className="space-y-1 min-w-0">
+            <h1 className="text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
+            <p className="text-slate-300 text-sm flex items-center gap-1.5"><MapPin size={14} />{contact.address}, {contact.city}</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/60">
+              {coverPhotoUrl ? 'Cover photo set' : 'No cover photo'}
+            </p>
+          </div>
         </div>
         <div className="absolute -bottom-8 left-6 right-6 flex justify-between gap-3">
           {[
@@ -542,7 +673,7 @@ export default function ContactDetail() {
             {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
             {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
-            {activeTab === 'documents' && <DocumentsTab contactId={contact.id} companyId={contact.company_id ?? profile?.company_id ?? ''} address={contact.address ?? ''} city={contact.city ?? ''} state={contact.state ?? ''} zip={contact.zip ?? ''} contactName={[contact.first_name, contact.last_name].filter(Boolean).join(' ')} userId={user?.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} onDocumentSaved={fetchDocuments} />}
+            {activeTab === 'documents' && <DocumentsTab contactId={contact.id} companyId={contact.company_id ?? profile?.company_id ?? ''} address={contact.address ?? ''} city={contact.city ?? ''} state={contact.state ?? ''} zip={contact.zip ?? ''} contactName={[contact.first_name, contact.last_name].filter(Boolean).join(' ')} userId={user?.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} onDocumentSaved={fetchDocuments} onDeleteDocument={handleDeleteDocument} />}
             {activeTab === 'financial' && <FinancialTab contact={contact} userId={user?.id} onEdit={openEdit} onRefresh={fetchContact} />}
             {activeTab === 'insurance' && <InsuranceTab contact={contact} />}
           </motion.div>
@@ -550,82 +681,122 @@ export default function ContactDetail() {
       </div>
 
       {isEditing && editForm && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
-          <div className="bg-white w-full max-h-[85vh] rounded-t-3xl p-6 overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">Edit Customer</h3>
-              <button onClick={() => setIsEditing(false)} className="text-sm font-bold text-slate-500">Close</button>
+        <div className="fixed inset-0 z-50 bg-white">
+          <div className="flex h-full flex-col">
+            <div
+              className="border-b border-slate-100 bg-white px-5 pb-4 pt-3"
+              style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}
+            >
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <button onClick={() => setIsEditing(false)} className="rounded-full bg-slate-100 px-4 py-2 text-sm font-bold text-slate-600">
+                  Cancel
+                </button>
+                <h3 className="text-lg font-bold text-primary">Edit Customer</h3>
+                <div className="w-[76px]" />
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="relative block h-20 w-20 cursor-pointer overflow-hidden rounded-3xl bg-slate-100 shadow-sm">
+                  {coverPhotoUrl ? (
+                    <img src={coverPhotoUrl} alt="Contact cover" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center bg-primary text-2xl font-black text-white">
+                      {(contact.first_name?.[0] || '').toUpperCase()}{(contact.last_name?.[0] || '').toUpperCase()}
+                    </div>
+                  )}
+                  <div className="absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center rounded-full bg-accent text-white shadow-lg">
+                    <Camera size={14} />
+                  </div>
+                  <input type="file" className="hidden" accept="image/*" onChange={handleEditPhotoUpload} />
+                </label>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold text-primary">Tap to update contact photo</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Upload a customer photo or a photo of the home. Favorited photos become the cover photo in the contact list.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="First name" value={editForm.first_name || ''} onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Last name" value={editForm.last_name || ''} onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })} />
-              </div>
-              <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Primary phone" value={editForm.phone1 || ''} onChange={(e) => setEditForm({ ...editForm, phone1: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Secondary phone" value={editForm.phone2 || ''} onChange={(e) => setEditForm({ ...editForm, phone2: e.target.value })} />
-              </div>
-              <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Address" value={editForm.address || ''} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
-              <div className="grid grid-cols-3 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="City" value={editForm.city || ''} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="State" value={editForm.state || ''} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Zip" value={editForm.zip || ''} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} />
-              </div>
+            <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 px-5 py-5">
+              <div className="space-y-6 pb-10">
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="First name" value={editForm.first_name || ''} onChange={(e) => setEditForm({ ...editForm, first_name: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Last name" value={editForm.last_name || ''} onChange={(e) => setEditForm({ ...editForm, last_name: e.target.value })} />
+                </div>
+                <input className="w-full bg-white rounded-xl p-3 text-sm" placeholder="Email" value={editForm.email || ''} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} />
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Primary phone" value={editForm.phone1 || ''} onChange={(e) => setEditForm({ ...editForm, phone1: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Secondary phone" value={editForm.phone2 || ''} onChange={(e) => setEditForm({ ...editForm, phone2: e.target.value })} />
+                </div>
+                <input className="w-full bg-white rounded-xl p-3 text-sm" placeholder="Address" value={editForm.address || ''} onChange={(e) => setEditForm({ ...editForm, address: e.target.value })} />
+                <div className="grid grid-cols-3 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="City" value={editForm.city || ''} onChange={(e) => setEditForm({ ...editForm, city: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="State" value={editForm.state || ''} onChange={(e) => setEditForm({ ...editForm, state: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Zip" value={editForm.zip || ''} onChange={(e) => setEditForm({ ...editForm, zip: e.target.value })} />
+                </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Lead source" value={editForm.lead_source || ''} onChange={(e) => setEditForm({ ...editForm, lead_source: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Project type" value={editForm.project_type || ''} onChange={(e) => setEditForm({ ...editForm, project_type: e.target.value })} />
-              </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Lead source" value={editForm.lead_source || ''} onChange={(e) => setEditForm({ ...editForm, lead_source: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Project type" value={editForm.project_type || ''} onChange={(e) => setEditForm({ ...editForm, project_type: e.target.value })} />
+                </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-400 uppercase">Status</label>
-                <select className="w-full bg-slate-50 rounded-xl p-3 text-sm mt-1" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
-                  {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
-              </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase">Status</label>
+                  <select className="mt-1 w-full bg-white rounded-xl p-3 text-sm" value={editForm.status} onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}>
+                    {ALL_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Project value" value={editForm.project_value ?? ''} onChange={(e) => setEditForm({ ...editForm, project_value: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Deposit amount" value={editForm.deposit_amount ?? ''} onChange={(e) => setEditForm({ ...editForm, deposit_amount: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Final payment amount" value={editForm.final_payment_amount ?? ''} onChange={(e) => setEditForm({ ...editForm, final_payment_amount: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Deductible" value={editForm.deductible ?? ''} onChange={(e) => setEditForm({ ...editForm, deductible: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={!!editForm.deposit_paid} onChange={(e) => setEditForm({ ...editForm, deposit_paid: e.target.checked })} />
-                  Deposit Paid
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Project value" value={editForm.project_value ?? ''} onChange={(e) => setEditForm({ ...editForm, project_value: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Deposit amount" value={editForm.deposit_amount ?? ''} onChange={(e) => setEditForm({ ...editForm, deposit_amount: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Final payment amount" value={editForm.final_payment_amount ?? ''} onChange={(e) => setEditForm({ ...editForm, final_payment_amount: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Deductible" value={editForm.deductible ?? ''} onChange={(e) => setEditForm({ ...editForm, deductible: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 rounded-xl bg-white p-3 text-sm">
+                    <input type="checkbox" checked={!!editForm.deposit_paid} onChange={(e) => setEditForm({ ...editForm, deposit_paid: e.target.checked })} />
+                    Deposit Paid
+                  </label>
+                  <label className="flex items-center gap-2 rounded-xl bg-white p-3 text-sm">
+                    <input type="checkbox" checked={!!editForm.final_payment_paid} onChange={(e) => setEditForm({ ...editForm, final_payment_paid: e.target.checked })} />
+                    Final Paid
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Insurance company" value={editForm.insurance_company || ''} onChange={(e) => setEditForm({ ...editForm, insurance_company: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Policy number" value={editForm.policy_number || ''} onChange={(e) => setEditForm({ ...editForm, policy_number: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Claim number" value={editForm.claim_number || ''} onChange={(e) => setEditForm({ ...editForm, claim_number: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Adjuster name" value={editForm.adjuster_name || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_name: e.target.value })} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Adjuster phone" value={editForm.adjuster_phone || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_phone: e.target.value })} />
+                  <input className="bg-white rounded-xl p-3 text-sm" placeholder="Adjuster email" value={editForm.adjuster_email || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_email: e.target.value })} />
+                </div>
+
+                <label className="flex items-center gap-2 rounded-xl bg-white p-3 text-sm">
+                  <input type="checkbox" checked={!!editForm.is_retail} onChange={(e) => setEditForm({ ...editForm, is_retail: e.target.checked })} />
+                  Retail Job
                 </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={!!editForm.final_payment_paid} onChange={(e) => setEditForm({ ...editForm, final_payment_paid: e.target.checked })} />
-                  Final Paid
-                </label>
+                <textarea className="w-full bg-white rounded-xl p-3 text-sm" placeholder="Retail notes" value={editForm.retail_notes || ''} onChange={(e) => setEditForm({ ...editForm, retail_notes: e.target.value })} />
+                <textarea className="w-full bg-white rounded-xl p-3 text-sm" placeholder="Notes" value={editForm.notes || ''} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
               </div>
+            </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Insurance company" value={editForm.insurance_company || ''} onChange={(e) => setEditForm({ ...editForm, insurance_company: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Policy number" value={editForm.policy_number || ''} onChange={(e) => setEditForm({ ...editForm, policy_number: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Claim number" value={editForm.claim_number || ''} onChange={(e) => setEditForm({ ...editForm, claim_number: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Adjuster name" value={editForm.adjuster_name || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_name: e.target.value })} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Adjuster phone" value={editForm.adjuster_phone || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_phone: e.target.value })} />
-                <input className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Adjuster email" value={editForm.adjuster_email || ''} onChange={(e) => setEditForm({ ...editForm, adjuster_email: e.target.value })} />
-              </div>
-
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={!!editForm.is_retail} onChange={(e) => setEditForm({ ...editForm, is_retail: e.target.checked })} />
-                Retail Job
-              </label>
-              <textarea className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Retail notes" value={editForm.retail_notes || ''} onChange={(e) => setEditForm({ ...editForm, retail_notes: e.target.value })} />
-              <textarea className="bg-slate-50 rounded-xl p-3 text-sm" placeholder="Notes" value={editForm.notes || ''} onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })} />
-
-              <button onClick={saveEdit} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold">Save Changes</button>
+            <div
+              className="border-t border-slate-100 bg-white px-5 pb-4 pt-4"
+              style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
+            >
+              <button onClick={saveEdit} disabled={isSavingEdit} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2">
+                {isSavingEdit && <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />}
+                {isSavingEdit ? 'Saving...' : 'Save Changes'}
+              </button>
             </div>
           </div>
         </div>
@@ -1118,24 +1289,58 @@ function WeatherCard({ contact }: { contact: any }) {
   useEffect(() => {
     let cancelled = false;
 
+    const fetchWithTimeout = async (url: string, ms = 10000): Promise<Response> => {
+      const controller = new AbortController();
+      const tid = setTimeout(() => controller.abort(), ms);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(tid);
+        return res;
+      } catch (e) {
+        clearTimeout(tid);
+        throw e;
+      }
+    };
+
     const loadWeather = async () => {
-      const queryParts = [contact?.city, contact?.state, contact?.zip].filter(Boolean);
-      if (!queryParts.length) {
-        setError('Add city/state or ZIP to view weather.');
+      // Open-Meteo geocoding works best with a plain city name.
+      // Using ZIP alone or comma-separated addresses often returns no results.
+      const city = contact?.city?.trim();
+      const state = contact?.state?.trim();
+      if (!city) {
+        setError('Add a city to view weather.');
         return;
       }
 
       setLoading(true);
       setError(null);
       try {
-        const query = encodeURIComponent(queryParts.join(', '));
-        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${query}&count=1&language=en&format=json`);
+        // "Columbus OH" (space-separated, no comma) gives better results than "Columbus, OH"
+        const cityQuery = encodeURIComponent(state ? `${city} ${state}` : city);
+        // countryCode=US narrows results for US addresses; ignored for non-US contacts
+        const isUsState = state && state.length === 2 && /^[A-Za-z]{2}$/.test(state);
+        const countryParam = isUsState ? '&countryCode=US' : '';
+        const geoRes = await fetchWithTimeout(
+          `https://geocoding-api.open-meteo.com/v1/search?name=${cityQuery}&count=1&language=en&format=json${countryParam}`
+        );
         if (!geoRes.ok) throw new Error(`Geocoding failed (${geoRes.status})`);
         const geoJson = await geoRes.json();
-        const first = geoJson?.results?.[0];
-        if (!first) throw new Error('Location not found');
+        let first = geoJson?.results?.[0];
 
-        const weatherRes = await fetch(
+        // Fallback: try city-only if city+state returned nothing
+        if (!first && state) {
+          const fallbackRes = await fetchWithTimeout(
+            `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json${countryParam}`
+          );
+          if (fallbackRes.ok) {
+            const fallbackJson = await fallbackRes.json();
+            first = fallbackJson?.results?.[0];
+          }
+        }
+
+        if (!first) throw new Error('Location not found — check city name');
+
+        const weatherRes = await fetchWithTimeout(
           `https://api.open-meteo.com/v1/forecast?latitude=${first.latitude}&longitude=${first.longitude}&current=temperature_2m,wind_speed_10m,weather_code&hourly=precipitation_probability&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1`
         );
         if (!weatherRes.ok) throw new Error(`Weather fetch failed (${weatherRes.status})`);
@@ -1147,7 +1352,7 @@ function WeatherCard({ contact }: { contact: any }) {
 
         if (!cancelled) {
           setWeather({
-            city: first.name || queryParts[0],
+            city: [first.name, first.admin1].filter(Boolean).join(', ') || city,
             tempF: Number(current?.temperature_2m ?? 0),
             windMph: Number(current?.wind_speed_10m ?? 0),
             code: Number(current?.weather_code ?? 0),
@@ -1156,7 +1361,8 @@ function WeatherCard({ contact }: { contact: any }) {
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Unable to load weather');
+          const msg = err instanceof Error ? err.message : 'Unable to load weather';
+          setError(msg.includes('abort') ? 'Weather request timed out — check connection.' : msg);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -1167,7 +1373,7 @@ function WeatherCard({ contact }: { contact: any }) {
     return () => {
       cancelled = true;
     };
-  }, [contact?.city, contact?.state, contact?.zip]);
+  }, [contact?.city, contact?.state]);
 
   return (
     <div className="card p-5 space-y-4">
@@ -1214,16 +1420,29 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const inlineCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
   const inlineStreamRef = React.useRef<MediaStream | null>(null);
   const pendingCaptureBlobsRef = React.useRef<Blob[]>([]);
-  const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
-  const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
+  const DRAFT_KEY = `trussctr_inspection_draft_${contact.id}`;
+
+  // Load any saved draft from localStorage as the initial state
+  const loadDraft = () => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  };
+  const savedDraft = React.useMemo(loadDraft, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [step, setStep] = useState<'questions' | 'photos' | 'report'>(savedDraft?.step ?? 'questions');
+  const [checklist, setChecklist] = useState(savedDraft?.checklist ?? { roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
   const [saving, setSaving] = useState(false);
-  const [pitch, setPitch] = useState({ rise: 4, run: 12 });
-  const [footprintArea, setFootprintArea] = useState<number | ''>('');
-  const [roofLength, setRoofLength] = useState<number | ''>('');
-  const [roofWidth, setRoofWidth] = useState<number | ''>('');
-  const [overhangFt, setOverhangFt] = useState<number | ''>('');
-  const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
-  const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>([]);
+  const [pitch, setPitch] = useState(savedDraft?.pitch ?? { rise: 4, run: 12 });
+  const [footprintArea, setFootprintArea] = useState<number | ''>(savedDraft?.footprintArea ?? '');
+  const [roofLength, setRoofLength] = useState<number | ''>(savedDraft?.roofLength ?? '');
+  const [roofWidth, setRoofWidth] = useState<number | ''>(savedDraft?.roofWidth ?? '');
+  const [overhangFt, setOverhangFt] = useState<number | ''>(savedDraft?.overhangFt ?? '');
+  const [inspectionSection, setInspectionSection] = useState<'exterior' | 'detached' | 'interior'>(savedDraft?.inspectionSection ?? 'exterior');
+  const [activeElevation, setActiveElevation] = useState<string>(savedDraft?.activeElevation ?? 'Front');
+  const [customRoom, setCustomRoom] = useState<string>(savedDraft?.customRoom ?? '');
+  const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>(savedDraft?.photos ?? []);
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState('');
   const [inlineCameraOpen, setInlineCameraOpen] = useState(false);
@@ -1236,6 +1455,16 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
   const [completedInspection, setCompletedInspection] = useState<any>(null);
+  const [confirmDeleteIndex, setConfirmDeleteIndex] = useState<number | null>(null);
+  const [replacingIndex, setReplacingIndex] = useState<number | null>(null);
+  const hasDraft = !!(savedDraft && (
+    savedDraft.step !== 'questions' ||
+    savedDraft.checklist?.material ||
+    savedDraft.checklist?.roofAge ||
+    (savedDraft.checklist?.damageTypes?.length ?? 0) > 0 ||
+    (savedDraft.photos?.length ?? 0) > 0 ||
+    savedDraft.pitch?.rise !== 4
+  ));
 
   const pitchDecimal = pitch.run ? pitch.rise / pitch.run : 0;
   const angle = pitch.run ? (Math.atan(pitchDecimal) * 180 / Math.PI) : 0;
@@ -1445,6 +1674,20 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     if (contact?.id) fetchInspection();
   }, [contact?.id]);
 
+  // Auto-save inspection draft to localStorage whenever form state changes.
+  // Only persists while the inspection is in-progress (not the report view).
+  useEffect(() => {
+    if (step === 'report') return;
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        step, checklist, pitch, footprintArea, roofLength, roofWidth, overhangFt,
+        inspectionSection, activeElevation, customRoom, photos,
+      }));
+    } catch { /* localStorage unavailable */ }
+  }, [step, checklist, pitch, footprintArea, roofLength, roofWidth, overhangFt, inspectionSection, activeElevation, customRoom, photos]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ } };
+
   useEffect(() => () => {
     inlineStreamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
@@ -1501,6 +1744,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       } catch {
         // ignore if inspections table missing
       }
+      clearDraft();
       alert('Inspection report saved! Continue to photos.');
       setStep('photos');
     } catch (err) {
@@ -1517,7 +1761,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     await ensureInspectionSession();
 
     const ext = (originalName?.split('.').pop() || blob.type.split('/').pop() || 'jpg').toLowerCase();
-    const elevation = activeElevation;
+    const elevation = activeElevation === 'Custom' ? (customRoom.trim() || 'Custom') : activeElevation;
     const fileName = `${elevation}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const filePath = `${contact.id}/${fileName}`;
     const uploadBytes = await blob.arrayBuffer();
@@ -1549,29 +1793,114 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     onDocumentsChanged?.();
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !contact?.id || !userId) return;
-    setUploading(true);
-    setUploadMessage(`Uploading ${activeElevation} photo...`);
+  // Extract Supabase storage path from a public URL
+  const extractStoragePath = (publicUrl: string): string | null => {
+    const marker = '/object/public/projectceo-photos/';
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return null;
+    return decodeURIComponent(publicUrl.slice(idx + marker.length).split('?')[0]);
+  };
+
+  const deleteInspectionPhoto = async (index: number) => {
+    const photo = photos[index];
+    // Optimistically remove from UI immediately
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+    setConfirmDeleteIndex(null);
     try {
-      const compressed = file.type.startsWith('image/')
-        ? await compressImageWithLightCompressor(file, {
-            maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
-            maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
-            quality: PHOTO_POLICY_PRESETS.high8mp.quality,
-          })
-        : file;
-      await uploadInspectionBlob(compressed, file.name);
+      const path = extractStoragePath(photo.url);
+      if (path) {
+        await supabase.storage.from('projectceo-photos').remove([path]);
+      }
+      await supabase.from('documents').delete().eq('url', photo.url);
+      onDocumentsChanged?.();
     } catch (err) {
-      console.error('Photo upload error:', err);
-      const message = (err as any)?.message || 'Check Supabase storage bucket and policies.';
-      alert(`Photo upload failed. ${message}`);
-    } finally {
-      setUploading(false);
-      setUploadMessage('');
-      e.target.value = '';
+      console.error('[deleteInspectionPhoto]', err);
+      // Silent fail — photo is already removed from local state
     }
+  };
+
+  const replaceInspectionPhoto = async (index: number, file: File) => {
+    const old = photos[index];
+    setReplacingIndex(index);
+    try {
+      await ensureInspectionSession();
+      const rawExt = (file.name.split('.').pop() || file.type.split('/').pop() || 'jpg').toLowerCase();
+      const ext = rawExt === 'heic' || rawExt === 'heif' ? 'jpg' : rawExt;
+      const elevation = old.elevation;
+      const fileName = `${elevation}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      const filePath = `${contact!.id}/${fileName}`;
+      const uploadBytes = await file.arrayBuffer();
+
+      const { error: uploadError } = await supabase.storage
+        .from('projectceo-photos')
+        .upload(filePath, uploadBytes, { contentType: file.type || 'image/jpeg' });
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
+      const displayUrl = URL.createObjectURL(file);
+
+      // Save new document record
+      await supabase.from('documents').insert({
+        contact_id: contact!.id,
+        company_id: contact!.company_id,
+        name: `${elevation} Inspection Photo`,
+        type: 'photo',
+        url: publicUrl,
+        size: file.size,
+        uploaded_by: userId,
+      } as any);
+
+      // Remove old storage file + document record (best-effort)
+      try {
+        const oldPath = extractStoragePath(old.url);
+        if (oldPath) await supabase.storage.from('projectceo-photos').remove([oldPath]);
+        await supabase.from('documents').delete().eq('url', old.url);
+      } catch { /* ignore cleanup failures */ }
+
+      // Swap in-place
+      setPhotos((prev) => {
+        const next = [...prev];
+        next[index] = { url: publicUrl, displayUrl, note: old.note, elevation, size: file.size };
+        return next;
+      });
+      onDocumentsChanged?.();
+    } catch (err) {
+      console.error('[replaceInspectionPhoto]', err);
+      alert('Replace failed. Please try again.');
+    } finally {
+      setReplacingIndex(null);
+    }
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length || !contact?.id || !userId) return;
+    setUploading(true);
+    let failed = 0;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setUploadMessage(`Uploading photo ${i + 1} of ${files.length}...`);
+      try {
+        const compressed = file.type.startsWith('image/')
+          ? await compressImageWithLightCompressor(file, {
+              maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
+              maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
+              quality: PHOTO_POLICY_PRESETS.high8mp.quality,
+            })
+          : file;
+        await uploadInspectionBlob(compressed, file.name);
+      } catch (err) {
+        failed += 1;
+        console.error(`Photo upload error (${i + 1}/${files.length}):`, err);
+      }
+    }
+    if (failed > 0) {
+      const message = `${failed} of ${files.length} photo(s) failed to upload. The rest were saved.`;
+      alert(message);
+    }
+    setUploading(false);
+    setUploadMessage('');
+    e.target.value = '';
   };
 
   const capturePhoto = async () => {
@@ -1710,6 +2039,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         // ignore if inspections table missing
       }
       onDocumentsChanged?.();
+      clearDraft();
       alert('Inspection completed and saved to timeline!');
       setStep('report');
     } catch (err) {
@@ -1720,22 +2050,101 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
     }
   };
 
+  const quickMarkComplete = async () => {
+    if (!userId) return;
+    setSaving(true);
+    try {
+      const timeout = <T,>(p: Promise<T>): Promise<T> =>
+        Promise.race([p, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Timed out')), 15000))]);
+
+      const { error: commError } = await timeout<any>(
+        supabase.from('communications').insert({
+          contact_id: contact.id,
+          company_id: contact.company_id,
+          type: 'note',
+          content: '✅ Inspection marked complete.',
+          user_id: userId,
+          direction: 'outbound',
+        } as any) as any
+      );
+      if (commError) throw commError;
+
+      const now = new Date().toISOString();
+      const { error: statusError } = await timeout<any>(
+        (supabase.from('contacts') as any)
+          .update({ status: 'inspected', status_changed_at: now })
+          .eq('id', contact.id)
+      );
+      if (statusError) throw statusError;
+
+      onDocumentsChanged?.();
+      clearDraft();
+      alert('Inspection marked complete!');
+    } catch (err) {
+      console.error('quickMarkComplete error:', err);
+      alert(err instanceof Error ? err.message : 'Failed to mark inspection complete.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Statuses that mean the inspection was already completed (regardless of which flow was used)
+  const INSPECTION_DONE_STATUSES = ['inspected', 'inspection_complete', 'estimate_sent', 'approved', 'signed_won', 'scheduled', 'in_progress', 'completed', 'paid'];
+  const isInspectionDone = INSPECTION_DONE_STATUSES.includes(contact.status);
+
   return (
     <div className="space-y-6">
-      {completedInspection?.status === 'completed' && (
+      {/* ── Inspection Complete Banner ── shown whenever status indicates done */}
+      {isInspectionDone ? (
         <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-bold text-emerald-700 uppercase">Inspection Completed</p>
-            <p className="text-[10px] text-emerald-600">Tap to view the completed inspection.</p>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-emerald-100 rounded-full flex items-center justify-center">
+              <CheckCircle2 size={16} className="text-emerald-600" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-emerald-700 uppercase">Inspection Complete</p>
+              <p className="text-[10px] text-emerald-600">Status has been updated on this contact.</p>
+            </div>
+          </div>
+          {completedInspection?.data && (
+            <button
+              onClick={() => { loadInspectionData(completedInspection.data); setStep('report'); }}
+              className="text-xs font-bold text-emerald-700 shrink-0"
+            >
+              View
+            </button>
+          )}
+        </div>
+      ) : (
+        /* ── Quick "Mark Complete" button — visible before the form is filled ── */
+        <button
+          onClick={quickMarkComplete}
+          disabled={saving}
+          className="w-full bg-emerald-600 text-white font-black py-4 rounded-2xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-50"
+        >
+          <CheckCircle2 size={20} />
+          {saving ? 'Marking Complete...' : 'Mark Inspection Complete'}
+        </button>
+      )}
+      {/* ── Draft Restored Banner ── */}
+      {hasDraft && !isInspectionDone && (
+        <div className="bg-blue-50 border border-blue-100 rounded-2xl px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-base">📋</span>
+            <div>
+              <p className="text-xs font-bold text-blue-700 uppercase">Draft Restored</p>
+              <p className="text-[10px] text-blue-600">Your previous inspection progress has been reloaded.</p>
+            </div>
           </div>
           <button
-            onClick={() => { loadInspectionData(completedInspection.data); setStep('report'); }}
-            className="text-xs font-bold text-emerald-700"
+            onClick={() => { clearDraft(); window.location.reload(); }}
+            className="text-[10px] font-bold text-blue-500 underline shrink-0 ml-2"
           >
-            View
+            Start fresh
           </button>
         </div>
       )}
+
       <div className="card p-5 bg-slate-900 text-white space-y-4">
         {/* Header */}
         <div className="flex justify-between items-center">
@@ -1858,15 +2267,77 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Photos</h3>
             <button onClick={() => setStep('report')} className="text-xs font-bold text-accent">Skip to Report</button>
           </div>
-          <div className="text-[10px] text-slate-500">Tap an elevation, then add as many photos as needed. You can come back to any elevation.</div>
-          <div className="grid grid-cols-3 gap-2">
-            {(['North', 'South', 'East', 'West', 'Garage', 'Detached'] as const).map((dir) => (
-              <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
-                {dir}
-                <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === dir).length})</span>
+          <div className="text-[10px] text-slate-500">Select a location, then add as many photos as needed.</div>
+
+          {/* Section tabs */}
+          <div className="flex gap-2">
+            {(['exterior', 'detached', 'interior'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => {
+                  setInspectionSection(s);
+                  if (s === 'exterior') setActiveElevation('Front');
+                  else if (s === 'detached') setActiveElevation('Det. Front');
+                  else setActiveElevation('Bedroom');
+                }}
+                className={`flex-1 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wide border transition-all ${inspectionSection === s ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-500'}`}
+              >
+                {s === 'exterior' ? 'Exterior' : s === 'detached' ? 'Detached' : 'Interior'}
               </button>
             ))}
           </div>
+
+          {/* Exterior directions */}
+          {inspectionSection === 'exterior' && (
+            <div className="grid grid-cols-2 gap-2">
+              {(['Front', 'Back', 'Left', 'Right'] as const).map((dir) => (
+                <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border transition-all ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                  {dir}
+                  <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === dir).length})</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Detached directions */}
+          {inspectionSection === 'detached' && (
+            <div className="grid grid-cols-2 gap-2">
+              {(['Det. Front', 'Det. Back', 'Det. Left', 'Det. Right'] as const).map((dir) => (
+                <button key={dir} onClick={() => setActiveElevation(dir)} className={`py-2 rounded-lg text-xs font-bold border transition-all ${activeElevation === dir ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                  {dir}
+                  <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === dir).length})</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Interior rooms */}
+          {inspectionSection === 'interior' && (
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                {(['Bedroom', 'Bathroom', 'Kitchen', 'Living Room', 'Dining Room', 'Attic'] as const).map((room) => (
+                  <button key={room} onClick={() => setActiveElevation(room)} className={`py-2 rounded-lg text-xs font-bold border transition-all ${activeElevation === room ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                    {room}
+                    <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === room).length})</span>
+                  </button>
+                ))}
+                <button onClick={() => setActiveElevation('Custom')} className={`py-2 rounded-lg text-xs font-bold border transition-all ${activeElevation === 'Custom' ? 'bg-accent text-white border-accent' : 'bg-white border-slate-100 text-slate-600'}`}>
+                  + Custom
+                  {customRoom.trim() && <span className="ml-1 text-[10px] opacity-70">({photos.filter(p => p.elevation === customRoom.trim()).length})</span>}
+                </button>
+              </div>
+              {activeElevation === 'Custom' && (
+                <input
+                  type="text"
+                  placeholder="Enter room name…"
+                  value={customRoom}
+                  onChange={(e) => setCustomRoom(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-accent"
+                  autoFocus
+                />
+              )}
+            </div>
+          )}
           {usesNativeInspectionCamera ? (
             <button
               type="button"
@@ -1875,15 +2346,15 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
               className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
             >
               <span className="text-sm font-bold text-slate-500">
-                {uploading ? uploadMessage || 'Uploading...' : `Tap to capture ${activeElevation} photos`}
+                {uploading ? uploadMessage || 'Uploading...' : `Tap to capture ${activeElevation === 'Custom' ? (customRoom.trim() || 'Custom') : activeElevation} photos`}
               </span>
-              <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that elevation is complete.</span>
+              <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that location is complete.</span>
             </button>
           ) : (
             <label className="block w-full cursor-pointer">
               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
               <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
-                <span className="text-sm font-bold text-slate-500">{uploading ? uploadMessage || 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
+                <span className="text-sm font-bold text-slate-500">{uploading ? uploadMessage || 'Uploading...' : `Tap to add ${activeElevation === 'Custom' ? (customRoom.trim() || 'Custom') : activeElevation} photo`}</span>
               </div>
             </label>
           )}
@@ -1891,7 +2362,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
             <button onClick={capturePhoto} disabled={uploading} className="bg-primary text-white py-3 rounded-xl text-xs font-bold disabled:opacity-50">Capture Photo</button>
             <label className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-xs font-bold text-center cursor-pointer">
               Choose from Library
-              <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+              <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} />
             </label>
             <input
               ref={cameraFallbackInputRef}
@@ -1905,13 +2376,111 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
           <div className="grid grid-cols-2 gap-3">
             {photos.map((p, i) => (
               <div key={`${p.url}-${i}`} className="card p-2 space-y-2">
-                <img src={p.displayUrl || p.url} alt="Inspection" className="w-full h-32 object-cover rounded-xl" referrerPolicy="no-referrer" />
-                <p className="text-[10px] font-bold text-slate-400">{p.elevation}</p>
-                <textarea className="w-full bg-slate-50 border-none rounded-lg p-2 text-xs" placeholder="Add note..." value={p.note} onChange={(e) => setPhotos((prev) => {
-                  const next = [...prev];
-                  next[i] = { ...next[i], note: e.target.value };
-                  return next;
-                })} />
+
+                {/* Photo thumbnail with action overlay */}
+                <div className="relative">
+                  <img
+                    src={p.displayUrl || p.url}
+                    alt="Inspection"
+                    className="w-full h-32 object-cover rounded-xl"
+                    referrerPolicy="no-referrer"
+                  />
+
+                  {/* Replace spinner overlay */}
+                  {replacingIndex === i && (
+                    <div className="absolute inset-0 bg-black/60 rounded-xl flex items-center justify-center">
+                      <RefreshCw size={20} className="text-white animate-spin" />
+                    </div>
+                  )}
+
+                  {/* Delete confirm overlay */}
+                  {confirmDeleteIndex === i ? (
+                    <div className="absolute inset-0 bg-black/70 rounded-xl flex flex-col items-center justify-center gap-2 p-2">
+                      <p className="text-white text-[11px] font-bold text-center">Delete this photo?</p>
+                      <div className="flex gap-2 w-full">
+                        <button
+                          onClick={() => deleteInspectionPhoto(i)}
+                          className="flex-1 bg-red-500 text-white text-[11px] font-black py-1.5 rounded-lg"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteIndex(null)}
+                          className="flex-1 bg-white/20 text-white text-[11px] font-black py-1.5 rounded-lg"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Normal action buttons — top-right corner */
+                    <div className="absolute top-1.5 right-1.5 flex gap-1">
+                      {/* Replace button */}
+                      <label className="cursor-pointer">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) replaceInspectionPhoto(i, file);
+                            e.target.value = '';
+                          }}
+                        />
+                        <div className="w-7 h-7 bg-black/60 hover:bg-black/80 rounded-full flex items-center justify-center transition-colors">
+                          <Camera size={13} className="text-white" />
+                        </div>
+                      </label>
+                      {/* Delete button */}
+                      <button
+                        onClick={() => setConfirmDeleteIndex(i)}
+                        className="w-7 h-7 bg-black/60 hover:bg-red-600 rounded-full flex items-center justify-center transition-colors"
+                      >
+                        <Trash2 size={13} className="text-white" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Location reassignment dropdown */}
+                <select
+                  value={p.elevation}
+                  onChange={(e) => setPhotos((prev) => {
+                    const next = [...prev];
+                    next[i] = { ...next[i], elevation: e.target.value };
+                    return next;
+                  })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-accent"
+                >
+                  <optgroup label="Exterior">
+                    {(['Front', 'Back', 'Left', 'Right'] as const).map((dir) => (
+                      <option key={dir} value={dir}>{dir}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Detached">
+                    {(['Det. Front', 'Det. Back', 'Det. Left', 'Det. Right'] as const).map((dir) => (
+                      <option key={dir} value={dir}>{dir}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Interior">
+                    {(['Bedroom', 'Bathroom', 'Kitchen', 'Living Room', 'Dining Room', 'Attic'] as const).map((room) => (
+                      <option key={room} value={room}>{room}</option>
+                    ))}
+                    {p.elevation && !['Front','Back','Left','Right','Det. Front','Det. Back','Det. Left','Det. Right','Bedroom','Bathroom','Kitchen','Living Room','Dining Room','Attic'].includes(p.elevation) && (
+                      <option value={p.elevation}>{p.elevation}</option>
+                    )}
+                  </optgroup>
+                </select>
+                <textarea
+                  className="w-full bg-slate-50 border-none rounded-lg p-2 text-xs"
+                  placeholder="Add note..."
+                  value={p.note}
+                  onChange={(e) => setPhotos((prev) => {
+                    const next = [...prev];
+                    next[i] = { ...next[i], note: e.target.value };
+                    return next;
+                  })}
+                />
                 <button onClick={() => openMarkup(i)} className="w-full text-xs font-bold text-accent">Markup Photo</button>
               </div>
             ))}
@@ -1930,7 +2499,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
           >
             <button onClick={stopInlineCamera} className="text-sm font-bold">Cancel</button>
             <div className="text-center">
-              <p className="text-sm font-bold">{activeElevation} Photos</p>
+              <p className="text-sm font-bold">{activeElevation === 'Custom' ? (customRoom.trim() || 'Custom') : activeElevation} Photos</p>
               <p className="text-xs text-white/70">{inlineCaptureCount} captured</p>
             </div>
             <button onClick={finishInlineCamera} className="text-sm font-bold text-accent">Done</button>
@@ -1955,7 +2524,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
                 />
               </div>
               <p className="mt-4 text-center text-xs text-white/80">
-                Keep taking photos, then tap Done to upload this {activeElevation.toLowerCase()} set.
+                Keep taking photos, then tap Done to upload this {(activeElevation === 'Custom' ? (customRoom.trim() || 'Custom') : activeElevation).toLowerCase()} set.
               </p>
             </div>
           </div>
@@ -2378,15 +2947,332 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
   );
 }
 
-function DocumentsTab({ contactId, companyId, address, city, state, zip, contactName, userId, documents, onUpload, onLegalUpload, onDocumentSaved }: { contactId: string; companyId: string; address: string; city: string; state: string; zip: string; contactName?: string; userId?: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void; onDocumentSaved?: () => void }) {
+// ─────────────────────────────────────────────
+// iPhone-style full-screen photo album modal
+// ─────────────────────────────────────────────
+function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelete, onMetadataUpdated }: {
+  photos: any[];
+  initialIndex: number;
+  onClose: () => void;
+  onDelete?: (docId: string, url: string) => Promise<void>;
+  onMetadataUpdated?: () => void;
+}) {
+  const [photos, setPhotos] = React.useState(initialPhotos);
+  const [index, setIndex] = React.useState(Math.min(initialIndex, Math.max(0, initialPhotos.length - 1)));
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const [noteDraft, setNoteDraft] = React.useState('');
+  const [savingNote, setSavingNote] = React.useState(false);
+  const [togglingStar, setTogglingStar] = React.useState(false);
+  const touchStartX = React.useRef(0);
+  const touchStartY = React.useRef(0);
+  const thumbsRef = React.useRef<HTMLDivElement>(null);
+
+  const current = photos[index];
+
+  // Scroll thumbnail strip to keep active thumb visible
+  React.useEffect(() => {
+    if (!thumbsRef.current) return;
+    const el = thumbsRef.current.children[index] as HTMLElement | undefined;
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [index]);
+
+  React.useEffect(() => {
+    setNoteDraft(String(current?.photo_notes || ''));
+  }, [current?.id]);
+
+  // Prevent body scroll while album is open
+  React.useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = ''; };
+  }, []);
+
+  const go = (i: number) => {
+    setConfirmDelete(false);
+    setIndex(Math.max(0, Math.min(i, photos.length - 1)));
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const dx = touchStartX.current - e.changedTouches[0].clientX;
+    const dy = Math.abs(touchStartY.current - e.changedTouches[0].clientY);
+    if (Math.abs(dx) > 50 && Math.abs(dx) > dy) {
+      if (dx > 0 && index < photos.length - 1) go(index + 1);
+      if (dx < 0 && index > 0) go(index - 1);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!onDelete || !current) return;
+    setDeleting(true);
+    try {
+      await onDelete(current.id, current.url);
+      const next = photos.filter((_: any, i: number) => i !== index);
+      if (next.length === 0) { onClose(); return; }
+      setPhotos(next);
+      setIndex(Math.min(index, next.length - 1));
+      setConfirmDelete(false);
+    } catch (err) {
+      console.error('Album delete failed:', err);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const persistPhotoUpdate = async (docId: string, updates: Record<string, unknown>) => {
+    const { error } = await (supabase.from('documents') as any).update(updates).eq('id', docId);
+    if (error) throw error;
+  };
+
+  const handleToggleFavorite = async () => {
+    if (!current?.id || togglingStar) return;
+    const nextStarred = !current.starred;
+    setTogglingStar(true);
+    const previous = photos;
+    const optimistic = sortPhotosForDisplay(photos.map((photo: any, i: number) => {
+      if (i !== index) return photo;
+      return { ...photo, starred: nextStarred };
+    }));
+    setPhotos(optimistic);
+    setIndex(Math.max(0, optimistic.findIndex((photo: any) => photo.id === current.id)));
+
+    try {
+      await persistPhotoUpdate(current.id, { starred: nextStarred });
+      await onMetadataUpdated?.();
+    } catch (err) {
+      console.error('Favorite toggle failed:', err);
+      setPhotos(previous);
+      setIndex(index);
+      alert('Unable to update favorite photo. If this is a new setup, run the latest documents migration first.');
+    } finally {
+      setTogglingStar(false);
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    if (!current?.id || savingNote) return;
+    setSavingNote(true);
+    const previous = photos;
+    const trimmed = noteDraft.trim();
+    const optimistic = photos.map((photo: any, i: number) => (
+      i === index ? { ...photo, photo_notes: trimmed || null } : photo
+    ));
+    setPhotos(optimistic);
+    try {
+      await persistPhotoUpdate(current.id, { photo_notes: trimmed || null });
+      await onMetadataUpdated?.();
+    } catch (err) {
+      console.error('Photo note save failed:', err);
+      setPhotos(previous);
+      alert('Unable to save photo notes. If this is a new setup, run the latest documents migration first.');
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  if (!current) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[300] bg-black flex flex-col select-none"
+      style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between px-3 py-2 bg-black/80 backdrop-blur-sm shrink-0">
+        <button
+          onClick={onClose}
+          className="w-9 h-9 flex items-center justify-center rounded-full active:bg-white/20"
+        >
+          <X size={22} className="text-white" />
+        </button>
+        <div className="text-center">
+          <p className="text-sm font-bold text-white">{index + 1} / {photos.length}</p>
+          {current.name && (
+            <p className="text-[10px] text-white/50 truncate max-w-[180px]">{current.name}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleToggleFavorite}
+            disabled={togglingStar}
+            className="flex h-9 w-9 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-60"
+            aria-label="Favorite photo"
+          >
+            <Star size={18} className={current.starred ? 'text-amber-400' : 'text-white'} fill={current.starred ? 'currentColor' : 'none'} />
+          </button>
+          {onDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="w-9 h-9 flex items-center justify-center rounded-full active:bg-white/20"
+            >
+              <Trash2 size={18} className="text-red-400" />
+            </button>
+          ) : (
+            <div className="w-9" />
+          )}
+        </div>
+      </div>
+
+      {/* ── Main photo with swipe ── */}
+      <div
+        className="flex-1 flex items-center justify-center overflow-hidden relative"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        <img
+          key={current.id || index}
+          src={current.displayUrl || current.url}
+          alt={current.name || 'Photo'}
+          className="max-h-full max-w-full object-contain"
+          draggable={false}
+          referrerPolicy="no-referrer"
+        />
+
+        {/* Prev tap zone */}
+        {index > 0 && (
+          <button
+            onClick={() => go(index - 1)}
+            className="absolute left-0 top-0 h-full w-16 flex items-center justify-start pl-2"
+            aria-label="Previous"
+          >
+            <div className="w-8 h-8 bg-black/50 rounded-full flex items-center justify-center">
+              <ChevronLeft size={20} className="text-white" />
+            </div>
+          </button>
+        )}
+
+        {/* Next tap zone */}
+        {index < photos.length - 1 && (
+          <button
+            onClick={() => go(index + 1)}
+            className="absolute right-0 top-0 h-full w-16 flex items-center justify-end pr-2"
+            aria-label="Next"
+          >
+            <div className="w-8 h-8 bg-black/50 rounded-full flex items-center justify-center">
+              <ChevronRight size={20} className="text-white" />
+            </div>
+          </button>
+        )}
+      </div>
+
+      {/* ── Thumbnail filmstrip ── */}
+      {photos.length > 1 && (
+        <div
+          ref={thumbsRef}
+          className="flex gap-1.5 overflow-x-auto px-4 py-3 no-scrollbar shrink-0"
+        >
+          {photos.map((p: any, i: number) => (
+            <button
+              key={p.id || i}
+              onClick={() => go(i)}
+              className={`shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all ${
+                i === index
+                  ? 'border-white scale-110 shadow-lg'
+                  : 'border-transparent opacity-50'
+              }`}
+            >
+              <img
+                src={p.displayUrl || p.url}
+                alt=""
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+                draggable={false}
+              />
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="shrink-0 border-t border-white/10 bg-black/85 px-4 py-3 backdrop-blur-sm">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/55">Photo Notes</p>
+          {current.starred ? (
+            <span className="rounded-full bg-amber-400/20 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300">
+              Cover Photo
+            </span>
+          ) : null}
+        </div>
+        <textarea
+          value={noteDraft}
+          onChange={(e) => setNoteDraft(e.target.value)}
+          placeholder="Add notes, highlight what matters, or describe why this photo is important."
+          className="min-h-[88px] w-full rounded-2xl border border-white/10 bg-white/8 p-3 text-sm text-white placeholder:text-white/35"
+        />
+        <div className="mt-3 flex items-center gap-3">
+          <button
+            onClick={handleSaveNotes}
+            disabled={savingNote}
+            className="rounded-2xl bg-accent px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {savingNote ? 'Saving…' : 'Save Notes'}
+          </button>
+          <p className="text-[11px] text-white/45">
+            Favorite a photo to pin it to the contact.
+          </p>
+        </div>
+      </div>
+
+      {/* ── Delete confirmation overlay ── */}
+      {confirmDelete && (
+        <div className="absolute inset-0 bg-black/80 z-10 flex items-center justify-center p-6">
+          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 w-full max-w-xs text-center space-y-4">
+            <div className="w-14 h-14 bg-red-500/20 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 size={26} className="text-red-400" />
+            </div>
+            <div>
+              <p className="text-white font-black text-base">Delete Photo?</p>
+              <p className="text-slate-400 text-sm mt-1">This cannot be undone.</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 bg-white/10 text-white font-bold py-3 rounded-2xl text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 bg-red-500 text-white font-black py-3 rounded-2xl text-sm disabled:opacity-60"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DocumentsTab({ contactId, companyId, address, city, state, zip, contactName, userId, documents, onUpload, onLegalUpload, onDocumentSaved, onDeleteDocument }: { contactId: string; companyId: string; address: string; city: string; state: string; zip: string; contactName?: string; userId?: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void; onDocumentSaved?: () => void; onDeleteDocument?: (docId: string, url: string) => Promise<void> }) {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
+  const [editMode, setEditMode] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [albumOpen, setAlbumOpen] = useState(false);
+  const [albumIndex, setAlbumIndex] = useState(0);
+
+  const handleDelete = async (doc: any) => {
+    if (!onDeleteDocument) return;
+    setDeleting(true);
+    try {
+      await onDeleteDocument(doc.id, doc.url);
+    } finally {
+      setDeleting(false);
+      setConfirmDeleteId(null);
+    }
+  };
 
   // Base document lists — strip signature attachments from visible set
   const allVisible = documents.filter((doc) => !getSignatureParentName(String(doc.name || '')));
-  const photos = allVisible
-    .filter((doc) => doc.type === 'photo')
-    .sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+  const photos = sortPhotosForDisplay(allVisible.filter((doc) => doc.type === 'photo'));
+  const starredPhotos = photos.filter((doc) => !!doc.starred);
   const nonLegalDocs = allVisible.filter((doc) => doc.type !== 'photo' && !isLegalDocument(doc));
   const legalDocStats = buildLegalDocumentStats(allVisible);
   const signedLegalDocs = LEGAL_DOCUMENT_TEMPLATES
@@ -2441,10 +3327,20 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
                   <button
                     key={i}
                     type="button"
-                    onClick={() => navigate(`/documents/view/${doc.id}`)}
-                    className="aspect-square rounded-xl overflow-hidden bg-slate-100 active:opacity-80"
+                    onClick={() => { setAlbumIndex(i); setAlbumOpen(true); }}
+                    className="relative aspect-square rounded-xl overflow-hidden bg-slate-100 active:opacity-80"
                   >
                     <img src={doc.displayUrl || doc.url} alt={doc.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    {doc.photo_notes ? (
+                      <div className="absolute left-1.5 top-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                        Note
+                      </div>
+                    ) : null}
+                    {doc.starred ? (
+                      <div className="absolute right-1.5 top-1.5 rounded-full bg-amber-400 p-1 text-white shadow-lg">
+                        <Star size={10} fill="currentColor" />
+                      </div>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -2522,7 +3418,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
           <label className="flex items-center justify-center gap-2 w-full py-3 bg-slate-100 rounded-xl text-xs font-bold text-slate-600 cursor-pointer active:bg-slate-200">
             <Plus size={16} />
             Upload File or Photo
-            <input type="file" className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
+            <input type="file" multiple className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
           </label>
         </div>
       )}
@@ -2532,38 +3428,112 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
       ══════════════════════════════════ */}
       {filter === 'photos' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               {photos.length} photo{photos.length !== 1 ? 's' : ''} on file
             </p>
-            <label className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-xl text-[11px] font-bold cursor-pointer active:opacity-80">
-              <Plus size={14} />
-              Add Photo
-              <input type="file" className="hidden" onChange={onUpload} accept="image/*" />
-            </label>
+            <div className="flex items-center gap-2">
+              {starredPhotos.length > 0 && (
+                <div className="rounded-xl bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-700">
+                  {starredPhotos.length} starred
+                </div>
+              )}
+              {photos.length > 0 && onDeleteDocument && (
+                <button
+                  onClick={() => { setEditMode((m) => !m); setConfirmDeleteId(null); }}
+                  className={`px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all ${editMode ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-600'}`}
+                >
+                  {editMode ? 'Done' : 'Edit'}
+                </button>
+              )}
+              {!editMode && (
+                <label className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-xl text-[11px] font-bold cursor-pointer active:opacity-80">
+                  <Plus size={14} />
+                  Add
+                  <input type="file" multiple className="hidden" onChange={onUpload} accept="image/*" />
+                </label>
+              )}
+            </div>
           </div>
+
+          {editMode && (
+            <p className="text-[10px] text-slate-400 bg-slate-50 rounded-xl px-3 py-2">
+              Tap the <strong>🗑</strong> on any photo to delete it. Tap <strong>Done</strong> when finished.
+            </p>
+          )}
 
           {photos.length > 0 ? (
             <div className="grid grid-cols-3 gap-2">
               {photos.map((doc, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => navigate(`/documents/view/${doc.id}`)}
-                  className="aspect-square rounded-xl overflow-hidden bg-slate-100 active:opacity-80 relative"
-                >
-                  <img
-                    src={doc.displayUrl || doc.url}
-                    alt={doc.name}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                  {doc.name && (
-                    <div className="absolute bottom-0 inset-x-0 bg-black/40 px-1.5 py-1">
-                      <p className="text-[8px] font-bold text-white truncate">{doc.name}</p>
-                    </div>
+                <div key={`${doc.id}-${i}`} className="aspect-square rounded-xl overflow-hidden bg-slate-100 relative">
+                  {/* Tapping the photo when NOT in edit mode opens the album */}
+                  {!editMode ? (
+                    <button
+                      type="button"
+                      onClick={() => { setAlbumIndex(i); setAlbumOpen(true); }}
+                      className="absolute inset-0 w-full h-full"
+                    >
+                      <img
+                        src={doc.displayUrl || doc.url}
+                        alt={doc.name}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                      {doc.photo_notes ? (
+                        <div className="absolute left-1.5 top-1.5 rounded-full bg-black/60 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                          Note
+                        </div>
+                      ) : null}
+                      {doc.starred ? (
+                        <div className="absolute right-1.5 top-1.5 rounded-full bg-amber-400 p-1 text-white shadow-lg">
+                          <Star size={10} fill="currentColor" />
+                        </div>
+                      ) : null}
+                      {doc.name && (
+                        <div className="absolute bottom-0 inset-x-0 bg-black/40 px-1.5 py-1">
+                          <p className="text-[8px] font-bold text-white truncate">{doc.name}</p>
+                        </div>
+                      )}
+                    </button>
+                  ) : (
+                    <>
+                      <img
+                        src={doc.displayUrl || doc.url}
+                        alt={doc.name}
+                        className="w-full h-full object-cover opacity-70"
+                        referrerPolicy="no-referrer"
+                      />
+
+                      {/* Delete confirm overlay */}
+                      {confirmDeleteId === doc.id ? (
+                        <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center gap-1.5 p-2">
+                          <p className="text-white text-[10px] font-bold text-center leading-tight">Delete this photo?</p>
+                          <button
+                            onClick={() => handleDelete(doc)}
+                            disabled={deleting}
+                            className="w-full bg-red-500 text-white text-[10px] font-black py-1.5 rounded-lg disabled:opacity-60"
+                          >
+                            {deleting ? '…' : 'Delete'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="w-full bg-white/20 text-white text-[10px] font-black py-1.5 rounded-lg"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        /* Delete badge */
+                        <button
+                          onClick={() => setConfirmDeleteId(doc.id)}
+                          className="absolute top-1.5 right-1.5 w-7 h-7 bg-red-500 rounded-full flex items-center justify-center shadow-lg active:bg-red-700"
+                        >
+                          <Trash2 size={13} className="text-white" />
+                        </button>
+                      )}
+                    </>
                   )}
-                </button>
+                </div>
               ))}
             </div>
           ) : (
@@ -2640,7 +3610,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
               <label className="flex items-center gap-1.5 px-3 py-1.5 bg-accent text-white rounded-xl text-[11px] font-bold cursor-pointer active:opacity-80">
                 <Plus size={14} />
                 Upload
-                <input type="file" className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
+                <input type="file" multiple className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
               </label>
             </div>
             {sortedDocs.length > 0 ? (
@@ -2763,6 +3733,17 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Photo Album Modal ── */}
+      {albumOpen && (
+        <PhotoAlbumModal
+          photos={photos}
+          initialIndex={albumIndex}
+          onClose={() => setAlbumOpen(false)}
+          onDelete={onDeleteDocument}
+          onMetadataUpdated={onDocumentSaved}
+        />
       )}
     </div>
   );

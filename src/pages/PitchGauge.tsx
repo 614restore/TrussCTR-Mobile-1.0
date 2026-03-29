@@ -201,110 +201,116 @@ export default function PitchGauge() {
       {/* Pitch-line overlay */}
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 
-      {/* Header */}
-      <div className="relative z-10 flex items-center gap-3 p-4 bg-gradient-to-b from-black/70 to-transparent">
+      {/* Header — padded below Dynamic Island / status bar */}
+      <div
+        className="relative z-10 flex items-center gap-3 px-4 pb-3 bg-gradient-to-b from-black/80 to-transparent"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top, 44px) + 10px)' }}
+      >
         <button
           onClick={() => navigate(-1)}
-          className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 text-white active:scale-90 transition-transform"
+          className="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full bg-black/60 text-white active:scale-90 transition-transform"
         >
           <ChevronLeft size={22} />
         </button>
-        <div>
-          <p className="text-white font-black text-lg leading-none">Pitch Gauge</p>
-          <p className="text-slate-300 text-[10px]">
-            {motionActive ? 'Place phone flat on roof slope' : 'Tap a pitch below or enable motion sensor'}
+        <div className="min-w-0 flex-1">
+          <p className="text-white font-black text-base leading-tight">Pitch Gauge</p>
+          <p className="text-slate-300 text-[10px] truncate">
+            {motionActive ? 'Place phone flat on roof slope' : 'Tap a pitch below or enable motion'}
           </p>
         </div>
         {locked && (
-          <div className="ml-auto bg-accent/20 border border-accent/50 px-2 py-1 rounded text-accent text-[10px] font-bold">
+          <div className="flex-shrink-0 bg-accent/20 border border-accent/50 px-2 py-1 rounded text-accent text-[10px] font-bold">
             LOCKED
           </div>
         )}
         {manualPitch && !locked && (
-          <div className="ml-auto bg-blue-500/20 border border-blue-400/50 px-2 py-1 rounded text-blue-300 text-[10px] font-bold">
+          <div className="flex-shrink-0 bg-blue-500/20 border border-blue-400/50 px-2 py-1 rounded text-blue-300 text-[10px] font-bold">
             MANUAL
           </div>
         )}
       </div>
 
-      {/* Bottom panel */}
-      <div className="relative z-10 mt-auto bg-black/85 backdrop-blur-md rounded-t-3xl p-5 space-y-4">
+      {/* Bottom panel — scrollable, clears home indicator */}
+      <div
+        className="relative z-10 mt-auto bg-black/85 backdrop-blur-md rounded-t-3xl overflow-y-auto"
+        style={{
+          paddingTop: '20px',
+          paddingLeft: '20px',
+          paddingRight: '20px',
+          paddingBottom: 'calc(env(safe-area-inset-bottom, 34px) + 10px)',
+        }}
+      >
+        <div className="space-y-3">
+          {/* iOS motion permission button */}
+          {needsPermission && !motionActive && (
+            <button
+              onClick={requestMotionPermission}
+              className="w-full py-3 bg-accent text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
+            >
+              Enable Motion Sensor
+            </button>
+          )}
+          {permissionError && (
+            <p className="text-amber-400 text-xs text-center">{permissionError}</p>
+          )}
 
-        {/* iOS motion permission button */}
-        {needsPermission && !motionActive && (
+          {/* Main readout — tighter font */}
+          <div className="flex items-stretch justify-around py-1">
+            <div className="text-center">
+              <p className="text-slate-400 text-[9px] uppercase font-bold mb-0.5">Pitch</p>
+              <p className="text-white font-black text-3xl leading-none">{currentPitch}/12</p>
+            </div>
+            <div className="w-px bg-white/10" />
+            <div className="text-center">
+              <p className="text-slate-400 text-[9px] uppercase font-bold mb-0.5">Multiplier</p>
+              <p className="text-accent font-black text-3xl leading-none">{multiplier.toFixed(3)}</p>
+            </div>
+            <div className="w-px bg-white/10" />
+            <div className="text-center">
+              <p className="text-slate-400 text-[9px] uppercase font-bold mb-0.5">Angle</p>
+              <p className="text-white font-black text-3xl leading-none">{angleForRise(currentPitch).toFixed(1)}°</p>
+            </div>
+          </div>
+
+          {/* Tappable pitch grid */}
+          <div>
+            <p className="text-slate-500 text-[9px] uppercase font-bold mb-1.5 text-center">
+              {manualPitch ? 'Tap again to return to auto' : 'Tap any pitch to select manually'}
+            </p>
+            <div className="grid grid-cols-5 gap-1">
+              {PITCHES.map((r) => {
+                const isSelected = r === currentPitch;
+                const isManual = r === manualPitch;
+                return (
+                  <button
+                    key={r}
+                    onClick={() => handlePitchTap(r)}
+                    className={`rounded-lg py-1.5 px-1 text-center transition-colors active:scale-95 ${
+                      isSelected
+                        ? isManual
+                          ? 'bg-blue-500 text-white'
+                          : 'bg-accent text-white'
+                        : 'bg-white/5 text-slate-400'
+                    }`}
+                  >
+                    <p className="text-[10px] font-bold">{r}/12</p>
+                    <p className="text-[8px] opacity-70">{multiplierForRise(r).toFixed(3)}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Lock button */}
           <button
-            onClick={requestMotionPermission}
-            className="w-full py-3 bg-accent text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
+            onClick={handleLock}
+            className={`w-full py-3 rounded-2xl font-black text-sm transition-colors active:scale-95 ${
+              locked ? 'bg-accent text-white' : 'bg-white/10 text-white'
+            }`}
           >
-            Enable Motion Sensor
+            {locked ? '🔒 Locked — Tap to Unlock' : 'Lock Reading'}
           </button>
-        )}
-        {permissionError && (
-          <p className="text-amber-400 text-xs text-center">{permissionError}</p>
-        )}
-
-        {/* Main readout */}
-        <div className="flex items-stretch justify-around">
-          <div className="text-center">
-            <p className="text-slate-400 text-[10px] uppercase font-bold mb-1">Pitch</p>
-            <p className="text-white font-black" style={{ fontSize: 44, lineHeight: 1 }}>
-              {currentPitch}/12
-            </p>
-          </div>
-          <div className="w-px bg-white/10" />
-          <div className="text-center">
-            <p className="text-slate-400 text-[10px] uppercase font-bold mb-1">Multiplier</p>
-            <p className="text-accent font-black" style={{ fontSize: 44, lineHeight: 1 }}>
-              {multiplier.toFixed(3)}
-            </p>
-          </div>
-          <div className="w-px bg-white/10" />
-          <div className="text-center">
-            <p className="text-slate-400 text-[10px] uppercase font-bold mb-1">Angle</p>
-            <p className="text-white font-black" style={{ fontSize: 44, lineHeight: 1 }}>
-              {angleForRise(currentPitch).toFixed(1)}°
-            </p>
-          </div>
         </div>
-
-        {/* Tappable pitch grid — tap to manually select; tap again to clear */}
-        <div>
-          <p className="text-slate-500 text-[9px] uppercase font-bold mb-2 text-center">
-            {manualPitch ? 'Tap again to return to auto' : 'Tap any pitch to select manually'}
-          </p>
-          <div className="grid grid-cols-5 gap-1.5">
-            {PITCHES.map((r) => {
-              const isSelected = r === currentPitch;
-              const isManual = r === manualPitch;
-              return (
-                <button
-                  key={r}
-                  onClick={() => handlePitchTap(r)}
-                  className={`rounded-lg p-2 text-center transition-colors active:scale-95 ${
-                    isSelected
-                      ? isManual
-                        ? 'bg-blue-500 text-white'
-                        : 'bg-accent text-white'
-                      : 'bg-white/5 text-slate-400'
-                  }`}
-                >
-                  <p className="text-[10px] font-bold">{r}/12</p>
-                  <p className="text-[9px] opacity-70">{multiplierForRise(r).toFixed(3)}</p>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Lock button */}
-        <button
-          onClick={handleLock}
-          className={`w-full py-4 rounded-2xl font-black text-sm transition-colors active:scale-95 ${
-            locked ? 'bg-accent text-white' : 'bg-white/10 text-white'
-          }`}
-        >
-          {locked ? '🔒 Locked — Tap to Unlock' : 'Lock Reading'}
-        </button>
       </div>
     </div>
   );

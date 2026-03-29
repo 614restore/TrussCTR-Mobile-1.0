@@ -23,10 +23,13 @@ export default function CalendarPage() {
   const labelParam = searchParams.get('label') || 'Event';
   const decodedLabel = decodeURIComponent(labelParam);
 
-  // When scheduling a next step, show ALL events on the calendar so you
-  // can spot conflicts. Keep the original contactId for saving and return nav.
-  const displayContactFilter = actionParam === 'schedule' ? null : contactId;
+  // Always load ALL events — the calendar always shows the full company schedule.
+  // contactId is used only for color-coding (green = this customer, blue = others)
+  // and for saving when action=schedule.
+  const displayContactFilter = null;
   const saveContactId = contactId;
+  // The "featured" contact whose events are highlighted green
+  const highlightContactId = contactId;
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -40,13 +43,20 @@ export default function CalendarPage() {
   const [eventNotes, setEventNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Auto-open the sheet when navigated here with action=schedule
-  useEffect(() => {
-    if (actionParam === 'schedule' && saveContactId) {
-      setSheetOpen(true);
-    }
-  }, [actionParam, saveContactId]);
+  // Reschedule sheet state
+  const [rescheduleEvent, setRescheduleEvent] = useState<PipelineEvent | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState('');
+  const [rescheduleTime, setRescheduleTime] = useState('');
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
+  const [rescheduleSavedOk, setRescheduleSavedOk] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+
+  // When navigated here with action=schedule, do NOT auto-open the sheet.
+  // The user needs to see all calendar events first, then tap a day to pick a
+  // date, then hit Add. A scheduling banner is shown instead (see JSX below).
 
   // Keep selected date in sync with the date picker in the sheet
   useEffect(() => {
@@ -60,14 +70,32 @@ export default function CalendarPage() {
   const fetchEvents = async () => {
     if (!profile?.company_id) return;
     setLoading(true);
+    setLoadError(null);
     try {
-      const [{ data: contacts, error: contactError }, { data: workOrders, error: workOrderError }] = await Promise.all([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any;
+      const [
+        { data: contacts, error: contactError },
+        { data: workOrders, error: workOrderError },
+        { data: appointments, error: appointmentError },
+      ] = await Promise.all([
         supabase.from('contacts').select('*').eq('company_id', profile.company_id),
         supabase.from('work_orders').select('*').eq('company_id', profile.company_id).order('scheduled_date', { ascending: true }),
+        db.from('appointments').select('*').eq('company_id', profile.company_id),
       ]);
 
       if (contactError) throw contactError;
       if (workOrderError) throw workOrderError;
+
+      // Diagnostic — visible in Xcode console so we can confirm the table exists and data is returned
+      if (appointmentError) {
+        console.error('[Calendar] appointments query error:', JSON.stringify(appointmentError));
+      } else {
+        console.log(`[Calendar] appointments fetched: ${(appointments || []).length} rows for company_id=${profile.company_id}`);
+        if ((appointments || []).length > 0) {
+          console.log('[Calendar] first appointment sample:', JSON.stringify((appointments as any[])[0]));
+        }
+      }
 
       const workOrderRows = (workOrders || []) as WorkOrderRow[];
       const contactRows = (contacts || []) as ContactRow[];
@@ -78,12 +106,68 @@ export default function CalendarPage() {
         workOrdersByContact.set(order.contact_id, current);
       }
 
+      // Build a contact lookup map for appointment display
+      const contactMap = new Map<string, ContactRow>();
+      for (const c of contactRows) {
+        contactMap.set(c.id, c);
+      }
+
       const nextEvents = contactRows
         .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
         .filter((event) => (displayContactFilter ? event.contactId === displayContactFilter : true))
         .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
 
-      setEvents(nextEvents);
+      // Convert appointments into PipelineEvent objects
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const aptRows = ((appointments || []) as any[]).filter((apt) => apt.status !== 'cancelled');
+      const appointmentEvents: PipelineEvent[] = aptRows
+        .filter((apt) => !displayContactFilter || apt.contact_id === displayContactFilter)
+        .map((apt) => {
+          const contactRow = contactMap.get(apt.contact_id);
+          const contactName = contactRow
+            ? `${(contactRow as any).first_name || ''} ${(contactRow as any).last_name || ''}`.trim()
+            : 'Unknown Contact';
+          const location = contactRow ? (contactRow as any).address || '' : '';
+
+          let eventType: PipelineEvent['type'] = 'inspection';
+          if (apt.type === 'inspection' || apt.type === 'damage_assessment') {
+            eventType = 'inspection';
+          } else if (apt.type === 'build' || apt.type === 'construction') {
+            eventType = 'build';
+          }
+
+          // Build a safe ISO datetime — apt.time may be "HH:mm", "HH:mm:ss", or null
+          const timeStr = apt.time
+            ? apt.time.length === 5   // "HH:mm"
+              ? `${apt.time}:00`
+              : apt.time              // already "HH:mm:ss"
+            : '09:00:00';             // fallback when time is missing
+
+          return {
+            id: `apt-${apt.id}`,
+            contactId: apt.contact_id,
+            contactName,
+            title: apt.title || 'Appointment',
+            date: `${apt.date}T${timeStr}`,
+            type: eventType,
+            location: apt.location || location,
+            crew: apt.assigned_to || null,   // required by PipelineEvent
+            source: 'schedule',              // required by PipelineEvent
+          } as PipelineEvent;
+        });
+
+      // Merge pipeline events and appointment events, deduplicate by id, then sort
+      const existingIds = new Set(nextEvents.map((e) => e.id));
+      const merged = [...nextEvents];
+      for (const aptEvent of appointmentEvents) {
+        if (!existingIds.has(aptEvent.id)) {
+          merged.push(aptEvent);
+          existingIds.add(aptEvent.id);
+        }
+      }
+      merged.sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
+
+      setEvents(merged);
 
       if (!actionParam) {
         const firstUpcoming = getUpcomingPipelineEvents(nextEvents)[0];
@@ -95,6 +179,8 @@ export default function CalendarPage() {
       }
     } catch (err) {
       console.error('Error fetching calendar events:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setLoadError(`Unable to load calendar events. ${message}`);
     } finally {
       setLoading(false);
     }
@@ -110,11 +196,35 @@ export default function CalendarPage() {
   }, [profile?.company_id, loadingAuth, displayContactFilter]);
 
   const handleSaveEvent = async () => {
-    if (!saveContactId || !profile?.company_id) return;
+    if (!saveContactId || !profile?.company_id) {
+      setSaveError('Missing customer context. Open this flow from a customer profile and try again.');
+      return;
+    }
+    if (!eventDate || !eventTime) {
+      setSaveError('Date and time are required.');
+      return;
+    }
+
+    const parsedDateTime = new Date(`${eventDate}T${eventTime}`);
+    if (Number.isNaN(parsedDateTime.getTime())) {
+      setSaveError('Selected date/time is invalid. Please choose a valid schedule slot.');
+      return;
+    }
+
+    setSaveError(null);
     setSaving(true);
 
+    // Helper: race any Supabase promise against a 15-second timeout
+    const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('Save timed out — check your connection and try again.')), 15000)
+        ),
+      ]);
+
     try {
-      const isoDateTime = new Date(eventDate + 'T' + eventTime).toISOString();
+      const isoDateTime = parsedDateTime.toISOString();
       const isMilestone = MILESTONE_TYPES.includes(nextStepParam as ContactMilestoneId);
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -122,11 +232,9 @@ export default function CalendarPage() {
 
       if (isMilestone) {
         // Save as a contact schedule milestone (stored in notes field)
-        const { data: contactData, error: fetchErr } = await db
-          .from('contacts')
-          .select('notes')
-          .eq('id', saveContactId)
-          .single();
+        const { data: contactData, error: fetchErr } = await withTimeout<any>(
+          db.from('contacts').select('notes').eq('id', saveContactId).single()
+        );
 
         if (fetchErr) throw fetchErr;
         if (!contactData) throw new Error('Contact not found');
@@ -137,24 +245,23 @@ export default function CalendarPage() {
         const updated = updateScheduleMilestone(schedule, nextStepParam as ContactMilestoneId, { date: isoDateTime });
         const newNotes = serializeContactSchedule(updated, eventNotes || plainNotes);
 
-        const { error: updateErr } = await db
-          .from('contacts')
-          .update({ notes: newNotes })
-          .eq('id', saveContactId);
+        const { error: updateErr } = await withTimeout<any>(
+          db.from('contacts').update({ notes: newNotes }).eq('id', saveContactId)
+        );
 
         if (updateErr) throw updateErr;
       } else {
         // Save as a work order
-        const { error: insertErr } = await db
-          .from('work_orders')
-          .insert({
+        const { error: insertErr } = await withTimeout<any>(
+          db.from('work_orders').insert({
             contact_id: saveContactId,
             company_id: profile.company_id,
             title: decodedLabel,
             scheduled_date: isoDateTime,
             notes: eventNotes || null,
             status: 'scheduled',
-          });
+          })
+        );
 
         if (insertErr) throw insertErr;
       }
@@ -184,6 +291,7 @@ export default function CalendarPage() {
       }
 
       setSavedOk(true);
+      setSaveError(null);
       await fetchEvents();
 
       // Close sheet and navigate back to contact after brief success flash
@@ -194,8 +302,69 @@ export default function CalendarPage() {
       }, 1200);
     } catch (err) {
       console.error('Failed to save event:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      setSaveError(`Save failed. ${message}`);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleReschedule = async () => {
+    if (!rescheduleEvent || !rescheduleDate || !rescheduleTime) return;
+    const parsedDT = new Date(`${rescheduleDate}T${rescheduleTime}`);
+    if (Number.isNaN(parsedDT.getTime())) {
+      setRescheduleError('Invalid date/time. Please try again.');
+      return;
+    }
+    setRescheduleError(null);
+    setRescheduleSaving(true);
+
+    const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
+      Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+          setTimeout(() => reject(new Error('Save timed out — check your connection and try again.')), 15000)
+        ),
+      ]);
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any;
+      const newISO = parsedDT.toISOString();
+
+      if (rescheduleEvent.id.startsWith('apt-')) {
+        // appointments table — store date and time separately
+        const aptId = rescheduleEvent.id.replace('apt-', '');
+        const timeStr = `${rescheduleTime}:00`;
+        const { error } = await withTimeout<any>(db.from('appointments').update({ date: rescheduleDate, time: timeStr }).eq('id', aptId));
+        if (error) throw error;
+      } else if (rescheduleEvent.source === 'work_order') {
+        // work_orders table — single ISO datetime column
+        const { error } = await withTimeout<any>(db.from('work_orders').update({ scheduled_date: newISO }).eq('id', rescheduleEvent.id));
+        if (error) throw error;
+      } else {
+        // schedule source — milestone stored in contact notes
+        const milestoneId = rescheduleEvent.type as ContactMilestoneId;
+        const { data: contactData, error: fetchErr } = await withTimeout<any>(db.from('contacts').select('notes').eq('id', rescheduleEvent.contactId).single());
+        if (fetchErr) throw fetchErr;
+        const { schedule, plainNotes } = parseContactSchedule((contactData as { notes: string | null }).notes);
+        const updated = updateScheduleMilestone(schedule, milestoneId, { date: newISO });
+        const newNotes = serializeContactSchedule(updated, plainNotes);
+        const { error: updateErr } = await withTimeout<any>(db.from('contacts').update({ notes: newNotes }).eq('id', rescheduleEvent.contactId));
+        if (updateErr) throw updateErr;
+      }
+
+      setRescheduleSavedOk(true);
+      await fetchEvents();
+      setTimeout(() => {
+        setRescheduleSavedOk(false);
+        setRescheduleEvent(null);
+      }, 1200);
+    } catch (err) {
+      console.error('Reschedule failed:', err);
+      setRescheduleError(err instanceof Error ? err.message : 'Reschedule failed. Please try again.');
+    } finally {
+      setRescheduleSaving(false);
     }
   };
 
@@ -250,7 +419,15 @@ export default function CalendarPage() {
         {calendarDays.map((day, i) => {
           const isSelected = isSameDay(day, selectedDate);
           const isCurrentMonth = isSameMonth(day, monthStart);
-          const hasEvent = events.some((event) => isSameDay(parseISO(event.date), day));
+          const dayEvents = events.filter((event) => isSameDay(parseISO(event.date), day));
+          const hasHighlight = highlightContactId
+            ? dayEvents.some((e) => e.contactId === highlightContactId)
+            : false;
+          // Count distinct other appointments (capped at 3 dots max)
+          const otherCount = Math.min(
+            dayEvents.filter((e) => !highlightContactId || e.contactId !== highlightContactId).length,
+            3
+          );
 
           return (
             <div
@@ -265,8 +442,17 @@ export default function CalendarPage() {
               }`}
             >
               <span className="text-sm font-bold">{format(day, 'd')}</span>
-              {hasEvent && !isSelected && (
-                <div className="absolute bottom-2 h-1.5 w-1.5 rounded-full bg-accent" />
+              {!isSelected && (hasHighlight || otherCount > 0) && (
+                <div className="absolute bottom-2 flex gap-0.5 items-center">
+                  {/* Green dot always first when this customer has an event */}
+                  {hasHighlight && (
+                    <div className="h-2 w-2 rounded-full bg-green-500" />
+                  )}
+                  {/* One blue dot per other appointment, up to 3 */}
+                  {Array.from({ length: otherCount }).map((_, idx) => (
+                    <div key={idx} className="h-1.5 w-1.5 rounded-full bg-blue-400" />
+                  ))}
+                </div>
               )}
             </div>
           );
@@ -293,9 +479,46 @@ export default function CalendarPage() {
     <div className="p-6 space-y-8">
       {renderHeader()}
 
+      {/* Scheduling banner — shown when navigated here from a contact */}
+      {actionParam === 'schedule' && saveContactId && (
+        <div className="rounded-2xl bg-accent/10 border border-accent/20 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-black text-accent uppercase tracking-widest">Scheduling Mode</p>
+            <p className="text-sm font-semibold text-primary mt-0.5 truncate">
+              Tap a date on the calendar, then tap <span className="text-accent font-black">+ Add</span> to save.
+            </p>
+          </div>
+          <button
+            onClick={() => navigate(`/contacts/${saveContactId}`)}
+            className="shrink-0 text-xs font-bold text-slate-500 bg-white rounded-xl px-3 py-2 border border-slate-200 active:scale-95 transition-transform"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+          <p className="text-xs font-bold uppercase tracking-widest text-red-600">Load Error</p>
+          <p className="mt-1 text-sm text-red-700">{loadError}</p>
+        </div>
+      )}
+
       <div className="card p-4">
         {renderDays()}
         {renderCells()}
+        {highlightContactId && (
+          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-green-500" />
+              <span className="text-[10px] font-bold text-slate-500">This Customer</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="h-2 w-2 rounded-full bg-blue-400" />
+              <span className="text-[10px] font-bold text-slate-500">Other Appointments</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">
@@ -313,7 +536,10 @@ export default function CalendarPage() {
               </button>
             )}
             <button
-              onClick={() => setSheetOpen(true)}
+              onClick={() => {
+                setSaveError(null);
+                setSheetOpen(true);
+              }}
               className="flex items-center gap-1 bg-accent text-white text-xs font-bold px-3 py-1.5 rounded-xl active:scale-95 transition-transform"
             >
               <Plus size={13} /> Add
@@ -323,17 +549,33 @@ export default function CalendarPage() {
 
         <div className="space-y-3">
           {filteredEvents.length > 0 ? (
-            filteredEvents.map((event) => (
+            filteredEvents.map((event) => {
+              const isHighlighted = highlightContactId && event.contactId === highlightContactId;
+              return (
               <button
                 key={event.id}
-                onClick={() => navigate(`/contacts/${event.contactId}`)}
-                className="card w-full p-4 text-left active:bg-slate-50 transition-colors"
+                onClick={() => {
+                  const d = parseISO(event.date);
+                  setRescheduleEvent(event);
+                  setRescheduleDate(format(d, 'yyyy-MM-dd'));
+                  setRescheduleTime(format(d, 'HH:mm'));
+                  setRescheduleError(null);
+                  setRescheduleSavedOk(false);
+                }}
+                className={`card w-full p-4 text-left active:bg-slate-50 transition-colors border-l-4 ${
+                  isHighlighted ? 'border-l-green-500' : highlightContactId ? 'border-l-blue-400' : 'border-l-transparent'
+                }`}
               >
                 <div className="flex gap-4">
-                  <div className={`w-1 rounded-full ${event.type === 'inspection' ? 'bg-amber-500' : event.type === 'build' ? 'bg-teal-500' : 'bg-primary'}`} />
+                  <div className={`w-1 rounded-full ${isHighlighted ? 'bg-green-500' : event.type === 'inspection' ? 'bg-amber-500' : event.type === 'build' ? 'bg-teal-500' : 'bg-blue-400'}`} />
                   <div className="flex-1 space-y-2">
                     <div className="flex justify-between items-start gap-3">
-                      <h4 className="font-bold text-primary text-sm">{event.title}</h4>
+                      <div>
+                        <h4 className="font-bold text-primary text-sm">{event.title}</h4>
+                        {isHighlighted && (
+                          <span className="text-[9px] font-black uppercase tracking-widest text-green-600">This Customer</span>
+                        )}
+                      </div>
                       <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
                         <Clock size={10} /> {format(parseISO(event.date), 'p')}
                       </span>
@@ -357,7 +599,8 @@ export default function CalendarPage() {
                   </div>
                 </div>
               </button>
-            ))
+              );
+            })
           ) : (
             <div className="card p-8 flex flex-col items-center justify-center text-center space-y-2 border-2 border-dashed border-slate-200 bg-transparent shadow-none">
               <CalendarIcon size={32} className="text-slate-200" />
@@ -366,6 +609,109 @@ export default function CalendarPage() {
           )}
         </div>
       </div>
+
+      {/* Reschedule Bottom Sheet */}
+      {rescheduleEvent && (
+        <div className="fixed inset-0 z-[70] flex flex-col justify-end">
+          <div className="absolute inset-0 bg-black/40" onClick={() => setRescheduleEvent(null)} />
+          <div className="relative flex max-h-[75vh] min-h-0 flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl">
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 w-10 h-1 bg-slate-200 rounded-full" />
+
+            {/* Fixed header — always visible, save button lives here */}
+            <div className="shrink-0 px-6 pt-8 pb-4 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Reschedule</p>
+                  <h2 className="text-xl font-black text-primary truncate">{rescheduleEvent.title}</h2>
+                  <p className="text-sm text-slate-500 mt-0.5 truncate">{rescheduleEvent.contactName}</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleReschedule}
+                    disabled={rescheduleSaving || rescheduleSavedOk || !rescheduleDate || !rescheduleTime}
+                    className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5 ${
+                      rescheduleSavedOk ? 'bg-green-500 text-white' : 'bg-accent text-white'
+                    }`}
+                  >
+                    {rescheduleSavedOk ? (
+                      <><Check size={13} /> Saved</>
+                    ) : rescheduleSaving ? (
+                      <div className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      'Save'
+                    )}
+                  </button>
+                  <button
+                    onClick={() => setRescheduleEvent(null)}
+                    className="p-2 rounded-xl bg-slate-100 active:scale-95 transition-transform"
+                  >
+                    <X size={18} className="text-slate-500" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Scrollable body */}
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 pt-5"
+              style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
+
+              {rescheduleError && (
+                <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-red-600">Error</p>
+                  <p className="mt-1 text-sm text-red-700">{rescheduleError}</p>
+                </div>
+              )}
+
+              {/* Date */}
+              <div className="space-y-1.5 mb-5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">New Date</label>
+                <input
+                  type="date"
+                  value={rescheduleDate}
+                  onChange={(e) => { setRescheduleError(null); setRescheduleDate(e.target.value); }}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+
+              {/* Time */}
+              <div className="space-y-1.5 mb-6">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">New Time</label>
+                <input
+                  type="time"
+                  value={rescheduleTime}
+                  onChange={(e) => { setRescheduleError(null); setRescheduleTime(e.target.value); }}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+
+              {/* Large save button in scroll area — always reachable */}
+              <button
+                onClick={handleReschedule}
+                disabled={rescheduleSaving || rescheduleSavedOk || !rescheduleDate || !rescheduleTime}
+                className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 mb-4 ${
+                  rescheduleSavedOk ? 'bg-green-500 text-white' : 'bg-accent text-white'
+                }`}
+              >
+                {rescheduleSavedOk ? (
+                  <><Check size={16} /> Rescheduled!</>
+                ) : rescheduleSaving ? (
+                  <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                ) : (
+                  'Save New Time'
+                )}
+              </button>
+
+              {/* Go to Contact link */}
+              <button
+                onClick={() => { setRescheduleEvent(null); navigate(`/contacts/${rescheduleEvent.contactId}`); }}
+                className="w-full text-center text-sm font-bold text-accent py-2"
+              >
+                Go to {rescheduleEvent.contactName}'s Profile →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Event Bottom Sheet */}
       {sheetOpen && (
@@ -393,7 +739,7 @@ export default function CalendarPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleSaveEvent}
-                    disabled={saving || savedOk || !eventDate}
+                    disabled={saving || savedOk || !eventDate || !eventTime}
                     className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest transition-all active:scale-95 ${
                       savedOk
                         ? 'bg-green-500 text-white'
@@ -403,7 +749,10 @@ export default function CalendarPage() {
                     {savedOk ? 'Saved' : saving ? 'Saving...' : 'Save'}
                   </button>
                   <button
-                    onClick={() => setSheetOpen(false)}
+                    onClick={() => {
+                      setSaveError(null);
+                      setSheetOpen(false);
+                    }}
                     className="p-2 rounded-xl bg-slate-100 active:scale-95 transition-transform"
                   >
                     <X size={18} className="text-slate-500" />
@@ -411,13 +760,23 @@ export default function CalendarPage() {
                 </div>
               </div>
 
+              {saveError && (
+                <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-red-600">Save Error</p>
+                  <p className="mt-1 text-sm text-red-700">{saveError}</p>
+                </div>
+              )}
+
               {/* Date */}
               <div className="mt-5 space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Date</label>
                 <input
                   type="date"
                   value={eventDate}
-                  onChange={(e) => setEventDate(e.target.value)}
+                  onChange={(e) => {
+                    setSaveError(null);
+                    setEventDate(e.target.value);
+                  }}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
@@ -428,7 +787,10 @@ export default function CalendarPage() {
                 <input
                   type="time"
                   value={eventTime}
-                  onChange={(e) => setEventTime(e.target.value)}
+                  onChange={(e) => {
+                    setSaveError(null);
+                    setEventTime(e.target.value);
+                  }}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
@@ -438,12 +800,61 @@ export default function CalendarPage() {
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Notes / Crew (optional)</label>
                 <textarea
                   value={eventNotes}
-                  onChange={(e) => setEventNotes(e.target.value)}
+                  onChange={(e) => {
+                    setSaveError(null);
+                    setEventNotes(e.target.value);
+                  }}
                   placeholder="Add crew name, address notes, or instructions…"
                   rows={3}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
                 />
               </div>
+
+              {/* Upcoming Appointments — visible inside the sheet so users can spot conflicts */}
+              {(() => {
+                const now = new Date();
+                now.setHours(0, 0, 0, 0);
+                const upcoming = events
+                  .filter((e) => new Date(e.date) >= now)
+                  .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+                  .slice(0, 15);
+                if (upcoming.length === 0) return null;
+                return (
+                  <div className="mt-6 space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400">All Upcoming Appointments</p>
+                    <div className="space-y-2">
+                      {upcoming.map((event) => (
+                        <div key={event.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
+                          <div
+                            className={`w-1 self-stretch rounded-full ${
+                              event.type === 'inspection'
+                                ? 'bg-amber-500'
+                                : event.type === 'build'
+                                ? 'bg-teal-500'
+                                : 'bg-primary'
+                            }`}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-primary truncate">{event.contactName}</p>
+                            <p className="text-[11px] text-slate-500 truncate">{event.title}</p>
+                            {event.location ? (
+                              <p className="text-[10px] text-slate-400 truncate">{event.location}</p>
+                            ) : null}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-[11px] font-bold text-slate-600">
+                              {format(parseISO(event.date), 'MMM d')}
+                            </p>
+                            <p className="text-[10px] text-slate-400">
+                              {format(parseISO(event.date), 'p')}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div
@@ -452,7 +863,7 @@ export default function CalendarPage() {
             >
               <button
                 onClick={handleSaveEvent}
-                disabled={saving || savedOk || !eventDate}
+                disabled={saving || savedOk || !eventDate || !eventTime}
                 className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${
                   savedOk
                     ? 'bg-green-500 text-white'

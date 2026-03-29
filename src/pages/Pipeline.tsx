@@ -8,7 +8,8 @@ import { formatCurrency, getStatusColor } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
-import { getPipelineStageLabel, normalizePipelineStatus, toPipelineBoardStage } from '../lib/pipelineStages';
+import { getPipelineStageLabel, toPipelineBoardStage, normalizePipelineStatus } from '../lib/pipelineStages';
+import { buildDocumentDisplayUrl } from '../lib/documentAccess';
 
 type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
 
@@ -35,6 +36,7 @@ export default function Pipeline() {
   const [searchQuery, setSearchQuery] = useState('');
   const [contacts, setContacts] = useState<any[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [contactPhotoMap, setContactPhotoMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [quickMenuContactId, setQuickMenuContactId] = useState<string | null>(null);
   const sectionScrollerRef = useRef<HTMLDivElement | null>(null);
@@ -102,18 +104,46 @@ export default function Pipeline() {
 
   const fetchContacts = async () => {
     try {
-      const [{ data, error }, { data: apptData }] = await Promise.all([
+      const [{ data, error }, { data: apptData }, { data: photoDocs }] = await Promise.all([
         supabase.from('contacts').select('*').eq('company_id', profile.company_id).order('updated_at', { ascending: false }),
         supabase.from('appointments').select('id,contact_id,date,time,title,status').eq('company_id', profile.company_id).eq('status', 'scheduled'),
+        supabase.from('documents').select('*').eq('company_id', profile.company_id).eq('type', 'photo'),
       ]);
       if (error) throw error;
       setContacts(data || []);
       setAppointments(apptData || []);
+      const photoMap: Record<string, string> = {};
+      const sortedPhotos: any[] = [...((photoDocs as any[]) || [])].sort((a: any, b: any) => {
+        const starDelta = Number(Boolean(b.starred)) - Number(Boolean(a.starred));
+        if (starDelta !== 0) return starDelta;
+        return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      });
+      for (const doc of sortedPhotos) {
+        if (photoMap[doc.contact_id]) continue;
+        photoMap[doc.contact_id] = await buildDocumentDisplayUrl(doc.url);
+      }
+      setContactPhotoMap(photoMap);
     } catch (err) {
       console.error('Error fetching contacts:', err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const renderContactAvatar = (contact: any, className: string, textClass: string) => {
+    const photoUrl = contactPhotoMap[contact.id];
+    if (photoUrl) {
+      return (
+        <div className={`${className} overflow-hidden bg-slate-100`}>
+          <img src={photoUrl} alt={`${contact.first_name} ${contact.last_name}`} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+        </div>
+      );
+    }
+    return (
+      <div className={`${className} bg-slate-100 flex items-center justify-center text-primary font-bold ${textClass}`}>
+        {contact.first_name[0]}{contact.last_name[0]}
+      </div>
+    );
   };
 
   // Returns the next upcoming scheduled appointment for a contact
@@ -290,7 +320,7 @@ export default function Pipeline() {
             setCanScrollSectionsRight(node.scrollLeft + node.clientWidth < node.scrollWidth - 8);
           }}
           className="px-12 pb-1 overflow-x-auto no-scrollbar"
-          style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
+          style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}
         >
           <div className="flex gap-4 min-w-max">
             {pipelineSections.map((section) => {
@@ -321,7 +351,7 @@ export default function Pipeline() {
             ))}
           </div>
         ) : viewMode === 'kanban' ? (
-          <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x" style={{ touchAction: 'pan-y', overscrollBehaviorX: 'contain' }}>
+          <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x" style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}>
             {STAGES.map((stage) => {
               const stageContacts = filteredContacts.filter(c => stage.statuses.includes(normalizePipelineStatus(c.status)));
               return (
@@ -417,8 +447,14 @@ export default function Pipeline() {
 
                         <div className="pt-2 border-t border-slate-50 flex justify-between items-center">
                           <div className="flex items-center gap-1.5">
-                            <div className="h-5 w-5 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden">
-                              <User size={10} className="text-slate-400" />
+                            <div className="h-5 w-5 overflow-hidden rounded-full bg-slate-100">
+                              {contactPhotoMap[contact.id] ? (
+                                <img src={contactPhotoMap[contact.id]} alt="" className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center">
+                                  <User size={10} className="text-slate-400" />
+                                </div>
+                              )}
                             </div>
                             <span className="text-[10px] text-slate-400 font-medium">Assigned to Rep</span>
                           </div>
@@ -444,9 +480,7 @@ export default function Pipeline() {
                 onClick={() => navigate(`/contacts/${contact.id}`)}
                 className="card p-4 flex items-center gap-4 active:bg-slate-50 transition-colors"
               >
-                <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-primary font-bold">
-                  {contact.first_name[0]}{contact.last_name[0]}
-                </div>
+                {renderContactAvatar(contact, 'h-12 w-12 rounded-2xl', '')}
                 <div className="flex-1 min-w-0">
                   <h4 className="font-bold text-primary truncate">{contact.first_name} {contact.last_name}</h4>
                   <p className="text-xs text-slate-500 truncate">{contact.address}</p>
@@ -482,9 +516,7 @@ export default function Pipeline() {
               >
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-slate-100 flex items-center justify-center text-primary font-bold">
-                      {contact.first_name[0]}{contact.last_name[0]}
-                    </div>
+                    {renderContactAvatar(contact, 'h-10 w-10 rounded-full', 'text-sm')}
                     <div>
                       <h4 className="font-bold text-primary">{contact.first_name} {contact.last_name}</h4>
                       <p className="text-xs text-slate-500">{contact.address}</p>

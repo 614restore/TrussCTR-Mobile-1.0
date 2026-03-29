@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, ExternalLink, FileText, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Download, ExternalLink, FileText, RefreshCw, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { fetchDocumentObjectUrl, resolveDocumentSignedUrl } from '../lib/documentAccess';
 
@@ -23,6 +23,8 @@ export default function DocumentViewer() {
   });
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const isPdf = useMemo(() => {
     return (
@@ -100,6 +102,42 @@ export default function DocumentViewer() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!documentRecord) return;
+    setDeleting(true);
+    try {
+      // Parse bucket + path from stored URL
+      const parseBucketAndPath = (url: string): { bucket: string; path: string } | null => {
+        try {
+          const parsed = new URL(url);
+          const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+          const b = hashParams.get('bucket');
+          const p = hashParams.get('path');
+          if (b && p) return { bucket: b, path: decodeURIComponent(p.replace(/^\/+/, '').trim()) };
+          for (const bkt of ['documents', 'projectceo-photos']) {
+            const marker = `/object/public/${bkt}/`;
+            const idx = parsed.pathname.indexOf(marker);
+            if (idx !== -1) return { bucket: bkt, path: decodeURIComponent(parsed.pathname.slice(idx + marker.length).split('?')[0]) };
+          }
+        } catch { /* ignore */ }
+        return null;
+      };
+
+      const metadata = parseBucketAndPath(documentRecord.url);
+      if (metadata) {
+        await supabase.storage.from(metadata.bucket).remove([metadata.path]);
+      }
+      await supabase.from('documents').delete().eq('id', documentRecord.id);
+      navigate(-1);
+    } catch (err) {
+      console.error('[DocumentViewer] delete error:', err);
+      alert('Failed to delete. Please try again.');
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
       <nav className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-4 shadow-sm">
@@ -116,7 +154,7 @@ export default function DocumentViewer() {
             <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Saved Document</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => window.location.reload()}
@@ -131,6 +169,15 @@ export default function DocumentViewer() {
           >
             <ExternalLink size={18} />
           </button>
+          {documentRecord && (
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="rounded-full p-2 text-red-400 transition-colors hover:bg-red-50"
+            >
+              <Trash2 size={18} />
+            </button>
+          )}
         </div>
       </nav>
 
@@ -197,10 +244,47 @@ export default function DocumentViewer() {
               >
                 Open Outside App
               </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="rounded-2xl bg-red-50 border border-red-100 px-4 py-3 text-sm font-bold text-red-500"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           </div>
         ) : null}
       </div>
+
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6">
+          <div className="w-full max-w-xs rounded-3xl bg-white p-6 text-center shadow-2xl space-y-4">
+            <div className="w-14 h-14 bg-red-50 rounded-full flex items-center justify-center mx-auto">
+              <Trash2 size={26} className="text-red-500" />
+            </div>
+            <div>
+              <p className="font-black text-base text-primary">Delete this file?</p>
+              <p className="text-slate-400 text-sm mt-1">This cannot be undone.</p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="flex-1 bg-slate-100 text-primary font-bold py-3 rounded-2xl text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex-1 bg-red-500 text-white font-black py-3 rounded-2xl text-sm disabled:opacity-60"
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

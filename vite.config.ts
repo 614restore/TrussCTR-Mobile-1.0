@@ -21,5 +21,21 @@ export default defineConfig(({mode}) => {
       // Do not modify — file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Core React — cached separately, rarely changes
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            // Supabase is large (~120 kB) — split so it caches independently
+            'vendor-supabase': ['@supabase/supabase-js'],
+            // Capacitor core — small but split for clarity
+            'vendor-capacitor': ['@capacitor/core', '@capacitor/splash-screen'],
+          },
+        },
+      },
+      // Raise the warning threshold — html2pdf/html2canvas are intentionally large lazy chunks
+      chunkSizeWarningLimit: 1000,
+    },
   };
 });

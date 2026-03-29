@@ -15,6 +15,7 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		8BC98F1C2F6DA87700911100 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BC98F1B2F6DA87700911100 /* SceneDelegate.swift */; };
 		A1B2C3D4E5F6070800000002 /* Plugins/MultiShotCameraPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6070800000001 /* Plugins/MultiShotCameraPlugin.swift */; };
 		B1C2D3E4F506070800000004 /* Plugins/BridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F506070800000003 /* Plugins/BridgeViewController.swift */; };
 /* End PBXBuildFile section */
@@ -30,6 +31,7 @@
 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		8B070B682F6C4FDE0030FA51 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
+		8BC98F1B2F6DA87700911100 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
 		A1B2C3D4E5F6070800000001 /* Plugins/MultiShotCameraPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plugins/MultiShotCameraPlugin.swift; sourceTree = "<group>"; };
 		B1C2D3E4F506070800000003 /* Plugins/BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plugins/BridgeViewController.swift; sourceTree = "<group>"; };
@@ -50,6 +52,7 @@
 		504EC2FB1FED79650016851F = {
 			isa = PBXGroup;
 			children = (
+				8BC98F1B2F6DA87700911100 /* SceneDelegate.swift */,
 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
 				504EC3061FED79650016851F /* App */,
 				504EC3051FED79650016851F /* Products */,
@@ -166,6 +169,7 @@
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				A1B2C3D4E5F6070800000002 /* Plugins/MultiShotCameraPlugin.swift in Sources */,
 				B1C2D3E4F506070800000004 /* Plugins/BridgeViewController.swift in Sources */,
+				8BC98F1C2F6DA87700911100 /* SceneDelegate.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -91,6 +91,8 @@ export interface Database {
           url: string
           size: number
           uploaded_by: string
+          starred?: boolean | null
+          photo_notes?: string | null
           created_at: string
         }
         Insert: Omit<Database['public']['Tables']['documents']['Row'], 'id' | 'created_at'>
@@ -116,7 +118,6 @@ export interface Database {
           id: string
           company_id: string
           contact_id: string
-          assigned_to: string | null
           title: string
           items: Json
           subtotal: number

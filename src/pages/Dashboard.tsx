@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
-import { getPipelineStageLabel } from '../lib/pipelineStages';
+import { getPipelineStageLabel, normalizePipelineStatus, toPipelineBoardStage } from '../lib/pipelineStages';
 import type { Database } from '../types/supabase';
 
 const STAGE_COLORS: Record<string, string> = {
@@ -103,10 +103,14 @@ export default function Dashboard() {
       const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
       const pipelineValue = (contacts as any[]).reduce((sum, c) => sum + (c.project_value || 0), 0);
-      const openLeads = (contacts as any[]).filter(c => c.status === 'lead').length;
-      const jobsInProgress = (contacts as any[]).filter(c => c.status === 'in_progress').length;
+      const openLeads = (contacts as any[]).filter(c => normalizePipelineStatus(c.status) === 'lead').length;
+      const jobsInProgress = (contacts as any[]).filter(c => normalizePipelineStatus(c.status) === 'in_progress').length;
       const revenueMTD = (contacts as any[])
-        .filter(c => (c.status === 'paid' || c.status === 'completed') && new Date(c.updated_at) >= firstDayOfMonth)
+        .filter(c => {
+          const normalized = normalizePipelineStatus(c.status);
+          return (normalized === 'paid' || toPipelineBoardStage(normalized) === 'completed')
+            && new Date(c.updated_at) >= firstDayOfMonth;
+        })
         .reduce((sum, c) => sum + (c.project_value || 0), 0);
 
       setStats({ pipelineValue, openLeads, jobsInProgress, revenueMTD });
@@ -114,7 +118,7 @@ export default function Dashboard() {
       // Real stage counts for pipeline distribution
       const counts: Record<string, number> = {};
       PIPELINE_STAGES.forEach(s => {
-        counts[s.id] = (contacts as any[]).filter(c => c.status === s.id).length;
+        counts[s.id] = (contacts as any[]).filter(c => toPipelineBoardStage(c.status) === s.id).length;
       });
       setStageCounts(counts);
 

@@ -18,6 +18,21 @@ export type ContactScheduleData = {
 
 const SCHEDULE_PREFIX = '[TRUSSCTR_SCHEDULE]';
 
+function extractScheduleChunk(notes: string) {
+  const prefixIndex = notes.indexOf(SCHEDULE_PREFIX);
+  if (prefixIndex === -1) return null;
+
+  const start = prefixIndex + SCHEDULE_PREFIX.length;
+  const firstBreak = notes.indexOf('\n\n', start);
+  const scheduleChunk = firstBreak === -1 ? notes.slice(start) : notes.slice(start, firstBreak);
+  const plainNotes = firstBreak === -1 ? notes.slice(0, prefixIndex).trim() : `${notes.slice(0, prefixIndex)}${notes.slice(firstBreak + 2)}`.trim();
+
+  return {
+    scheduleChunk,
+    plainNotes,
+  };
+}
+
 export const DEFAULT_CONTACT_SCHEDULE: ContactScheduleData = {
   milestones: [
     { id: 'inspection', label: 'Inspection', date: null, completedAt: null },
@@ -36,32 +51,50 @@ export function parseContactSchedule(notes?: string | null) {
     };
   }
 
-  if (!notes.startsWith(SCHEDULE_PREFIX)) {
+  const extracted = extractScheduleChunk(notes);
+
+  if (!extracted) {
     return {
       schedule: DEFAULT_CONTACT_SCHEDULE,
       plainNotes: notes,
     };
   }
 
-  const firstBreak = notes.indexOf('\n\n');
-  const scheduleChunk = firstBreak === -1 ? notes.slice(SCHEDULE_PREFIX.length) : notes.slice(SCHEDULE_PREFIX.length, firstBreak);
-  const plainNotes = firstBreak === -1 ? '' : notes.slice(firstBreak + 2);
-
   try {
-    const parsed = JSON.parse(scheduleChunk) as ContactScheduleData;
+    const parsed = JSON.parse(extracted.scheduleChunk) as ContactScheduleData;
     const milestones = DEFAULT_CONTACT_SCHEDULE.milestones.map((defaultMilestone) => {
       const existing = parsed?.milestones?.find((item) => item.id === defaultMilestone.id);
       return existing ? { ...defaultMilestone, ...existing } : defaultMilestone;
     });
 
+    // Recursively strip nested schedule markers that may have been double-serialized
+    let cleanPlainNotes = extracted.plainNotes;
+    while (cleanPlainNotes.includes(SCHEDULE_PREFIX)) {
+      const inner = extractScheduleChunk(cleanPlainNotes);
+      if (!inner) {
+        cleanPlainNotes = cleanPlainNotes.replace(/\[TRUSSCTR_SCHEDULE\]\{[\s\S]*$/, '').trim();
+        break;
+      }
+      cleanPlainNotes = inner.plainNotes;
+    }
+
     return {
       schedule: { milestones },
-      plainNotes,
+      plainNotes: cleanPlainNotes,
     };
   } catch {
+    let cleanPlainNotes = extracted.plainNotes || notes.replace(SCHEDULE_PREFIX, '').trim();
+    while (cleanPlainNotes.includes(SCHEDULE_PREFIX)) {
+      const inner = extractScheduleChunk(cleanPlainNotes);
+      if (!inner) {
+        cleanPlainNotes = cleanPlainNotes.replace(/\[TRUSSCTR_SCHEDULE\]\{[\s\S]*$/, '').trim();
+        break;
+      }
+      cleanPlainNotes = inner.plainNotes;
+    }
     return {
       schedule: DEFAULT_CONTACT_SCHEDULE,
-      plainNotes: notes,
+      plainNotes: cleanPlainNotes,
     };
   }
 }

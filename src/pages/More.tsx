@@ -18,9 +18,9 @@ export default function More() {
   const handleSignOut = async () => {
     try {
       setIsSigningOut(true);
-      const { error } = await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw error;
-      navigate('/login');
+      navigate('/login', { replace: true });
     } catch (err) {
       console.error('Error signing out:', err);
       localStorage.clear();
@@ -155,38 +155,76 @@ export default function More() {
       };
       const badge = STATUS_BADGE[status] ?? { label: status, cls: 'bg-slate-400' };
 
+      const PLAN_ORDER = ['trial', 'starter', 'pro', 'business', 'scale'] as const;
+
       return (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowPlanModal(false)}>
-          <div className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-6" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-primary">Your Plan</h2>
+          <div
+            className="w-full max-w-lg rounded-t-3xl bg-white flex flex-col"
+            style={{ maxHeight: 'min(88vh, calc(100dvh - env(safe-area-inset-top) - 1rem))' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Fixed header */}
+            <div className="px-6 pt-6 pb-4 flex items-center justify-between shrink-0">
+              <div>
+                <h2 className="text-xl font-bold text-primary">Subscription Plans</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Your current plan is highlighted</p>
+              </div>
               <button onClick={() => setShowPlanModal(false)} className="p-2 text-slate-400 active:scale-90 transition-transform">
                 <X size={22} />
               </button>
             </div>
-            <div className="rounded-2xl border-2 border-primary bg-primary/5 p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-lg font-bold text-primary">TrussCTR {meta.label}</span>
-                  <p className="text-xs text-slate-400 mt-0.5">{meta.userLimit}</p>
-                </div>
-                <span className={`rounded-full ${badge.cls} px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white`}>{badge.label}</span>
-              </div>
-              <div className="space-y-2">
-                {meta.features.map(feature => (
-                  <div key={feature} className="flex items-center gap-3">
-                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-                    <span className="text-sm text-slate-600">{feature}</span>
+
+            {/* Scrollable plan list */}
+            <div className="flex-1 overflow-y-auto px-6 space-y-4 pb-4">
+              {PLAN_ORDER.map((planKey) => {
+                const planMeta = PLAN_META[planKey];
+                if (!planMeta) return null;
+                const isCurrent = planKey === rawPlan;
+                return (
+                  <div
+                    key={planKey}
+                    className={`rounded-2xl border-2 p-5 space-y-3 transition-all ${
+                      isCurrent
+                        ? 'border-primary bg-primary/5'
+                        : 'border-slate-100 bg-slate-50 opacity-80'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className={`text-base font-bold ${isCurrent ? 'text-primary' : 'text-slate-600'}`}>
+                          TrussCTR {planMeta.label}
+                        </span>
+                        <p className="text-xs text-slate-400 mt-0.5">{planMeta.userLimit}</p>
+                      </div>
+                      {isCurrent && (
+                        <span className={`rounded-full ${badge.cls} px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white shrink-0`}>
+                          {badge.label}
+                        </span>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      {planMeta.features.map(feature => (
+                        <div key={feature} className="flex items-center gap-2.5">
+                          <CheckCircle2 size={14} className={`shrink-0 ${isCurrent ? 'text-emerald-500' : 'text-slate-300'}`} />
+                          <span className={`text-sm ${isCurrent ? 'text-slate-600' : 'text-slate-400'}`}>{feature}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-            <p className="text-xs text-slate-400 text-center">
-              To upgrade or manage billing, visit{' '}
-              <span className="text-accent font-bold">trussctr.com</span>
-              {' '}or contact{' '}
-              <span className="text-accent font-bold">support@trussctr.com</span>
-            </p>
+
+            {/* Fixed footer */}
+            <div className="shrink-0 px-6 py-4 border-t border-slate-100" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
+              <p className="text-xs text-slate-400 text-center">
+                To upgrade or manage billing, visit{' '}
+                <span className="text-accent font-bold">trussctr.com</span>
+                {' '}or contact{' '}
+                <span className="text-accent font-bold">support@trussctr.com</span>
+              </p>
+            </div>
           </div>
         </div>
       );

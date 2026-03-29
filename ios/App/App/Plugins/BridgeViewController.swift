@@ -3,12 +3,10 @@ import Capacitor
 @objc(BridgeViewController)
 public class BridgeViewController: CAPBridgeViewController {
 
-    // capacitorDidLoad() is called after the Capacitor bridge is fully
-    // initialised and all npm plugins are registered. This is the correct
-    // lifecycle point to register inline (non-npm) plugins such as
-    // MultiShotCameraPlugin so that Capacitor.isPluginAvailable() always
-    // returns true on the JS side.
+    // With Capacitor 8, registerPluginType() is ignored when autoRegisterPlugins
+    // is enabled. Registering an explicit plugin instance ensures this inline
+    // app plugin is exported to JS alongside the package-based plugins.
     override public func capacitorDidLoad() {
-        bridge?.registerPluginType(MultiShotCameraPlugin.self)
+        bridge?.registerPluginInstance(MultiShotCameraPlugin())
     }
 }

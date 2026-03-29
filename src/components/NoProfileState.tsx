@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Building2, RefreshCw, LogOut, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
+import { useNavigate } from 'react-router-dom';
 
 export default function NoProfileState() {
+  const navigate = useNavigate();
   const { user, profile, refreshProfile } = useAuth();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -18,8 +20,9 @@ export default function NoProfileState() {
   const handleSignOut = async () => {
     try {
       setIsSigningOut(true);
-      const { error } = await supabase.auth.signOut();
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
       if (error) throw error;
+      navigate('/login', { replace: true });
     } catch (err) {
       console.error('Error signing out:', err);
       localStorage.clear();

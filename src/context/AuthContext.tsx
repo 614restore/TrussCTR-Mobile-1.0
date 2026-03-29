@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { SplashScreen } from '@capacitor/splash-screen';
 
 interface AuthContextType {
   session: any;
@@ -36,6 +37,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let isMounted = true;
 
+    // Hard timeout: always unblock the app within 1.5 seconds even if Supabase hangs.
+    // On native, the splash covers ~2s — this ensures the app never gets stuck behind
+    // a slow token refresh or network call.
+    const loadingTimeout = window.setTimeout(() => {
+      if (isMounted) {
+        console.warn('[Auth] Loading timeout — forcing app unblock');
+        setLoading(false);
+      }
+    }, 1500);
+
     const init = async () => {
       try {
         const { data, error } = await supabase.auth.getSession();
@@ -46,16 +57,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(session);
         setUser(session?.user ?? null);
 
+        // Unblock the app immediately — profile loads in background
+        setLoading(false);
+
         if (session?.user) {
           lastUserId.current = session.user.id;
-          await fetchProfile(session.user.id, session.user.email);
+          fetchProfile(session.user.id, session.user.email); // no await — background
         } else {
           setProfile(null);
-          setLoading(false);
         }
       } catch (err) {
         console.error('Auth init error:', err);
         if (isMounted) setLoading(false);
+      } finally {
+        window.clearTimeout(loadingTimeout);
       }
     };
 
@@ -93,6 +108,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         lastUserId.current = session.user.id;
         await fetchProfile(session.user.id, session.user.email);
       } else {
+        lastUserId.current = null;
+        isFetchingProfile.current = false;
         setProfile(null);
         setLoading(false);
       }
@@ -102,7 +119,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
       supabase.auth.getSession().then(async ({ data: { session } }) => {
-        if (!session?.user) return;
+        if (!session?.user) {
+          lastUserId.current = null;
+          isFetchingProfile.current = false;
+          setSession(null);
+          setUser(null);
+          setProfile(null);
+          return;
+        }
         setSession(session);
         setUser(session.user);
         setProfile(prev => {
@@ -118,6 +142,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       isMounted = false;
+      window.clearTimeout(loadingTimeout);
       subscription.unsubscribe();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
@@ -131,56 +156,36 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     try {
       const cleanEmail = email?.trim();
-      console.log('Fetching profile for:', { userId, cleanEmail });
 
-      const fetchById = async () => {
-        return await supabase
+      // Single query: fetch profile + company in one round trip via join
+      const tryFetch = async (filter: { field: string; value: string }) => {
+        return supabase
           .from('profiles')
-          .select('*')
-          .eq('id', userId)
+          .select('*, companies(*)')
+          .eq(filter.field, filter.value)
           .maybeSingle();
       };
 
-      let { data, error } = await fetchById();
+      let { data, error } = await tryFetch({ field: 'id', value: userId });
       if (error?.message?.includes('Lock was stolen')) {
         await new Promise((r) => setTimeout(r, 250));
-        ({ data, error } = await fetchById());
+        ({ data, error } = await tryFetch({ field: 'id', value: userId }));
       }
 
-      if (error) {
-        console.error('Error fetching from profiles by id:', error);
-      }
+      if (error) console.error('Error fetching profile by id:', error);
 
+      // Fallback: try by email if not found by id
       if (!data && cleanEmail) {
-        console.log('Profile not found by id, trying email in profiles...');
-        const fetchByEmail = async () => {
-          return await supabase
-            .from('profiles')
-            .select('*')
-            .eq('email', cleanEmail)
-            .maybeSingle();
-        };
-
-        let { data: emailData, error: emailError } = await fetchByEmail();
+        let { data: emailData, error: emailError } = await tryFetch({ field: 'email', value: cleanEmail });
         if (emailError?.message?.includes('Lock was stolen')) {
           await new Promise((r) => setTimeout(r, 250));
-          ({ data: emailData, error: emailError } = await fetchByEmail());
+          ({ data: emailData, error: emailError } = await tryFetch({ field: 'email', value: cleanEmail }));
         }
-
-        if (!emailError && emailData) {
-          data = emailData;
-        }
+        if (!emailError && emailData) data = emailData;
       }
 
       if (data) {
-        const profileData = data as any;
-        const { data: companyData } = await supabase
-          .from('companies')
-          .select('*')
-          .eq('id', profileData.company_id)
-          .maybeSingle();
-
-        setProfile(companyData ? { ...profileData, companies: companyData } : profileData);
+        setProfile(data as any);
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
@@ -189,6 +194,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
     }
   };
+
+  // Hide the native splash screen as soon as auth finishes loading
+  useEffect(() => {
+    if (!loading) {
+      SplashScreen.hide().catch(() => {/* web/non-native, ignore */});
+    }
+  }, [loading]);
 
   // Safety-net: if user is present but profile is null after loading,
   // schedule a recovery re-fetch. This covers any edge case the event handlers miss.
