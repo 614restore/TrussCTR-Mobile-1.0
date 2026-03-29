@@ -294,3 +294,67 @@ export async function fetchStormHistory(companyId: string): Promise<any[]> {
     return [];
   }
 }
+
+// ─── Live NOAA feed (on-demand, no threshold filter, no rate limit) ───────────
+
+export interface LiveNoaaEvent extends ParsedEvent {
+  distanceMiles: number | null;
+  isToday: boolean;
+}
+
+/**
+ * Fetch ALL current NOAA SPC events and annotate each with distance from the
+ * company's location.  No radius filter, no threshold filter — returns
+ * everything so the user can browse the full live feed on demand.
+ *
+ * Returns { events, fetchedAt } so the UI can show "last updated" time.
+ */
+export async function fetchLiveNoaaFeed(companyId: string): Promise<{
+  events: LiveNoaaEvent[];
+  fetchedAt: Date;
+}> {
+  const [allEvents, company] = await Promise.all([
+    fetchEventsFromEdgeFunction(),
+    supabase.from('companies').select('city, state, zip').eq('id', companyId).single(),
+  ]);
+
+  const geo = company.data
+    ? await geocodeAddress(
+        (company.data as any).city,
+        (company.data as any).state,
+        (company.data as any).zip,
+      )
+    : null;
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const annotated: LiveNoaaEvent[] = allEvents.map((ev) => {
+    const dist = geo
+      ? Math.round(distanceMiles(geo.lat, geo.lng, ev.lat, ev.lng) * 10) / 10
+      : null;
+    return {
+      ...ev,
+      distanceMiles: dist,
+      isToday: ev.eventDate === todayStr,
+    };
+  });
+
+  // Sort nearest first; nulls (no company location) fall to the bottom
+  annotated.sort((a, b) => {
+    if (a.distanceMiles === null && b.distanceMiles === null) return 0;
+    if (a.distanceMiles === null) return 1;
+    if (b.distanceMiles === null) return -1;
+    return a.distanceMiles - b.distanceMiles;
+  });
+
+  return { events: annotated, fetchedAt: new Date() };
+}
+
+/**
+ * Force a fresh NOAA storm check regardless of the 15-min rate limit.
+ * Intended for manual "Refresh" actions from the UI.
+ */
+export async function forceCheckForNoaaStorms(companyId: string): Promise<void> {
+  lastCheckEpoch = 0; // bypass rate limit
+  return checkForNoaaStorms(companyId);
+}
