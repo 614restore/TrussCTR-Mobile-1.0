@@ -1,21 +1,12 @@
 /**
  * NOAA SPC Storm Service
  *
- * Fetches verified storm reports from the NOAA Storm Prediction Center:
- *   https://www.spc.noaa.gov/climo/reports/today.csv
- *   https://www.spc.noaa.gov/climo/reports/yesterday.csv
+ * Fetches verified storm reports from the NOAA Storm Prediction Center via a
+ * Supabase Edge Function (supabase/functions/noaa-storms/index.ts).
  *
- * These are ground-truth post-storm reports (not forecasts), making them
- * the gold standard for roofing lead generation. Both hail (size in inches)
- * and damaging wind (mph) events are captured.
- *
- * CSV format — 3 sections, each starts with a header row:
- *   Wind:    Time, F_Scale, Speed,  Location, County, State, Lat, Lon, Comments
- *   Hail:    Time, Size,    Speed,  Location, County, State, Lat, Lon, Comments
- *   Tornado: Time, F_Scale, Speed,  Location, County, State, Lat, Lon, Comments
- *
- * Hail Size is encoded as hundredths of an inch (e.g. 100 = 1.00", 175 = 1.75").
- * Wind Speed is in mph.
+ * The Edge Function fetches and parses the SPC CSV server-side, eliminating
+ * the CORS restriction that previously blocked web browser clients. Both
+ * native (Capacitor) and web clients now receive storm data identically.
  *
  * Designed to be called:
  *   1. On app foreground (visibility change listener in Layout.tsx)
@@ -23,16 +14,10 @@
  *
  * Rate-limited to once per 15 minutes in-memory.
  * Dedup is handled via localStorage (48-hour TTL on seen fingerprints).
- *
- * NOTE: On native (Capacitor), cross-origin requests to spc.noaa.gov work
- * fine — no CORS restriction in native WebViews. On web dev (localhost),
- * the browser will block the request; this fails silently.
  */
 
 import { supabase } from './supabase';
 
-const SPC_TODAY_URL     = 'https://www.spc.noaa.gov/climo/reports/today.csv';
-const SPC_YESTERDAY_URL = 'https://www.spc.noaa.gov/climo/reports/yesterday.csv';
 const MIN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const DEDUP_TTL_MS          = 48 * 60 * 60 * 1000; // 48 hours
 
@@ -81,7 +66,7 @@ function markSeen(fingerprint: string) {
   }
 }
 
-// ─── NOAA SPC CSV parser ──────────────────────────────────────────────────────
+// ─── Event type (matches Edge Function response shape) ────────────────────────
 
 interface ParsedEvent {
   type: 'HAIL' | 'WIND';
@@ -94,95 +79,25 @@ interface ParsedEvent {
   fingerprint: string;
 }
 
+// ─── Edge Function fetch ──────────────────────────────────────────────────────
+
 /**
- * Parse SPC CSV text into typed storm events.
- *
- * Section detection:
- *  - Header `Time,F_Scale,...`  → Wind (first occurrence), Tornado (second — skip)
- *  - Header `Time,Size,...`     → Hail
- *
- * We skip Tornado because an F-scale value is not a useful magnitude for
- * roofing lead generation.
+ * Fetch storm events via the Supabase Edge Function.
+ * The Edge Function fetches + parses the NOAA SPC CSV server-side,
+ * so there is no CORS issue on web or mobile.
  */
-function parseSpcCsv(csvText: string, reportDate: string): ParsedEvent[] {
-  const events: ParsedEvent[] = [];
-  const lines = csvText.split('\n');
-
-  let fScaleCount = 0;
-  let section: 'WIND' | 'HAIL' | null = null;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    // ── Section header detection ─────────────────────────────────────────────
-    if (line.startsWith('Time,')) {
-      const cols = line.split(',');
-      const col2 = cols[1]?.trim() ?? '';
-      if (col2 === 'Size') {
-        section = 'HAIL';
-      } else if (col2 === 'F_Scale') {
-        fScaleCount++;
-        section = fScaleCount === 1 ? 'WIND' : null; // 2nd occurrence = Tornado, skip
-      } else {
-        section = null;
-      }
-      continue;
+async function fetchEventsFromEdgeFunction(): Promise<ParsedEvent[]> {
+  try {
+    const { data, error } = await (supabase.functions as any).invoke('noaa-storms');
+    if (error) {
+      console.warn('[NOAA] Edge Function error:', error.message);
+      return [];
     }
-
-    if (!section) continue;
-
-    // ── Data row parsing ─────────────────────────────────────────────────────
-    const parts = line.split(',');
-    if (parts.length < 8) continue;
-
-    const timeStr  = parts[0].trim();
-    if (!/^\d{3,4}$/.test(timeStr)) continue; // Must look like HHMM
-
-    const col2     = parts[1].trim(); // Size (hail) or F_Scale (wind)
-    const speedStr = parts[2].trim(); // mph for wind
-    const locName  = parts[3].trim();
-    const county   = parts[4].trim();
-    const state    = parts[5].trim().toUpperCase();
-    const lat      = parseFloat(parts[6]);
-    const lng      = parseFloat(parts[7]);
-
-    if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) continue;
-    if (!state || state.length < 2) continue;
-
-    if (section === 'HAIL') {
-      // Size is in hundredths of an inch: 100 → 1.00", 175 → 1.75"
-      const sizeHundredths = parseInt(col2, 10);
-      if (isNaN(sizeHundredths) || sizeHundredths < 25) continue; // skip < 0.25"
-      const sizeInches = sizeHundredths / 100;
-      events.push({
-        type: 'HAIL',
-        magnitude: sizeInches,
-        lat, lng,
-        location: locName || county,
-        state,
-        eventDate: reportDate,
-        fingerprint: `HAIL_${reportDate}_${lat.toFixed(2)}_${lng.toFixed(2)}_${sizeHundredths}`,
-      });
-
-    } else if (section === 'WIND') {
-      // Skip if col2 looks like a tornado F/EF scale (e.g. "F2", "EF1")
-      if (/^[EF]\d/.test(col2)) continue;
-      const windMph = parseInt(speedStr, 10);
-      if (isNaN(windMph) || windMph < 35) continue; // skip sub-advisory winds
-      events.push({
-        type: 'WIND',
-        magnitude: windMph,
-        lat, lng,
-        location: locName || county,
-        state,
-        eventDate: reportDate,
-        fingerprint: `WIND_${reportDate}_${lat.toFixed(2)}_${lng.toFixed(2)}_${windMph}`,
-      });
-    }
+    return (data?.events as ParsedEvent[]) ?? [];
+  } catch (err) {
+    console.warn('[NOAA] Edge Function call failed:', err);
+    return [];
   }
-
-  return events;
 }
 
 // ─── Geocoding (same approach as hailAlertService) ────────────────────────────
@@ -279,27 +194,8 @@ export async function checkForNoaaStorms(companyId: string): Promise<void> {
       return;
     }
 
-    // ── 3. Fetch SPC CSV for today and yesterday ──────────────────────────────
-    const todayStr     = new Date().toISOString().split('T')[0];
-    const yesterdayStr = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
-
-    const fetchCsv = async (url: string, dateStr: string): Promise<ParsedEvent[]> => {
-      try {
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) return [];
-        return parseSpcCsv(await res.text(), dateStr);
-      } catch {
-        // CORS on web dev or network error — fail silently
-        return [];
-      }
-    };
-
-    const [todayEvents, yesterdayEvents] = await Promise.all([
-      fetchCsv(SPC_TODAY_URL,     todayStr),
-      fetchCsv(SPC_YESTERDAY_URL, yesterdayStr),
-    ]);
-
-    const allEvents = [...todayEvents, ...yesterdayEvents];
+    // ── 3. Fetch events via Edge Function (no CORS, works on web + native) ────
+    const allEvents = await fetchEventsFromEdgeFunction();
     if (allEvents.length === 0) return;
 
     // ── 4. Filter by proximity and threshold ─────────────────────────────────
