@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronLeft, Bell, MessageSquare, Calendar, AlertCircle, Check, CloudRain, Wind } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Bell, MessageSquare, Calendar, AlertCircle, Check, CloudRain, Wind } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -120,6 +120,22 @@ export default function Notifications() {
       </div>
 
       <div className="w-full max-w-full p-6 space-y-4 overflow-x-hidden">
+        {/* Storm History shortcut */}
+        <button
+          onClick={() => navigate('/storm-history')}
+          className="w-full flex items-center justify-between p-4 bg-white rounded-2xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="h-9 w-9 rounded-xl bg-red-50 flex items-center justify-center">
+              <CloudRain size={18} className="text-red-500" />
+            </div>
+            <div className="text-left">
+              <p className="text-sm font-bold text-primary">Storm History</p>
+              <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">NOAA + HailTrace · Last 12 months</p>
+            </div>
+          </div>
+          <ChevronRight size={16} className="text-slate-300" />
+        </button>
         {loading ? (
           [1, 2, 3].map((item) => (
             <div key={item} className="h-20 animate-pulse rounded-2xl border border-slate-100 bg-white" />

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, Users, Briefcase, DollarSign, Plus, Calendar, ChevronRight } from 'lucide-react';
+import { TrendingUp, Users, Briefcase, DollarSign, Plus, Calendar, ChevronRight, CloudRain, Wind } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -50,6 +50,7 @@ export default function Dashboard() {
   const [recentActivity, setRecentActivity] = useState<any[]>([]);
   const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
   const [allPipelineEvents, setAllPipelineEvents] = useState<any[]>([]);
+  const [recentStorms, setRecentStorms] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -148,6 +149,21 @@ export default function Dashboard() {
         .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
         .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
       setAllPipelineEvents(allEvents);
+
+      // Fetch recent storm alerts (last 7 days)
+      try {
+        const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: storms } = await (supabase.from('notifications') as any)
+          .select('*')
+          .eq('company_id', profile.company_id)
+          .in('type', ['storm_alert', 'hail_alert'])
+          .gte('created_at', since7d)
+          .order('created_at', { ascending: false })
+          .limit(10);
+        setRecentStorms(storms ?? []);
+      } catch {
+        // Non-critical — silently skip
+      }
     } catch (err) {
       console.error('Error fetching dashboard data:', err);
     } finally {
@@ -228,6 +244,62 @@ export default function Dashboard() {
           </motion.div>
         ))}
       </div>
+
+      {/* Storm Alert Card — only shown when events exist in last 7 days */}
+      {recentStorms.length > 0 && (() => {
+        const latest = recentStorms[0];
+        const evType = latest.metadata?.event_type ?? (latest.type === 'hail_alert' ? 'HAIL' : 'WIND');
+        const isHail = evType === 'HAIL';
+        const hailCount = recentStorms.filter(s => (s.metadata?.event_type ?? (s.type === 'hail_alert' ? 'HAIL' : 'WIND')) === 'HAIL').length;
+        const windCount = recentStorms.filter(s => (s.metadata?.event_type ?? (s.type === 'hail_alert' ? 'HAIL' : 'WIND')) === 'WIND').length;
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`rounded-2xl p-4 border ${isHail ? 'bg-red-50 border-red-100' : 'bg-blue-50 border-blue-100'}`}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 ${isHail ? 'bg-red-500' : 'bg-blue-500'}`}>
+                {isHail ? <CloudRain size={20} className="text-white" /> : <Wind size={20} className="text-white" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-bold ${isHail ? 'text-red-700' : 'text-blue-700'}`}>
+                  Storm Activity Near You
+                </p>
+                <p className="text-xs text-slate-600 mt-0.5 leading-relaxed line-clamp-2">
+                  {latest.message}
+                </p>
+                <div className="flex items-center gap-3 mt-2">
+                  {hailCount > 0 && (
+                    <span className="text-[10px] font-bold text-red-500 bg-red-100 rounded-full px-2 py-0.5">
+                      {hailCount} hail {hailCount === 1 ? 'report' : 'reports'}
+                    </span>
+                  )}
+                  {windCount > 0 && (
+                    <span className="text-[10px] font-bold text-blue-500 bg-blue-100 rounded-full px-2 py-0.5">
+                      {windCount} wind {windCount === 1 ? 'report' : 'reports'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => navigate('/storm-history')}
+                className={`flex-1 py-2.5 rounded-xl text-xs font-bold text-white transition-colors active:scale-95 ${isHail ? 'bg-red-500' : 'bg-blue-500'}`}
+              >
+                View Storm History
+              </button>
+              <button
+                onClick={() => navigate('/contacts')}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold bg-white border border-slate-200 text-slate-700 active:scale-95 transition-colors"
+              >
+                Find Nearby Contacts
+              </button>
+            </div>
+          </motion.div>
+        );
+      })()}
 
       {/* Quick Actions */}
       <div className="space-y-4">
