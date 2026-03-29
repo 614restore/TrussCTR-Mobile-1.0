@@ -3,9 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
   Check,
+  CheckCircle,
   Download,
   Eraser,
   FileText,
+  Share2,
   Shield,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
@@ -516,6 +518,90 @@ export default function DocumentSigner() {
         <button onClick={() => navigate(-1)} className="mt-6 rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white">
           Go Back
         </button>
+      </div>
+    );
+  }
+
+  // ── Success screen — replaces the form after signing ────────────────────────
+  if (signed) {
+    const handleShare = async () => {
+      if (!pdfUrl) return;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: doc?.title, url: pdfUrl });
+        } else {
+          window.open(pdfUrl, '_blank', 'noopener,noreferrer');
+        }
+      } catch { /* user cancelled */ }
+    };
+
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
+        <div className="w-full max-w-sm space-y-6">
+          {/* Success icon */}
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-20 h-20 rounded-full bg-emerald-500 flex items-center justify-center shadow-xl shadow-emerald-200">
+              <CheckCircle size={40} className="text-white" />
+            </div>
+            <div className="text-center">
+              <h1 className="text-xl font-bold text-primary">Document Signed &amp; Saved</h1>
+              <p className="text-slate-500 text-sm mt-1">{doc?.title} has been generated and saved to this contact.</p>
+            </div>
+          </div>
+
+          {/* Details card */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Document</span>
+              <span className="font-semibold text-primary">{doc?.title}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Customer</span>
+              <span className="font-semibold text-primary">{customerName}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Date</span>
+              <span className="font-semibold text-primary">{today}</span>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="space-y-3">
+            {/* After contingency or CSA, prompt for 3-Day Notice */}
+            {(docType === 'contingency' || docType === 'csa') && (
+              <button
+                onClick={() => navigate(`/contacts/${id}/documents/rescind`)}
+                className="w-full py-4 rounded-2xl bg-emerald-600 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-100 active:scale-[0.98] transition-transform"
+              >
+                <Shield size={16} /> Next: Sign 3-Day Notice →
+              </button>
+            )}
+
+            {pdfUrl && (
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => savedDocumentId ? navigate(`/documents/view/${savedDocumentId}`) : window.open(pdfUrl, '_blank', 'noopener,noreferrer')}
+                  className="py-3.5 rounded-2xl bg-slate-100 text-primary font-bold text-sm active:bg-slate-200"
+                >
+                  View PDF
+                </button>
+                <button
+                  onClick={handleShare}
+                  className="py-3.5 rounded-2xl bg-slate-100 text-primary font-bold text-sm flex items-center justify-center gap-2 active:bg-slate-200"
+                >
+                  <Share2 size={15} /> Share
+                </button>
+              </div>
+            )}
+
+            <button
+              onClick={() => navigate(`/contacts/${id}`)}
+              className="w-full py-4 rounded-2xl bg-primary text-white font-bold text-sm active:scale-[0.98] transition-transform shadow-lg"
+            >
+              Back to Contact
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
