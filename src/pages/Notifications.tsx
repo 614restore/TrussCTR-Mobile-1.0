@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronLeft, Bell, MessageSquare, Calendar, AlertCircle, Check, CloudRain, Wind } from 'lucide-react';
+import { ChevronLeft, Bell, MessageSquare, Calendar, AlertCircle, Check, CloudRain, Wind, UserCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -90,18 +90,31 @@ export default function Notifications() {
 
   const getNotificationIcon = (type: string, metadata?: any) => {
     switch (type) {
-      case 'mention':               return { icon: MessageSquare, color: 'bg-emerald-500' };
-      case 'unassigned_appointment': return { icon: Calendar,     color: 'bg-amber-500'   };
-      case 'lead_assignment':        return { icon: Bell,         color: 'bg-blue-500'    };
-      case 'hail_alert':             return { icon: CloudRain,    color: 'bg-red-500'     };
+      case 'mention':                return { icon: MessageSquare, color: 'bg-emerald-500' };
+      case 'unassigned_appointment': return { icon: Calendar,      color: 'bg-amber-500'   };
+      case 'lead_assignment':        return { icon: Bell,          color: 'bg-blue-500'    };
+      case 'hail_alert':             return { icon: CloudRain,     color: 'bg-red-500'     };
       case 'storm_alert': {
         const evType = metadata?.event_type;
         return evType === 'WIND'
           ? { icon: Wind,      color: 'bg-blue-600' }
           : { icon: CloudRain, color: 'bg-red-500'  };
       }
+      case 'contact_storm_alert': {
+        const evType = metadata?.event_type;
+        return evType === 'WIND'
+          ? { icon: UserCheck, color: 'bg-blue-600' }
+          : { icon: UserCheck, color: 'bg-red-500'  };
+      }
       default:                       return { icon: AlertCircle,  color: 'bg-slate-800'   };
     }
+  };
+
+  const getNotificationAction = (n: any): (() => void) | null => {
+    if (n.type === 'contact_storm_alert' && n.metadata?.contact_id) {
+      return () => navigate(`/contacts/${n.metadata.contact_id}`);
+    }
+    return null;
   };
 
   return (
@@ -127,14 +140,28 @@ export default function Notifications() {
         ) : notifications.length > 0 ? (
           notifications.map((n) => {
             const { icon: Icon, color } = getNotificationIcon(String(n.type || ''), n.metadata);
+            const action = getNotificationAction(n);
+            const isContactAlert = n.type === 'contact_storm_alert';
             return (
-              <div key={n.id} className={`card p-4 flex items-start gap-4 active:bg-slate-50 transition-colors ${n.read ? 'opacity-60' : ''}`}>
+              <div
+                key={n.id}
+                onClick={action ?? undefined}
+                className={`card p-4 flex items-start gap-4 transition-colors ${n.read ? 'opacity-60' : ''} ${action ? 'active:bg-slate-50 cursor-pointer' : ''}`}
+              >
                 <div className={`${color} h-10 w-10 rounded-xl flex items-center justify-center text-white shrink-0`}>
                   <Icon size={20} />
                 </div>
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="min-w-0 text-sm font-bold text-primary">{n.title || 'Notification'}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-primary">{n.title || 'Notification'}</p>
+                      {isContactAlert && n.metadata?.contact_name && (
+                        <span className="inline-block text-[10px] font-bold text-white px-2 py-0.5 rounded-full mt-0.5 mr-1
+                          bg-red-500">
+                          {n.metadata.event_type === 'WIND' ? '💨' : '🌨'} Contact Alert
+                        </span>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {n.read && <Check size={12} className="text-emerald-400" />}
                       <span className="text-[10px] text-slate-400">
@@ -143,6 +170,9 @@ export default function Notifications() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 leading-relaxed">{n.message || 'No message available'}</p>
+                  {action && (
+                    <p className="text-[10px] font-bold text-accent mt-1">Tap to view contact →</p>
+                  )}
                 </div>
               </div>
             );

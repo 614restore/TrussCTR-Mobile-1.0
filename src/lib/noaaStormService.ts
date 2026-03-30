@@ -182,6 +182,134 @@ function hailSizeLabel(inches: number): string {
   return `${inches}"`;
 }
 
+// ─── Contact storm dedup (separate key space, 30-day TTL) ────────────────────
+
+const CONTACT_STORM_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function getContactStormSeen(): Set<string> {
+  try {
+    const raw = localStorage.getItem('noaa_contact_storm_fps');
+    if (!raw) return new Set();
+    const entries: { fp: string; ts: number }[] = JSON.parse(raw);
+    const cutoff = Date.now() - CONTACT_STORM_TTL_MS;
+    return new Set(entries.filter((e) => e.ts > cutoff).map((e) => e.fp));
+  } catch {
+    return new Set();
+  }
+}
+
+function markContactStormSeen(fp: string) {
+  try {
+    const raw = localStorage.getItem('noaa_contact_storm_fps');
+    const entries: { fp: string; ts: number }[] = raw ? JSON.parse(raw) : [];
+    const cutoff = Date.now() - CONTACT_STORM_TTL_MS;
+    const fresh = entries.filter((e) => e.ts > cutoff);
+    fresh.push({ fp, ts: Date.now() });
+    localStorage.setItem('noaa_contact_storm_fps', JSON.stringify(fresh));
+  } catch {
+    // localStorage unavailable — acceptable
+  }
+}
+
+/**
+ * For a set of qualifying storm events, find contacts whose addresses fall
+ * within `radiusMiles` of each event and write a `contact_storm_alert`
+ * notification for each new match.
+ *
+ * Uses an in-run geocode cache so each unique city/state/zip is only
+ * geocoded once per invocation.
+ */
+async function checkContactsNearStorms(
+  companyId: string,
+  events: ParsedEvent[],
+  radiusMiles: number,
+): Promise<void> {
+  if (events.length === 0) return;
+
+  // 1. Fetch contacts that have at least a city or zip
+  const { data: contacts } = await (supabase.from('contacts') as any)
+    .select('id, first_name, last_name, address, city, state, zip')
+    .eq('company_id', companyId)
+    .or('city.neq.,zip.neq.')
+    .limit(200) as { data: any[] | null };
+
+  if (!contacts?.length) return;
+
+  // 2. Geocode each unique location (cache by "zip|city|state" key)
+  const geocodeCache = new Map<string, { lat: number; lng: number } | null>();
+  const seen = getContactStormSeen();
+
+  const getGeo = async (c: any) => {
+    const key = `${c.zip ?? ''}|${c.city ?? ''}|${c.state ?? ''}`;
+    if (geocodeCache.has(key)) return geocodeCache.get(key)!;
+    const result = await geocodeAddress(c.city, c.state, c.zip);
+    geocodeCache.set(key, result);
+    return result;
+  };
+
+  // 3. For each contact × storm event, check distance and create notification
+  for (const contact of contacts) {
+    const geo = await getGeo(contact);
+    if (!geo) continue;
+
+    const contactName = [contact.first_name, contact.last_name].filter(Boolean).join(' ');
+    const contactAddr = [contact.address, contact.city, contact.state].filter(Boolean).join(', ');
+
+    for (const event of events) {
+      const dist = distanceMiles(geo.lat, geo.lng, event.lat, event.lng);
+      if (dist > radiusMiles) continue;
+
+      // Dedup key: unique per contact + storm event
+      const fp = `cs_${contact.id}_${event.fingerprint}`;
+      if (seen.has(fp)) continue;
+
+      const distStr  = dist < 1 ? 'less than 1 mile' : `${Math.round(dist)} mile${Math.round(dist) !== 1 ? 's' : ''}`;
+      const dateStr  = new Date(event.eventDate + 'T12:00:00').toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      });
+      const eventLabel = event.type === 'HAIL'
+        ? `${hailSizeLabel(event.magnitude)} hail`
+        : `${Math.round(event.magnitude)} mph winds`;
+
+      const title   = `Storm Hit Near ${contactName}`;
+      const message = event.type === 'HAIL'
+        ? `${hailSizeLabel(event.magnitude)} hail confirmed ${distStr} from ${contactAddr} on ${dateStr}.`
+        : `${Math.round(event.magnitude)} mph winds confirmed ${distStr} from ${contactAddr} on ${dateStr}.`;
+
+      try {
+        await (supabase.from('notifications') as any).insert({
+          company_id: companyId,
+          user_id:    null,
+          type:       'contact_storm_alert',
+          title,
+          message,
+          read:       false,
+          metadata: {
+            fingerprint:     fp,
+            contact_id:      contact.id,
+            contact_name:    contactName,
+            contact_address: contactAddr,
+            event_type:      event.type,
+            magnitude:       event.magnitude,
+            event_label:     eventLabel,
+            lat:             event.lat,
+            lng:             event.lng,
+            location:        event.location,
+            state:           event.state,
+            event_date:      event.eventDate,
+            distance_miles:  Math.round(dist),
+            source:          'noaa_spc',
+          },
+        });
+        markContactStormSeen(fp);
+        console.log(`[NOAA] Contact alert: ${contactName} is ${distStr} from ${eventLabel} on ${dateStr}`);
+      } catch {
+        markContactStormSeen(fp); // still mark seen to avoid re-attempting
+      }
+    }
+  }
+}
+
 // ─── Integration settings shape ───────────────────────────────────────────────
 
 interface NoaaConfig {
@@ -248,6 +376,7 @@ export async function checkForNoaaStorms(companyId: string): Promise<void> {
     // ── 4. Filter by proximity and threshold ─────────────────────────────────
     const seen = getSeenFingerprints();
     let newCount = 0;
+    const qualifyingEvents: ParsedEvent[] = []; // collected for contact matching
 
     for (const event of allEvents) {
       if (seen.has(event.fingerprint)) continue;
@@ -257,6 +386,8 @@ export async function checkForNoaaStorms(companyId: string): Promise<void> {
 
       if (event.type === 'HAIL' && event.magnitude < cfg.noaa_min_hail_inches) continue;
       if (event.type === 'WIND' && event.magnitude < cfg.noaa_min_wind_mph)     continue;
+
+      qualifyingEvents.push(event);
 
       // ── 5. Write notification ─────────────────────────────────────────────
       const distStr = dist < 1
@@ -307,7 +438,14 @@ export async function checkForNoaaStorms(companyId: string): Promise<void> {
       console.log(`[NOAA] Created ${newCount} storm notification(s)`);
     }
 
-    // ── 6. Stamp last_checked_at ──────────────────────────────────────────────
+    // ── 6. Check contacts near qualifying events ──────────────────────────────
+    if (qualifyingEvents.length > 0) {
+      await checkContactsNearStorms(companyId, qualifyingEvents, cfg.noaa_radius_miles).catch(
+        (err) => console.warn('[NOAA] Contact storm check failed:', err),
+      );
+    }
+
+    // ── 7. Stamp last_checked_at ──────────────────────────────────────────────
     await (supabase.from('company_integrations') as any).upsert(
       { company_id: companyId, noaa_last_checked_at: new Date().toISOString() },
       { onConflict: 'company_id' },
