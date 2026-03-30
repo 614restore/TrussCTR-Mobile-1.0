@@ -133,18 +133,20 @@ export default function CompanyProfile() {
             </div>
           </div>
 
-          {/* City / State / Zip row */}
+          {/* City — full width */}
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">City</label>
+            <input
+              type="text"
+              placeholder="Denver"
+              className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20"
+              value={formData.city}
+              onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+            />
+          </div>
+
+          {/* State + ZIP — side by side */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2 col-span-2 sm:col-span-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">City</label>
-              <input
-                type="text"
-                placeholder="Denver"
-                className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20"
-                value={formData.city}
-                onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-              />
-            </div>
             <div className="space-y-2">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">State</label>
               <input
@@ -156,18 +158,18 @@ export default function CompanyProfile() {
                 onChange={(e) => setFormData({ ...formData, state: e.target.value.toUpperCase() })}
               />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">ZIP Code</label>
-            <input
-              type="text"
-              placeholder="80201"
-              maxLength={10}
-              className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20"
-              value={formData.zip}
-              onChange={(e) => setFormData({ ...formData, zip: e.target.value })}
-            />
+            <div className="space-y-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">ZIP Code</label>
+              <input
+                type="text"
+                placeholder="80201"
+                maxLength={10}
+                inputMode="numeric"
+                className="w-full bg-white border border-slate-200 rounded-2xl py-4 px-4 text-sm focus:ring-2 focus:ring-accent/20"
+                value={formData.zip}
+                onChange={(e) => setFormData({ ...formData, zip: e.target.value })}
+              />
+            </div>
           </div>
 
           <div className="space-y-2">
