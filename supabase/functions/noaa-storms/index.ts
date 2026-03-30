@@ -34,10 +34,15 @@ interface ParsedEvent {
 
 // ─── CSV parser ───────────────────────────────────────────────────────────────
 //
-// SPC CSV has 3 sections (Wind, Hail, Tornado), each preceded by a header row:
-//   Wind:    Time, F_Scale, Speed,  Location, County, State, Lat, Lon, Comments
-//   Hail:    Time, Size,    Speed,  Location, County, State, Lat, Lon, Comments
-//   Tornado: Time, F_Scale, Speed,  Location, County, State, Lat, Lon, Comments
+// Actual NOAA SPC CSV format — 8 columns per section, 3 sections per file:
+//   Tornado: Time, F_Scale, Location, County, State, Lat, Lon, Comments
+//   Wind:    Time, Speed,   Location, County, State, Lat, Lon, Comments
+//   Hail:    Time, Size,    Location, County, State, Lat, Lon, Comments
+//
+// Key differences from earlier assumption:
+//   - Wind section col2 = "Speed", NOT "F_Scale"
+//   - Only 8 columns (no separate Speed column between F_Scale and Location)
+//   - Column indices: Lat=parts[5], Lon=parts[6] (not 6/7)
 //
 // Hail Size = hundredths of an inch (100 → 1.00", 175 → 1.75")
 // Wind Speed = mph
@@ -46,50 +51,43 @@ function parseSpcCsv(csvText: string, reportDate: string): ParsedEvent[] {
   const events: ParsedEvent[] = [];
   const lines = csvText.split('\n');
 
-  let fScaleCount = 0;
-  let section: 'WIND' | 'HAIL' | null = null;
+  let section: 'WIND' | 'HAIL' | 'TORNADO' | null = null;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    // Section header detection
+    // Section header: always starts with "Time,"
     if (line.startsWith('Time,')) {
-      const cols = line.split(',');
-      const col2 = (cols[1] ?? '').trim();
-      if (col2 === 'Size') {
-        section = 'HAIL';
-      } else if (col2 === 'F_Scale') {
-        fScaleCount++;
-        section = fScaleCount === 1 ? 'WIND' : null; // 2nd = Tornado, skip
-      } else {
-        section = null;
-      }
+      const col2 = (line.split(',')[1] ?? '').trim();
+      if      (col2 === 'Size')    section = 'HAIL';
+      else if (col2 === 'Speed')   section = 'WIND';
+      else if (col2 === 'F_Scale') section = 'TORNADO'; // skip tornado rows
+      else                         section = null;
       continue;
     }
 
-    if (!section) continue;
+    if (!section || section === 'TORNADO') continue;
 
-    // Data row
+    // Data row — 8 cols: Time, Magnitude, Location, County, State, Lat, Lon, Comments
     const parts = line.split(',');
-    if (parts.length < 8) continue;
+    if (parts.length < 7) continue;
 
     const timeStr = parts[0].trim();
     if (!/^\d{3,4}$/.test(timeStr)) continue;
 
-    const col2     = parts[1].trim();
-    const speedStr = parts[2].trim();
-    const locName  = parts[3].trim();
-    const county   = parts[4].trim();
-    const state    = parts[5].trim().toUpperCase();
-    const lat      = parseFloat(parts[6]);
-    const lng      = parseFloat(parts[7]);
+    const magnitude = parts[1].trim();
+    const locName   = parts[2].trim();
+    const county    = parts[3].trim();
+    const state     = parts[4].trim().toUpperCase();
+    const lat       = parseFloat(parts[5]);
+    const lng       = parseFloat(parts[6]);
 
     if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) continue;
-    if (!state || state.length < 2) continue;
+    if (!state || state.length !== 2) continue;
 
     if (section === 'HAIL') {
-      const sizeHundredths = parseInt(col2, 10);
+      const sizeHundredths = parseInt(magnitude, 10);
       if (isNaN(sizeHundredths) || sizeHundredths < 25) continue;
       const sizeInches = sizeHundredths / 100;
       events.push({
@@ -103,8 +101,7 @@ function parseSpcCsv(csvText: string, reportDate: string): ParsedEvent[] {
       });
 
     } else if (section === 'WIND') {
-      if (/^[EF]\d/.test(col2)) continue; // skip tornado F-scale rows
-      const windMph = parseInt(speedStr, 10);
+      const windMph = parseInt(magnitude, 10);
       if (isNaN(windMph) || windMph < 35) continue;
       events.push({
         type:        'WIND',
