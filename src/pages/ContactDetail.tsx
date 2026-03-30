@@ -6,7 +6,7 @@ import {
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
   ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
   Trash2, Camera, RefreshCw, X, Star, CreditCard,
-  Wind, CloudRain, Zap,
+  Wind, CloudRain, Zap, Archive, RotateCcw,
 } from 'lucide-react';
 import { fetchContactStormHistory, type ContactStormEvent } from '../lib/noaaStormService';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -159,7 +159,12 @@ export default function ContactDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [editForm, setEditForm] = useState<any>(null);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const tabScrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollTabsLeft, setCanScrollTabsLeft] = useState(false);
   const [canScrollTabsRight, setCanScrollTabsRight] = useState(false);
@@ -369,6 +374,7 @@ export default function ContactDetail() {
 
       setIsEditing(false);
       fetchContact();
+      fetchDocuments();
     } catch (err) {
       console.error('Error saving contact:', err);
       alert(err instanceof Error ? err.message : 'Failed to save contact changes.');
@@ -376,6 +382,56 @@ export default function ContactDetail() {
       setIsSavingEdit(false);
     }
   };
+
+  const handleArchiveContact = async () => {
+    if (!contact?.id || isArchiving) return;
+    setIsArchiving(true);
+    try {
+      const { error } = await (supabase.from('contacts') as any)
+        .update({ is_archived: true, archived_at: new Date().toISOString(), archived_by: user?.id })
+        .eq('id', contact.id);
+      if (error) throw error;
+      setShowArchiveConfirm(false);
+      navigate(-1);
+    } catch (err) {
+      console.error('Error archiving contact:', err);
+      alert('Failed to archive contact. Please try again.');
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  const handleReactivateContact = async () => {
+    if (!contact?.id) return;
+    try {
+      const { error } = await (supabase.from('contacts') as any)
+        .update({ is_archived: false, archived_at: null, archived_by: null, status: 'new_lead' })
+        .eq('id', contact.id);
+      if (error) throw error;
+      fetchContact();
+    } catch (err) {
+      console.error('Error reactivating contact:', err);
+      alert('Failed to reactivate contact. Please try again.');
+    }
+  };
+
+  const handleDeleteContact = async () => {
+    if (!contact?.id || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      const { error } = await (supabase.from('contacts') as any).delete().eq('id', contact.id);
+      if (error) throw error;
+      setShowDeleteConfirm(false);
+      navigate(-1);
+    } catch (err) {
+      console.error('Error deleting contact:', err);
+      alert('Failed to delete contact. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const canManageContacts = profile?.role === 'owner' || profile?.role === 'admin' || (profile?.role as string) === 'manager';
 
   const scrollTabs = (direction: 'left' | 'right') => {
     const node = tabScrollerRef.current;
@@ -481,6 +537,7 @@ export default function ContactDetail() {
   const handleEditPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setIsUploadingPhoto(true);
     try {
       await uploadContactPhoto(file);
       await fetchDocuments();
@@ -488,6 +545,7 @@ export default function ContactDetail() {
       console.error('Error uploading contact photo:', err);
       alert('Failed to upload contact photo.');
     } finally {
+      setIsUploadingPhoto(false);
       e.target.value = '';
     }
   };
@@ -605,7 +663,14 @@ export default function ContactDetail() {
             )}
           </div>
           <div className="space-y-1 min-w-0">
-            <h1 className="text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
+              {contact.is_archived && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-amber-200">
+                  <Archive size={10} /> Archived
+                </span>
+              )}
+            </div>
             <p className="text-slate-300 text-sm flex items-center gap-1.5"><MapPin size={14} />{contact.address}, {contact.city}</p>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/60">
               {coverPhotoUrl ? 'Cover photo set' : 'No cover photo'}
@@ -723,9 +788,9 @@ export default function ContactDetail() {
                     </div>
                   )}
                   <div className="absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center rounded-full bg-accent text-white shadow-lg">
-                    <Camera size={14} />
+                    {isUploadingPhoto ? <span className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent" /> : <Camera size={14} />}
                   </div>
-                  <input type="file" className="hidden" accept="image/*" onChange={handleEditPhotoUpload} />
+                  <input type="file" className="hidden" accept="image/*" disabled={isUploadingPhoto} onChange={handleEditPhotoUpload} />
                 </label>
                 <div className="min-w-0">
                   <p className="text-sm font-bold text-primary">Tap to update contact photo</p>
@@ -833,6 +898,30 @@ export default function ContactDetail() {
               <div className="space-y-3">
                 <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
                 <button onClick={() => { setShowActions(false); changeTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
+                {canManageContacts && !contact?.is_archived && (
+                  <button
+                    onClick={() => { setShowActions(false); setShowArchiveConfirm(true); }}
+                    className="w-full flex items-center justify-center gap-2 bg-amber-50 text-amber-700 py-3 rounded-xl text-sm font-bold"
+                  >
+                    <Archive size={16} /> Archive Contact
+                  </button>
+                )}
+                {canManageContacts && contact?.is_archived && (
+                  <button
+                    onClick={() => { setShowActions(false); handleReactivateContact(); }}
+                    className="w-full flex items-center justify-center gap-2 bg-emerald-50 text-emerald-700 py-3 rounded-xl text-sm font-bold"
+                  >
+                    <RotateCcw size={16} /> Reactivate Contact
+                  </button>
+                )}
+                {canManageContacts && (
+                  <button
+                    onClick={() => { setShowActions(false); setShowDeleteConfirm(true); }}
+                    className="w-full flex items-center justify-center gap-2 bg-red-50 text-red-600 py-3 rounded-xl text-sm font-bold"
+                  >
+                    <Trash2 size={16} /> Delete Contact
+                  </button>
+                )}
               </div>
             </div>
             <div
@@ -840,6 +929,68 @@ export default function ContactDetail() {
               style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
             >
               <button onClick={() => setShowActions(false)} className="w-full bg-white border border-slate-200 py-3 rounded-xl text-sm font-bold">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Archive Confirmation Modal */}
+      {showArchiveConfirm && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-6">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100">
+              <Archive size={24} className="text-amber-600" />
+            </div>
+            <h3 className="text-lg font-black text-primary">Archive Contact?</h3>
+            <p className="mt-2 text-sm text-slate-500">
+              This contact will be removed from your active pipeline. All history, documents, and project data are preserved. You can reactivate them anytime to start a new project.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowArchiveConfirm(false)}
+                className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleArchiveContact}
+                disabled={isArchiving}
+                className="flex-1 rounded-xl bg-amber-500 py-3 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {isArchiving && <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />}
+                {isArchiving ? 'Archiving...' : 'Archive'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-6">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100">
+              <Trash2 size={24} className="text-red-600" />
+            </div>
+            <h3 className="text-lg font-black text-primary">Delete Contact?</h3>
+            <p className="mt-2 text-sm text-slate-500">
+              This will permanently delete <span className="font-bold">{contact?.first_name} {contact?.last_name}</span> and all associated data including documents, estimates, and history. This cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteContact}
+                disabled={isDeleting}
+                className="flex-1 rounded-xl bg-red-600 py-3 text-sm font-bold text-white disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {isDeleting && <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />}
+                {isDeleting ? 'Deleting...' : 'Delete Forever'}
+              </button>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User, ChevronLeft, ChevronRight, Shield, FileText, Briefcase, Calendar, ClipboardList, Phone, Zap, StickyNote, CalendarPlus, Clock } from 'lucide-react';
+import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User, ChevronLeft, ChevronRight, Shield, FileText, Briefcase, Calendar, ClipboardList, Phone, Zap, StickyNote, CalendarPlus, Clock, Archive, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -39,12 +39,15 @@ export default function Pipeline() {
   const [contactPhotoMap, setContactPhotoMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [quickMenuContactId, setQuickMenuContactId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
   const sectionScrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollSectionsLeft, setCanScrollSectionsLeft] = useState(false);
   const [canScrollSectionsRight, setCanScrollSectionsRight] = useState(false);
 
   const pipelineSections = [
-    { id: 'pipeline', label: 'Pipeline', icon: LayoutGrid, action: () => setViewMode('kanban') },
+    { id: 'pipeline', label: 'Pipeline', icon: LayoutGrid, action: () => { setViewMode('kanban'); setShowArchived(false); } },
+    { id: 'archived', label: 'Archived', icon: Archive, action: () => setShowArchived(true) },
     { id: 'inspection', label: 'Inspection', icon: Shield, action: () => navigate('/tools') },
     { id: 'documents', label: 'Documents', icon: FileText, action: () => navigate('/documents') },
     { id: 'financial', label: 'Financial', icon: DollarSign, action: () => navigate('/estimates-list') },
@@ -105,6 +108,7 @@ export default function Pipeline() {
   const fetchContacts = async () => {
     try {
       const [{ data, error }, { data: apptData }, { data: photoDocs }] = await Promise.all([
+        // Fetch ALL contacts (active + archived) so both views work without a refetch on tab switch
         supabase.from('contacts').select('*').eq('company_id', profile.company_id).order('updated_at', { ascending: false }),
         supabase.from('appointments').select('id,contact_id,date,time,title,status').eq('company_id', profile.company_id).eq('status', 'scheduled'),
         supabase.from('documents').select('*').eq('company_id', profile.company_id).eq('type', 'photo'),
@@ -129,6 +133,23 @@ export default function Pipeline() {
       setLoading(false);
     }
   };
+
+  const reactivateContact = async (contactId: string) => {
+    setReactivatingId(contactId);
+    try {
+      await supabase.from('contacts').update({ is_archived: false, archived_at: null, archived_by: null, status: 'new_lead' } as any).eq('id', contactId);
+      await fetchContacts();
+    } catch (err) {
+      console.error('Error reactivating contact:', err);
+    } finally {
+      setReactivatingId(null);
+    }
+  };
+
+  // Active contacts: not archived (handle missing column gracefully — treat null as false)
+  const activeContacts = contacts.filter((c) => !c.is_archived);
+  // Archived contacts
+  const archivedContacts = contacts.filter((c) => !!c.is_archived);
 
   const renderContactAvatar = (contact: any, className: string, textClass: string) => {
     const photoUrl = contactPhotoMap[contact.id];
@@ -198,30 +219,35 @@ export default function Pipeline() {
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
-  const filteredContacts = contacts.filter((contact) => {
-    if (!normalizedQuery) return true;
+  const applySearch = (list: any[]) => {
+    if (!normalizedQuery) return list;
+    return list.filter((contact) => {
+      const haystack = [
+        contact.first_name,
+        contact.last_name,
+        `${contact.first_name || ''} ${contact.last_name || ''}`.trim(),
+        contact.address,
+        contact.city,
+        contact.state,
+        contact.zip,
+        contact.email,
+        contact.phone1,
+        contact.phone2,
+        contact.project_type,
+        contact.lead_source,
+        contact.status,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  };
 
-    const haystack = [
-      contact.first_name,
-      contact.last_name,
-      `${contact.first_name || ''} ${contact.last_name || ''}`.trim(),
-      contact.address,
-      contact.city,
-      contact.state,
-      contact.zip,
-      contact.email,
-      contact.phone1,
-      contact.phone2,
-      contact.project_type,
-      contact.lead_source,
-      contact.status,
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase();
-
-    return haystack.includes(normalizedQuery);
-  });
+  // Active pipeline only shows non-archived contacts
+  const filteredContacts = applySearch(activeContacts);
+  // Archived view
+  const filteredArchived = applySearch(archivedContacts);
 
   const scrollSections = (direction: 'left' | 'right') => {
     const node = sectionScrollerRef.current;
@@ -325,7 +351,9 @@ export default function Pipeline() {
           <div className="flex gap-4 min-w-max">
             {pipelineSections.map((section) => {
               const Icon = section.icon;
-              const isActive = section.id === 'pipeline' && viewMode === 'kanban';
+              const isActive =
+                (section.id === 'pipeline' && !showArchived) ||
+                (section.id === 'archived' && showArchived);
               return (
                 <button
                   key={section.id}
@@ -335,6 +363,11 @@ export default function Pipeline() {
                 >
                   <Icon size={18} />
                   <span className="text-sm font-bold whitespace-nowrap">{section.label}</span>
+                  {section.id === 'archived' && archivedContacts.length > 0 && (
+                    <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-1.5 py-0.5 rounded-full">
+                      {archivedContacts.length}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -349,6 +382,54 @@ export default function Pipeline() {
             {[1, 2, 3].map(i => (
               <div key={i} className="h-32 w-full bg-slate-200 animate-pulse rounded-2xl" />
             ))}
+          </div>
+        ) : showArchived ? (
+          <div className="h-full overflow-y-auto p-6 space-y-4 pb-32">
+            <div className="flex items-center gap-2 mb-2">
+              <Archive size={16} className="text-amber-500" />
+              <h2 className="text-sm font-black uppercase tracking-wider text-slate-500">Archived Contacts</h2>
+              <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded-full">{filteredArchived.length}</span>
+            </div>
+            {filteredArchived.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-100">
+                  <Archive size={28} className="text-slate-300" />
+                </div>
+                <p className="font-bold text-slate-400">No archived contacts</p>
+                <p className="mt-1 text-sm text-slate-300">
+                  {searchQuery ? 'No archived contacts match your search.' : 'Archive a completed contact to keep your pipeline clean.'}
+                </p>
+              </div>
+            ) : (
+              filteredArchived.map((contact) => (
+                <div
+                  key={contact.id}
+                  className="card p-4 flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform"
+                  onClick={() => navigate(`/contacts/${contact.id}`)}
+                >
+                  {renderContactAvatar(contact, 'h-12 w-12 rounded-2xl flex-shrink-0', 'text-base')}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-primary truncate">{contact.first_name} {contact.last_name}</p>
+                    <p className="text-xs text-slate-400 truncate">{contact.address}{contact.city ? `, ${contact.city}` : ''}</p>
+                    {contact.archived_at && (
+                      <p className="text-[10px] text-slate-300 mt-0.5">
+                        Archived {new Date(contact.archived_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); reactivateContact(contact.id); }}
+                    disabled={reactivatingId === contact.id}
+                    className="flex-shrink-0 flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-2 rounded-xl text-xs font-bold disabled:opacity-60"
+                  >
+                    {reactivatingId === contact.id
+                      ? <span className="animate-spin rounded-full h-3 w-3 border-2 border-emerald-600 border-t-transparent" />
+                      : <RotateCcw size={13} />}
+                    Reactivate
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         ) : viewMode === 'kanban' ? (
           <div className="h-full overflow-x-auto flex gap-4 p-6 no-scrollbar snap-x" style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}>

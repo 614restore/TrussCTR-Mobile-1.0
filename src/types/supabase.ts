@@ -63,6 +63,9 @@ export interface Database {
           retail_notes: string | null
           notes: string | null
           status_changed_at: string
+          is_archived: boolean
+          archived_at: string | null
+          archived_by: string | null
           created_at: string
           updated_at: string
         }
