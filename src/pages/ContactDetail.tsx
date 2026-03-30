@@ -6,7 +6,9 @@ import {
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
   ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
   Trash2, Camera, RefreshCw, X, Star, CreditCard,
+  Wind, CloudRain, Zap,
 } from 'lucide-react';
+import { fetchContactStormHistory, type ContactStormEvent } from '../lib/noaaStormService';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -1217,6 +1219,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
             </div>
           </div>
         </div>
+        <ContactStormCard contact={contact} />
         <WeatherCard contact={contact} />
         <button
           type="button"
@@ -1289,6 +1292,153 @@ function wmoLabel(code: number): string {
 }
 function wmoIcon(code: number): string {
   return WMO_LABELS[code]?.icon ?? '🌡️';
+}
+
+// ─── Contact Storm History Card ───────────────────────────────────────────────
+
+function ContactStormCard({ contact }: { contact: any }) {
+  const [loading,  setLoading]  = useState(true);
+  const [events,   setEvents]   = useState<ContactStormEvent[]>([]);
+  const [geocoded, setGeocoded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const navigate = useNavigate();
+
+  const hasAddress = !!(contact?.city || contact?.zip);
+
+  useEffect(() => {
+    if (!hasAddress || !contact?.company_id) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    fetchContactStormHistory(contact.company_id, {
+      city:  contact.city,
+      state: contact.state,
+      zip:   contact.zip,
+    }).then(({ events: evts, geocoded: geo }) => {
+      if (!cancelled) {
+        setEvents(evts);
+        setGeocoded(geo);
+        setLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [contact?.id, contact?.city, contact?.state, contact?.zip, contact?.company_id]);
+
+  const displayEvents = expanded ? events : events.slice(0, 3);
+
+  const formatEventDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      });
+    } catch { return dateStr; }
+  };
+
+  return (
+    <div className="card p-5 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Storm Reports Nearby</h3>
+        <Zap size={16} className="text-amber-500" />
+      </div>
+
+      {/* Loading */}
+      {loading && (
+        <div className="space-y-2">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-14 animate-pulse rounded-xl bg-slate-100" />
+          ))}
+        </div>
+      )}
+
+      {/* No address */}
+      {!loading && !hasAddress && (
+        <p className="text-sm text-slate-400">Add a city or ZIP to this contact to see nearby storm reports.</p>
+      )}
+
+      {/* Geocode failed */}
+      {!loading && hasAddress && !geocoded && (
+        <p className="text-sm text-amber-600">Could not locate this address — check city/state/ZIP.</p>
+      )}
+
+      {/* No events */}
+      {!loading && geocoded && hasAddress && events.length === 0 && (
+        <div className="text-center py-4 space-y-2">
+          <p className="text-sm text-slate-400">No storm reports recorded within 25 miles.</p>
+          <button
+            onClick={() => navigate('/storm-history')}
+            className="text-[11px] font-bold text-accent underline"
+          >
+            Import storm history →
+          </button>
+        </div>
+      )}
+
+      {/* Event list */}
+      {!loading && events.length > 0 && (
+        <div className="space-y-2">
+          {displayEvents.map((ev) => (
+            <div
+              key={ev.id}
+              className={`flex items-start gap-3 rounded-xl p-3 ${
+                ev.type === 'HAIL' ? 'bg-red-50' : 'bg-blue-50'
+              }`}
+            >
+              {/* Icon */}
+              <div className={`mt-0.5 shrink-0 h-8 w-8 rounded-xl flex items-center justify-center ${
+                ev.type === 'HAIL' ? 'bg-red-100' : 'bg-blue-100'
+              }`}>
+                {ev.type === 'HAIL'
+                  ? <CloudRain size={15} className="text-red-600" />
+                  : <Wind      size={15} className="text-blue-600" />
+                }
+              </div>
+
+              {/* Details */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-2">
+                  <p className={`text-xs font-bold ${ev.type === 'HAIL' ? 'text-red-700' : 'text-blue-700'}`}>
+                    {ev.type === 'HAIL'
+                      ? `${ev.magnitude}" Hail`
+                      : `${Math.round(ev.magnitude)} mph Wind`
+                    }
+                  </p>
+                  <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                    {ev.distanceMiles < 1 ? '<1 mi' : `${ev.distanceMiles} mi`}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500 truncate">
+                  {[ev.location, ev.state].filter(Boolean).join(', ')}
+                </p>
+                <p className="text-[10px] text-slate-400">{formatEventDate(ev.eventDate)}</p>
+              </div>
+            </div>
+          ))}
+
+          {/* Expand / collapse */}
+          {events.length > 3 && (
+            <button
+              onClick={() => setExpanded((v) => !v)}
+              className="w-full text-[11px] font-bold text-accent py-1"
+            >
+              {expanded ? 'Show less' : `Show ${events.length - 3} more`}
+            </button>
+          )}
+
+          {/* Footer link */}
+          <button
+            onClick={() => navigate('/storm-history')}
+            className="w-full text-[11px] font-bold text-slate-400 text-center pt-1 underline"
+          >
+            View full storm history
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function WeatherCard({ contact }: { contact: any }) {

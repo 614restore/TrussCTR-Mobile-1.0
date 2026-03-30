@@ -342,6 +342,84 @@ export async function fetchStormHistory(companyId: string): Promise<any[]> {
   }
 }
 
+// ─── Contact-level storm history ─────────────────────────────────────────────
+
+export interface ContactStormEvent {
+  id: string;
+  type: 'HAIL' | 'WIND';
+  magnitude: number;       // inches for HAIL, mph for WIND
+  distanceMiles: number;
+  location: string;
+  state: string;
+  eventDate: string;       // YYYY-MM-DD
+  source: 'noaa_spc' | 'hail_alert' | string;
+}
+
+/**
+ * Fetch storm reports that occurred within `radiusMiles` of a contact's
+ * address.  Uses already-saved notifications (no live fetch) so it's fast
+ * and works offline.  Geocodes the contact's city/state/zip on-the-fly.
+ *
+ * Returns the most recent events sorted newest-first (up to `limit`).
+ */
+export async function fetchContactStormHistory(
+  companyId: string,
+  contact: { city?: string | null; state?: string | null; zip?: string | null },
+  radiusMiles = 25,
+  limit = 10,
+): Promise<{ events: ContactStormEvent[]; geocoded: boolean }> {
+  // 1. Geocode the contact's address
+  const geo = await geocodeAddress(contact.city, contact.state, contact.zip);
+  if (!geo) return { events: [], geocoded: false };
+
+  // 2. Pull saved storm notifications for the company (last 12 months)
+  const since = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString();
+  const { data } = await (supabase.from('notifications') as any)
+    .select('*')
+    .eq('company_id', companyId)
+    .in('type', ['storm_alert', 'hail_alert'])
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(500) as { data: any[] | null };
+
+  if (!data?.length) return { events: [], geocoded: true };
+
+  // 3. Filter by distance from the contact's geocoded location
+  const nearby: ContactStormEvent[] = [];
+  for (const n of data) {
+    const lat = n.metadata?.lat ?? n.metadata?.latitude;
+    const lng = n.metadata?.lng ?? n.metadata?.longitude;
+    if (typeof lat !== 'number' || typeof lng !== 'number') continue;
+
+    const dist = distanceMiles(geo.lat, geo.lng, lat, lng);
+    if (dist > radiusMiles) continue;
+
+    const eventType: 'HAIL' | 'WIND' =
+      n.type === 'hail_alert' ? 'HAIL' :
+      (n.metadata?.event_type === 'WIND' ? 'WIND' : 'HAIL');
+
+    const magnitude =
+      n.type === 'hail_alert'
+        ? (n.metadata?.max_size_inches ?? 0)
+        : (n.metadata?.magnitude ?? 0);
+
+    nearby.push({
+      id:           n.id,
+      type:         eventType,
+      magnitude,
+      distanceMiles: Math.round(dist * 10) / 10,
+      location:     n.metadata?.city ?? n.metadata?.location ?? '',
+      state:        n.metadata?.state ?? '',
+      eventDate:    n.metadata?.event_date ?? n.created_at?.slice(0, 10) ?? '',
+      source:       n.metadata?.source ?? (n.type === 'hail_alert' ? 'hail_alert' : 'noaa_spc'),
+    });
+  }
+
+  // 4. Sort newest-first and trim to limit
+  nearby.sort((a, b) => b.eventDate.localeCompare(a.eventDate));
+  return { events: nearby.slice(0, limit), geocoded: true };
+}
+
 // ─── Live NOAA feed (on-demand, no threshold filter, no rate limit) ───────────
 
 export interface LiveNoaaEvent extends ParsedEvent {

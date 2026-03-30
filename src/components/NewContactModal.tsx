@@ -13,6 +13,7 @@ interface NewContactModalProps {
 export default function NewContactModal({ isOpen, onClose, onSuccess }: NewContactModalProps) {
   const { profile, user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const initialFormData = {
     first_name: '',
     last_name: '',
@@ -31,6 +32,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
     if (!isOpen) {
       setFormData(initialFormData);
       setLoading(false);
+      setSaveError(null);
     }
   }, [isOpen]);
 
@@ -46,11 +48,12 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
     }
 
     if (!profile?.company_id) {
-      alert('Your account is not linked to a company yet. Refresh your profile and try again.');
+      setSaveError('Your account is not linked to a company yet. Refresh and try again.');
       return;
     }
 
     setLoading(true);
+    setSaveError(null);
     try {
       const payload = {
         first_name: firstName,
@@ -87,15 +90,20 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
         status_changed_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('contacts').insert(payload as any);
+      // Race the insert against a 15-second timeout so the spinner never hangs
+      const insertPromise = supabase.from('contacts').insert(payload as any);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Request timed out — check your connection and try again.')), 15000),
+      );
+      const { error } = await Promise.race([insertPromise, timeoutPromise]) as Awaited<typeof insertPromise>;
 
       if (error) throw error;
       onSuccess();
       onClose();
     } catch (err: any) {
-      console.error('Error creating contact:', err);
-      const message = err instanceof Error ? err.message : 'Failed to create contact';
-      alert(`Failed to create contact: ${message}`);
+      console.error('[NewContact] Save error:', err);
+      const msg = err?.message ?? err?.details ?? 'Failed to create contact. Please try again.';
+      setSaveError(msg);
     } finally {
       setLoading(false);
     }
@@ -259,7 +267,15 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
                 </div>
               </div>
 
-              <div className="border-t border-slate-100 bg-white px-6 pt-4 pb-6">
+              <div className="border-t border-slate-100 bg-white px-6 pt-4 pb-6 space-y-3">
+                {/* Error banner — visible instead of alert() which is unreliable in Capacitor */}
+                {saveError && (
+                  <div className="rounded-2xl bg-red-50 border border-red-100 px-4 py-3 flex items-start gap-2">
+                    <span className="text-red-500 text-xs font-bold mt-0.5">⚠</span>
+                    <p className="text-xs text-red-700 font-medium flex-1">{saveError}</p>
+                    <button onClick={() => setSaveError(null)} className="text-red-400 text-xs">✕</button>
+                  </div>
+                )}
                 <button
                   type="submit"
                   disabled={loading}
