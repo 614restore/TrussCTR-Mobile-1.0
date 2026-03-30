@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle, FileText, CreditCard, Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle, FileText, CreditCard, Plus, Trash2, Plug } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -255,6 +255,28 @@ export default function Settings() {
             </button>
           </div>
         </div>
+
+        {/* Integrations — owner/admin only */}
+        {(profile?.role === 'owner' || profile?.role === 'admin') && (
+          <div className="space-y-3">
+            <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Integrations</h2>
+            <button
+              onClick={() => navigate('/settings/integrations')}
+              className="w-full flex items-center justify-between p-4 bg-white border border-slate-100 rounded-2xl shadow-sm active:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                  <Plug size={20} className="text-blue-500" />
+                </div>
+                <div className="text-left">
+                  <p className="font-bold text-primary text-sm">Manage Integrations</p>
+                  <p className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">Roof Hub, Roofr, EagleView, HailTrace</p>
+                </div>
+              </div>
+              <ChevronRight size={18} className="text-slate-300" />
+            </button>
+          </div>
+        )}
 
         {/* Document Templates — owner/admin only */}
         {(profile?.role === 'owner' || profile?.role === 'admin') && (

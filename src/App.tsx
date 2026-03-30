@@ -42,6 +42,7 @@ const PublicDocumentSigner = lazy(() => import('./pages/PublicDocumentSigner'));
 const InspectionReportBuilder = lazy(() => import('./pages/InspectionReportBuilder'));
 const Landing = lazy(() => import('./pages/Landing'));
 const StormHistory = lazy(() => import('./pages/StormHistory'));
+const Integrations = lazy(() => import('./pages/Integrations'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -132,6 +133,7 @@ function AppRoutes() {
             <Route path="/photo-checklist" element={<PhotoChecklist />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/settings/document-templates" element={<DocumentTemplateEditor />} />
+            <Route path="/settings/integrations" element={<Integrations />} />
             <Route path="/help" element={<HelpSupport />} />
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/storm-history" element={<StormHistory />} />
