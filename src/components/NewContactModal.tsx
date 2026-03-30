@@ -93,7 +93,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
       // Race the insert against a 15-second timeout so the spinner never hangs
       const insertPromise = supabase.from('contacts').insert(payload as any);
       const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Request timed out — check your connection and try again.')), 15000),
+        setTimeout(() => reject(new Error('Request timed out — check your connection and try again.')), 12000),
       );
       const { error } = await Promise.race([insertPromise, timeoutPromise]) as Awaited<typeof insertPromise>;
 
