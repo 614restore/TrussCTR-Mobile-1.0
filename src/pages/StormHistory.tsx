@@ -16,6 +16,8 @@ import {
   fetchStormHistory,
   fetchLiveNoaaFeed,
   forceCheckForNoaaStorms,
+  backfillNoaaHistory,
+  type BackfillProgress,
   type LiveNoaaEvent,
 } from '../lib/noaaStormService';
 
@@ -455,20 +457,47 @@ function LiveFeedTab({ companyId, location }: {
 
 // ─── History tab ──────────────────────────────────────────────────────────────
 
-function HistoryTab({ companyId }: { companyId: string }) {
-  const [events,     setEvents]     = useState<any[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [filter,     setFilter]     = useState<FilterTab>('all');
-  const [dateRange,  setDateRange]  = useState<DateRange>('12m');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo,   setCustomTo]   = useState('');
+function HistoryTab({ companyId, location }: {
+  companyId: string;
+  location?: { city?: string | null; state?: string | null; zip?: string | null };
+}) {
+  const [events,          setEvents]          = useState<any[]>([]);
+  const [loading,         setLoading]         = useState(true);
+  const [filter,          setFilter]          = useState<FilterTab>('all');
+  const [dateRange,       setDateRange]       = useState<DateRange>('12m');
+  const [customFrom,      setCustomFrom]      = useState('');
+  const [customTo,        setCustomTo]        = useState('');
+  const [backfilling,     setBackfilling]     = useState(false);
+  const [backfillProgress,setBackfillProgress]= useState<BackfillProgress | null>(null);
+  const [backfillDone,    setBackfillDone]    = useState(false);
 
-  useEffect(() => {
+  const reload = () => {
+    setLoading(true);
     fetchStormHistory(companyId).then((data) => {
       setEvents(data);
       setLoading(false);
     });
-  }, [companyId]);
+  };
+
+  useEffect(() => { reload(); }, [companyId]);
+
+  const handleBackfill = async (days: number) => {
+    if (!location?.city && !location?.state && !location?.zip) return;
+    setBackfilling(true);
+    setBackfillProgress({ total: days - 2, done: 0, saved: 0 });
+    try {
+      await backfillNoaaHistory(
+        companyId,
+        location,
+        days,
+        (p) => setBackfillProgress(p),
+      );
+      setBackfillDone(true);
+      reload();
+    } finally {
+      setBackfilling(false);
+    }
+  };
 
   // Default custom range to last 30 days when user switches to Custom
   const handleRangeSelect = (r: DateRange) => {
@@ -601,16 +630,65 @@ function HistoryTab({ companyId }: { companyId: string }) {
         ))}
       </div>
 
+      {/* Backfill progress bar */}
+      {backfilling && backfillProgress && (
+        <div className="bg-primary/5 border border-primary/10 rounded-2xl p-4 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-bold text-primary">Importing storm history…</p>
+            <p className="text-xs text-slate-400">
+              Day {backfillProgress.done}/{backfillProgress.total} · {backfillProgress.saved} saved
+            </p>
+          </div>
+          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-300"
+              style={{ width: `${backfillProgress.total > 0 ? Math.round((backfillProgress.done / backfillProgress.total) * 100) : 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Backfill done banner */}
+      {backfillDone && !backfilling && (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3">
+          <div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
+            <History size={16} className="text-white" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-bold text-emerald-700">History imported</p>
+            <p className="text-[11px] text-emerald-600">Past storm reports loaded into your history.</p>
+          </div>
+        </div>
+      )}
+
       {/* Event list */}
       {filtered.length === 0 ? (
-        <div className="py-16 text-center">
-          <History size={36} className="mx-auto text-slate-200 mb-3" />
-          <p className="text-sm font-bold text-slate-400">No storms recorded</p>
-          <p className="text-xs text-slate-300 mt-1 px-6">
-            {events.length === 0
-              ? 'Storm reports will appear here once detected near your area'
-              : `No events match "${rangeLabel}"${filter !== 'all' ? ` · ${filter}` : ''}`}
-          </p>
+        <div className="py-10 text-center space-y-4">
+          <History size={36} className="mx-auto text-slate-200" />
+          <div>
+            <p className="text-sm font-bold text-slate-400">No storms recorded</p>
+            <p className="text-xs text-slate-300 mt-1 px-6">
+              {events.length === 0
+                ? 'Import past data to see storms that happened near you'
+                : `No events match "${rangeLabel}"${filter !== 'all' ? ` · ${filter}` : ''}`}
+            </p>
+          </div>
+          {events.length === 0 && !backfilling && location?.city && (
+            <div className="flex flex-col gap-2 items-center px-6">
+              <button
+                onClick={() => handleBackfill(30)}
+                className="w-full bg-primary text-white py-3 rounded-2xl text-sm font-bold active:scale-95 transition-all"
+              >
+                Import Past 30 Days
+              </button>
+              <button
+                onClick={() => handleBackfill(90)}
+                className="w-full bg-slate-100 text-slate-600 py-3 rounded-2xl text-sm font-bold active:scale-95 transition-all"
+              >
+                Import Past 90 Days
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -724,7 +802,14 @@ export default function StormHistory() {
           }}
         />
       ) : (
-        <HistoryTab companyId={companyId} />
+        <HistoryTab
+          companyId={companyId}
+          location={{
+            city:  (profile?.companies as any)?.city  ?? null,
+            state: (profile?.companies as any)?.state ?? null,
+            zip:   (profile?.companies as any)?.zip   ?? null,
+          }}
+        />
       )}
     </div>
   );

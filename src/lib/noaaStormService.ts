@@ -83,12 +83,14 @@ interface ParsedEvent {
 
 /**
  * Fetch storm events via the Supabase Edge Function.
- * The Edge Function fetches + parses the NOAA SPC CSV server-side,
- * so there is no CORS issue on web or mobile.
+ * Pass date=YYYY-MM-DD to fetch a specific archive day; omit for today+yesterday.
  */
-async function fetchEventsFromEdgeFunction(): Promise<ParsedEvent[]> {
+async function fetchEventsFromEdgeFunction(date?: string): Promise<ParsedEvent[]> {
   try {
-    const { data, error } = await (supabase.functions as any).invoke('noaa-storms');
+    const { data, error } = await (supabase.functions as any).invoke('noaa-storms', {
+      ...(date ? { headers: {}, body: null, method: 'GET' } : {}),
+      ...(date ? { queryParams: { date } } : {}),
+    } as any);
     if (error) {
       console.warn('[NOAA] Edge Function error:', error.message);
       return [];
@@ -96,6 +98,29 @@ async function fetchEventsFromEdgeFunction(): Promise<ParsedEvent[]> {
     return (data?.events as ParsedEvent[]) ?? [];
   } catch (err) {
     console.warn('[NOAA] Edge Function call failed:', err);
+    return [];
+  }
+}
+
+async function fetchEventsForDate(date: string): Promise<ParsedEvent[]> {
+  try {
+    // Supabase JS SDK invoke doesn't support query params natively, so we call fetch directly
+    const { data: { session } } = await supabase.auth.getSession();
+    const supabaseUrl = (supabase as any).supabaseUrl as string;
+    const supabaseKey = (supabase as any).supabaseKey as string;
+    const res = await fetch(
+      `${supabaseUrl}/functions/v1/noaa-storms?date=${encodeURIComponent(date)}`,
+      {
+        headers: {
+          'apikey': supabaseKey,
+          'Authorization': `Bearer ${session?.access_token ?? supabaseKey}`,
+        },
+      },
+    );
+    if (!res.ok) return [];
+    const json = await res.json();
+    return (json?.events as ParsedEvent[]) ?? [];
+  } catch {
     return [];
   }
 }
@@ -392,4 +417,124 @@ export async function fetchLiveNoaaFeed(
 export async function forceCheckForNoaaStorms(companyId: string): Promise<void> {
   lastCheckEpoch = 0; // bypass rate limit
   return checkForNoaaStorms(companyId);
+}
+
+// ─── Historical backfill ──────────────────────────────────────────────────────
+
+export interface BackfillProgress {
+  total: number;
+  done: number;
+  saved: number;
+}
+
+/**
+ * Backfill NOAA storm history for the past `days` days.
+ * Fetches each day's SPC archive, filters by the company's location and
+ * configured thresholds, and inserts missing notifications.
+ *
+ * Calls onProgress(progress) after each day so the UI can show a progress bar.
+ */
+export async function backfillNoaaHistory(
+  companyId: string,
+  location: { city?: string | null; state?: string | null; zip?: string | null },
+  days = 30,
+  onProgress?: (p: BackfillProgress) => void,
+): Promise<{ saved: number }> {
+  // 1. Geocode company location
+  const geo = await geocodeAddress(location.city, location.state, location.zip);
+  if (!geo) {
+    console.warn('[NOAA Backfill] Cannot geocode company location — aborting.');
+    return { saved: 0 };
+  }
+
+  // 2. Load NOAA config
+  const { data: row } = await (supabase.from('company_integrations') as any)
+    .select('noaa_enabled, noaa_min_hail_inches, noaa_min_wind_mph, noaa_radius_miles')
+    .eq('company_id', companyId)
+    .maybeSingle() as { data: NoaaConfig | null };
+
+  const cfg: NoaaConfig = {
+    noaa_enabled:         row?.noaa_enabled         ?? true,
+    noaa_min_hail_inches: row?.noaa_min_hail_inches ?? 1.0,
+    noaa_min_wind_mph:    row?.noaa_min_wind_mph    ?? 58,
+    noaa_radius_miles:    row?.noaa_radius_miles    ?? 25,
+  };
+
+  // 3. Load existing notification fingerprints to avoid duplicates
+  const since = new Date(Date.now() - (days + 1) * 86_400_000).toISOString();
+  const { data: existing } = await (supabase.from('notifications') as any)
+    .select('metadata')
+    .eq('company_id', companyId)
+    .in('type', ['storm_alert'])
+    .gte('created_at', since) as { data: { metadata: any }[] | null };
+
+  const existingFingerprints = new Set<string>(
+    (existing ?? []).map((n) => n.metadata?.fingerprint).filter(Boolean),
+  );
+
+  // 4. Build list of dates (skip today and yesterday — already handled by live check)
+  const dates: string[] = [];
+  for (let i = 2; i <= days; i++) {
+    const d = new Date(Date.now() - i * 86_400_000);
+    dates.push(d.toISOString().split('T')[0]); // YYYY-MM-DD
+  }
+
+  let saved = 0;
+  const total = dates.length;
+
+  // 5. Fetch each day and insert qualifying events (sequentially to avoid rate limiting)
+  for (let i = 0; i < dates.length; i++) {
+    const dateStr = dates[i];
+    onProgress?.({ total, done: i, saved });
+
+    const events = await fetchEventsForDate(dateStr);
+
+    const toInsert: any[] = [];
+    for (const event of events) {
+      if (existingFingerprints.has(event.fingerprint)) continue;
+
+      const dist = distanceMiles(geo.lat, geo.lng, event.lat, event.lng);
+      if (dist > cfg.noaa_radius_miles) continue;
+      if (event.type === 'HAIL' && event.magnitude < cfg.noaa_min_hail_inches) continue;
+      if (event.type === 'WIND' && event.magnitude < cfg.noaa_min_wind_mph)     continue;
+
+      const distStr = dist < 1 ? 'within 1 mile' : `${Math.round(dist)} miles away`;
+      const dateLabel = new Date(event.eventDate + 'T12:00:00').toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+      });
+
+      const title = event.type === 'HAIL'
+        ? `Hail Report: ${event.magnitude}" — ${distStr}`
+        : `Wind Report: ${Math.round(event.magnitude)} mph — ${distStr}`;
+
+      toInsert.push({
+        company_id: companyId,
+        type:       'storm_alert',
+        title,
+        body:       `${event.location}, ${event.state} on ${dateLabel}`,
+        read:       true, // backfilled history — don't trigger badge
+        metadata: {
+          fingerprint:  event.fingerprint,
+          event_type:   event.type,
+          magnitude:    event.magnitude,
+          distance_miles: Math.round(dist),
+          city:         event.location,
+          state:        event.state,
+          source:       'noaa_spc',
+          event_date:   event.eventDate,
+        },
+        created_at: event.eventDate + 'T12:00:00.000Z',
+      });
+
+      existingFingerprints.add(event.fingerprint); // prevent intra-batch duplicates
+    }
+
+    if (toInsert.length > 0) {
+      await (supabase.from('notifications') as any).insert(toInsert);
+      saved += toInsert.length;
+    }
+  }
+
+  onProgress?.({ total, done: total, saved });
+  return { saved };
 }

@@ -5,8 +5,12 @@
  * bypassing the CORS restriction that prevents browser clients from calling
  * spc.noaa.gov directly.
  *
- * Returns parsed HAIL and WIND events for today and yesterday as JSON.
- * Response is cached for 10 minutes to avoid hammering NOAA on busy days.
+ * Query params:
+ *   ?date=YYMMDD   — fetch a specific archive day (e.g. 260315 for 2026-03-15)
+ *                    omit for default: today + yesterday
+ *
+ * Returns parsed HAIL and WIND events as JSON.
+ * Today+yesterday response is cached for 10 minutes.
  *
  * Called by: src/lib/noaaStormService.ts via supabase.functions.invoke()
  */
@@ -18,6 +22,11 @@ const corsHeaders = {
 
 const SPC_TODAY_URL     = 'https://www.spc.noaa.gov/climo/reports/today.csv';
 const SPC_YESTERDAY_URL = 'https://www.spc.noaa.gov/climo/reports/yesterday.csv';
+
+// Archive URL uses 2-digit year: YYMMDD_rpts.csv
+function spcArchiveUrl(yymmdd: string): string {
+  return `https://www.spc.noaa.gov/climo/reports/${yymmdd}_rpts.csv`;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,11 +48,6 @@ interface ParsedEvent {
 //   Wind:    Time, Speed,   Location, County, State, Lat, Lon, Comments
 //   Hail:    Time, Size,    Location, County, State, Lat, Lon, Comments
 //
-// Key differences from earlier assumption:
-//   - Wind section col2 = "Speed", NOT "F_Scale"
-//   - Only 8 columns (no separate Speed column between F_Scale and Location)
-//   - Column indices: Lat=parts[5], Lon=parts[6] (not 6/7)
-//
 // Hail Size = hundredths of an inch (100 → 1.00", 175 → 1.75")
 // Wind Speed = mph
 
@@ -62,7 +66,7 @@ function parseSpcCsv(csvText: string, reportDate: string): ParsedEvent[] {
       const col2 = (line.split(',')[1] ?? '').trim();
       if      (col2 === 'Size')    section = 'HAIL';
       else if (col2 === 'Speed')   section = 'WIND';
-      else if (col2 === 'F_Scale') section = 'TORNADO'; // skip tornado rows
+      else if (col2 === 'F_Scale') section = 'TORNADO';
       else                         section = null;
       continue;
     }
@@ -118,6 +122,12 @@ function parseSpcCsv(csvText: string, reportDate: string): ParsedEvent[] {
   return events;
 }
 
+// Convert a YYYY-MM-DD string to YYMMDD archive format
+function toYYMMDD(isoDate: string): string {
+  const [yyyy, mm, dd] = isoDate.split('-');
+  return `${yyyy.slice(2)}${mm}${dd}`;
+}
+
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
@@ -127,12 +137,12 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const todayStr     = new Date().toISOString().split('T')[0];
-    const yesterdayStr = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
+    const url       = new URL(req.url);
+    const dateParam = url.searchParams.get('date'); // YYMMDD or YYYY-MM-DD
 
-    const fetchCsv = async (url: string, date: string): Promise<ParsedEvent[]> => {
+    const fetchCsv = async (csvUrl: string, date: string): Promise<ParsedEvent[]> => {
       try {
-        const res = await fetch(url, {
+        const res = await fetch(csvUrl, {
           headers: { 'User-Agent': 'TrussCTR/1.0 (storm alert system)' },
         });
         if (!res.ok) return [];
@@ -142,12 +152,44 @@ Deno.serve(async (req: Request) => {
       }
     };
 
-    const [todayEvents, yesterdayEvents] = await Promise.all([
-      fetchCsv(SPC_TODAY_URL,     todayStr),
-      fetchCsv(SPC_YESTERDAY_URL, yesterdayStr),
-    ]);
+    let events: ParsedEvent[];
+    let cacheControl = 'no-store'; // default: no cache for archive requests
 
-    const events = [...todayEvents, ...yesterdayEvents];
+    if (dateParam) {
+      // ── Archive mode: fetch a specific date ──────────────────────────────────
+      // Accept either YYYY-MM-DD or YYMMDD
+      let isoDate: string;
+      let yymmdd: string;
+
+      if (dateParam.includes('-')) {
+        // YYYY-MM-DD format
+        isoDate = dateParam;
+        yymmdd  = toYYMMDD(dateParam);
+      } else {
+        // YYMMDD format — convert to YYYY-MM-DD
+        const yy   = dateParam.slice(0, 2);
+        const mm   = dateParam.slice(2, 4);
+        const dd   = dateParam.slice(4, 6);
+        const yyyy = parseInt(yy, 10) < 50 ? `20${yy}` : `19${yy}`;
+        isoDate = `${yyyy}-${mm}-${dd}`;
+        yymmdd  = dateParam;
+      }
+
+      events = await fetchCsv(spcArchiveUrl(yymmdd), isoDate);
+
+    } else {
+      // ── Live mode: today + yesterday ─────────────────────────────────────────
+      const todayStr     = new Date().toISOString().split('T')[0];
+      const yesterdayStr = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
+
+      const [todayEvents, yesterdayEvents] = await Promise.all([
+        fetchCsv(SPC_TODAY_URL,     todayStr),
+        fetchCsv(SPC_YESTERDAY_URL, yesterdayStr),
+      ]);
+
+      events       = [...todayEvents, ...yesterdayEvents];
+      cacheControl = 'public, max-age=600'; // cache 10 min for live data
+    }
 
     return new Response(
       JSON.stringify({ events, fetchedAt: new Date().toISOString() }),
@@ -156,7 +198,7 @@ Deno.serve(async (req: Request) => {
         headers: {
           ...corsHeaders,
           'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=600', // cache 10 minutes
+          'Cache-Control': cacheControl,
         },
       },
     );
