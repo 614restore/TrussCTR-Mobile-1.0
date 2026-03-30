@@ -535,9 +535,10 @@ export async function backfillNoaaHistory(
 
       toInsert.push({
         company_id: companyId,
+        user_id:    null,
         type:       'storm_alert',
         title,
-        body:       `${event.location}, ${event.state} on ${dateLabel}`,
+        message:    `${event.location}, ${event.state} on ${dateLabel}`,
         read:       true, // backfilled history — don't trigger badge
         metadata: {
           fingerprint:  event.fingerprint,
@@ -556,8 +557,12 @@ export async function backfillNoaaHistory(
     }
 
     if (toInsert.length > 0) {
-      await (supabase.from('notifications') as any).insert(toInsert);
-      saved += toInsert.length;
+      const { error: insertErr } = await (supabase.from('notifications') as any).insert(toInsert);
+      if (insertErr) {
+        console.warn('[NOAA Backfill] Insert error:', insertErr.message);
+      } else {
+        saved += toInsert.length;
+      }
     }
   }
 
