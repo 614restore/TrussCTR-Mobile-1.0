@@ -1,9 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Mail, Shield, ChevronLeft, Plus, Search, X, AlertCircle } from 'lucide-react';
+import { Users, Mail, Shield, ChevronLeft, Plus, Search, X, AlertCircle, CheckCircle, Send } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
+
+const ROLE_OPTIONS = [
+  { value: 'admin',       label: 'Admin' },
+  { value: 'sales_rep',   label: 'Sales Rep' },
+  { value: 'crew_lead',   label: 'Crew Lead' },
+  { value: 'crew_member', label: 'Crew Member' },
+];
 
 const USER_LIMITS: Record<string, number> = {
   starter:  2,
@@ -20,6 +27,13 @@ export default function Team() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [showLimitModal, setShowLimitModal] = useState(false);
+  const [inviteEmail, setInviteEmail]       = useState('');
+  const [inviteRole, setInviteRole]         = useState('sales_rep');
+  const [inviteSending, setInviteSending]   = useState(false);
+  const [inviteSuccess, setInviteSuccess]   = useState(false);
+  const [inviteError, setInviteError]       = useState<string | null>(null);
+
+  const canInvite = profile?.role === 'owner' || profile?.role === 'admin';
 
   const subscriptionPlan: string = profile?.companies?.subscription_plan ?? 'trial';
   const planLimit = USER_LIMITS[subscriptionPlan] ?? 2;
@@ -48,24 +62,70 @@ export default function Team() {
     }
   };
 
-  const filteredMembers = members.filter(m => 
+  const openInviteModal = () => {
+    setInviteEmail('');
+    setInviteRole('sales_rep');
+    setInviteError(null);
+    setInviteSuccess(false);
+    setShowLimitModal(true);
+  };
+
+  const closeInviteModal = () => {
+    setShowLimitModal(false);
+  };
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteError(null);
+    setInviteSending(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${supabaseUrl}/functions/v1/invite-team-member`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`,
+        },
+        body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to send invite. Please try again.');
+      }
+      setInviteSuccess(true);
+      // Refresh member list in case the invited user was already registered
+      fetchMembers();
+    } catch (err: any) {
+      setInviteError(err.message || 'Failed to send invite.');
+    } finally {
+      setInviteSending(false);
+    }
+  };
+
+  const filteredMembers = members.filter(m =>
     `${m.first_name} ${m.last_name}`.toLowerCase().includes(searchQuery.toLowerCase()) ||
     m.email?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   return (
     <>
-    {/* Seat limit / invite modal */}
+    {/* Invite / seat-limit modal */}
     {showLimitModal && (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowLimitModal(false)}>
-        <div className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-5" onClick={e => e.stopPropagation()}>
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={closeInviteModal}>
+        <motion.div
+          initial={{ y: 60, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-5"
+          onClick={e => e.stopPropagation()}
+        >
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-primary">Add Team Member</h2>
-            <button onClick={() => setShowLimitModal(false)} className="p-2 text-slate-400 active:scale-90 transition-transform">
+            <h2 className="text-xl font-bold text-primary">Invite Team Member</h2>
+            <button onClick={closeInviteModal} className="p-2 text-slate-400 active:scale-90 transition-transform">
               <X size={22} />
             </button>
           </div>
 
+          {/* Seat limit reached */}
           {atSeatLimit ? (
             <div className="space-y-4">
               <div className="flex items-start gap-3 rounded-2xl bg-amber-50 border border-amber-100 p-4">
@@ -79,30 +139,116 @@ export default function Team() {
                 </div>
               </div>
               <p className="text-sm text-slate-500 text-center">
-                To add more members, upgrade your plan from the{' '}
-                <span className="font-bold text-accent">TrussCTR web app</span> under Settings → My Plan.
+                To add more members, upgrade your plan under{' '}
+                <span className="font-bold text-accent">Settings → My Plan</span>.
               </p>
-              <button onClick={() => setShowLimitModal(false)} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
+              <button onClick={closeInviteModal} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
                 Got it
               </button>
             </div>
-          ) : (
+
+          /* No invite permission (not admin/owner) */
+          ) : !canInvite ? (
             <div className="space-y-4">
-              <p className="text-sm text-slate-500">
-                You have <span className="font-bold text-primary">{members.length} / {planLimit === Infinity ? '∞' : planLimit}</span> seats used on your <span className="font-semibold capitalize">{subscriptionPlan}</span> plan.
-              </p>
-              <p className="text-sm text-slate-500">
-                To invite a new team member, send the invitation from the{' '}
-                <span className="font-bold text-accent">TrussCTR web app</span> under Team.
-                The invite link will take them to a <span className="font-semibold">Create Account</span> page
-                showing their role and company.
-              </p>
-              <button onClick={() => setShowLimitModal(false)} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
+              <div className="flex items-start gap-3 rounded-2xl bg-slate-50 border border-slate-100 p-4">
+                <Shield size={20} className="text-slate-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-bold text-slate-700">Admin access required</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Only owners and admins can invite new team members. Contact your team admin to send an invite.
+                  </p>
+                </div>
+              </div>
+              <button onClick={closeInviteModal} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
                 OK
               </button>
             </div>
+
+          /* Invite sent successfully */
+          ) : inviteSuccess ? (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center gap-3 py-4 text-center">
+                <div className="h-14 w-14 rounded-full bg-emerald-50 flex items-center justify-center">
+                  <CheckCircle size={28} className="text-emerald-500" />
+                </div>
+                <div>
+                  <p className="font-bold text-primary">Invite sent!</p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    <span className="font-semibold">{inviteEmail}</span> will receive an email with a link to create their account.
+                  </p>
+                </div>
+              </div>
+              <button onClick={closeInviteModal} className="w-full bg-primary text-white font-bold py-4 rounded-2xl active:scale-95 transition-transform">
+                Done
+              </button>
+            </div>
+
+          /* Invite form */
+          ) : (
+            <form onSubmit={handleInvite} className="space-y-4">
+              <p className="text-xs text-slate-400">
+                {planLimit === Infinity
+                  ? `${members.length} member${members.length !== 1 ? 's' : ''} on your team`
+                  : `${members.length} / ${planLimit} seats used · ${subscriptionPlan} plan`}
+              </p>
+
+              {inviteError && (
+                <div className="flex items-start gap-3 rounded-2xl bg-red-50 border border-red-100 p-4">
+                  <AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-700">{inviteError}</p>
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Email address</label>
+                <div className="relative">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="email"
+                    required
+                    placeholder="teammate@company.com"
+                    value={inviteEmail}
+                    onChange={e => setInviteEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+                    autoComplete="off"
+                    autoCapitalize="none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Role</label>
+                <div className="relative">
+                  <Shield className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <select
+                    value={inviteRole}
+                    onChange={e => setInviteRole(e.target.value)}
+                    className="w-full appearance-none bg-slate-50 border border-slate-200 rounded-2xl py-3 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+                  >
+                    {ROLE_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={inviteSending}
+                className="w-full bg-accent text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+              >
+                {inviteSending ? (
+                  <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Send size={16} />
+                    Send Invite
+                  </>
+                )}
+              </button>
+            </form>
           )}
-        </div>
+        </motion.div>
       </div>
     )}
 
@@ -128,7 +274,7 @@ export default function Team() {
             />
           </div>
           <button
-            onClick={() => setShowLimitModal(true)}
+            onClick={openInviteModal}
             className="bg-accent text-white p-3 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-transform"
           >
             <Plus size={20} />
