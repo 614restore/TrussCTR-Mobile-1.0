@@ -65,7 +65,12 @@ export default function Dashboard() {
   // ── Storm Intelligence fetch ────────────────────────────────────────────────
   useEffect(() => {
     if (!profile?.company_id) return;
-    fetchLiveNoaaFeed(profile.company_id)
+    const co = profile.companies as any;
+    fetchLiveNoaaFeed(profile.company_id, {
+      city:  co?.city  ?? null,
+      state: co?.state ?? null,
+      zip:   co?.zip   ?? null,
+    })
       .then(({ events }) => {
         const noLocation = events.length > 0 && events[0].distanceMiles === null;
         const savedRadius = parseInt(localStorage.getItem('stormRadiusMiles') ?? '50', 10);

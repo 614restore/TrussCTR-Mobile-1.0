@@ -199,7 +199,10 @@ function hailLabel(h: HailOption): string {
   return `${h}"`;
 }
 
-function LiveFeedTab({ companyId }: { companyId: string }) {
+function LiveFeedTab({ companyId, location }: {
+  companyId: string;
+  location?: { city?: string | null; state?: string | null; zip?: string | null };
+}) {
   const [events,    setEvents]    = useState<LiveNoaaEvent[]>([]);
   const [loading,   setLoading]   = useState(true);
   const [refreshing,setRefreshing]= useState(false);
@@ -235,7 +238,7 @@ function LiveFeedTab({ companyId }: { companyId: string }) {
   const load = useCallback(async (force = false) => {
     if (force) setRefreshing(true); else setLoading(true);
     try {
-      const result = await fetchLiveNoaaFeed(companyId);
+      const result = await fetchLiveNoaaFeed(companyId, location);
       setEvents(result.events);
       setFetchedAt(result.fetchedAt);
       // If no distances were calculated the company has no city/state set
@@ -712,7 +715,14 @@ export default function StormHistory() {
           <p className="text-sm font-bold text-slate-400">Not signed in</p>
         </div>
       ) : tab === 'live' ? (
-        <LiveFeedTab companyId={companyId} />
+        <LiveFeedTab
+          companyId={companyId}
+          location={{
+            city:  (profile?.companies as any)?.city  ?? null,
+            state: (profile?.companies as any)?.state ?? null,
+            zip:   (profile?.companies as any)?.zip   ?? null,
+          }}
+        />
       ) : (
         <HistoryTab companyId={companyId} />
       )}

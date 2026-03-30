@@ -325,22 +325,40 @@ export interface LiveNoaaEvent extends ParsedEvent {
  * company's location.  No radius filter, no threshold filter — returns
  * everything so the user can browse the full live feed on demand.
  *
+ * Pass `location` directly from profile.companies to avoid a redundant DB
+ * query and any PostgREST schema-cache issues with newly added columns.
+ *
  * Returns { events, fetchedAt } so the UI can show "last updated" time.
  */
-export async function fetchLiveNoaaFeed(companyId: string): Promise<{
+export async function fetchLiveNoaaFeed(
+  companyId: string,
+  location?: { city?: string | null; state?: string | null; zip?: string | null },
+): Promise<{
   events: LiveNoaaEvent[];
   fetchedAt: Date;
 }> {
-  const [allEvents, companyRes] = await Promise.all([
-    fetchEventsFromEdgeFunction(),
-    (supabase.from('companies').select('*').eq('id', companyId).single() as unknown as Promise<{ data: Record<string, any> | null }>),
-  ]);
+  // If location was passed in from the profile, use it directly.
+  // Otherwise fall back to a DB query (for callers that don't have profile data).
+  let city  = location?.city;
+  let state = location?.state;
+  let zip   = location?.zip;
 
-  const companyData = companyRes.data as any;
-  console.log('[NOAA] Company location data:', companyData);
-  const geo = companyData
-    ? await geocodeAddress(companyData.city, companyData.state, companyData.zip)
-    : null;
+  if (!city && !state && !zip) {
+    const { data: companyData } = await (supabase
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single() as unknown as Promise<{ data: Record<string, any> | null }>);
+    city  = companyData?.city;
+    state = companyData?.state;
+    zip   = companyData?.zip;
+  }
+
+  console.log('[NOAA] Geocoding with:', { city, state, zip });
+  const [allEvents, geo] = await Promise.all([
+    fetchEventsFromEdgeFunction(),
+    geocodeAddress(city, state, zip),
+  ]);
   console.log('[NOAA] Geocode result:', geo);
 
   const todayStr = new Date().toISOString().slice(0, 10);
