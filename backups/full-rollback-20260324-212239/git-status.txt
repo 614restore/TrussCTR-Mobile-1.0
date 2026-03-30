@@ -1,0 +1,39 @@
+On branch main
+Your branch and 'origin/main' have diverged,
+and have 1 and 19 different commits each, respectively.
+  (use "git pull" if you want to integrate the remote branch with yours)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   capacitor.config.ts
+	modified:   ios/App/App.xcodeproj/project.pbxproj
+	modified:   ios/App/App/Plugins/BridgeViewController.swift
+	modified:   ios/App/App/Plugins/MultiShotCameraPlugin.swift
+	modified:   src/App.tsx
+	modified:   src/components/Layout.tsx
+	modified:   src/context/AuthContext.tsx
+	modified:   src/lib/contactSchedule.ts
+	modified:   src/lib/pipelineStages.ts
+	modified:   src/pages/Calendar.tsx
+	modified:   src/pages/ContactDetail.tsx
+	modified:   src/pages/MaterialOrders.tsx
+	modified:   src/pages/More.tsx
+	modified:   src/pages/Pipeline.tsx
+	modified:   src/pages/PitchGauge.tsx
+	modified:   src/pages/Settings.tsx
+	modified:   tsconfig.json
+	modified:   vite.config.ts
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	.cursor/
+	.github/copilot-instructions.md
+	CLAUDE.md
+	backups/
+	ios/App/App.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+	ios/App/App/SceneDelegate.swift
+	ios/App/SceneDelegate.swift
+	src/lib/pushNotifications.ts
+
+no changes added to commit (use "git add" and/or "git commit -a")

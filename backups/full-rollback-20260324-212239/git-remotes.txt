@@ -1,0 +1,2 @@
+origin	https://github.com/614restore/TrussCTR-Mobile-1.0.git (fetch)
+origin	https://github.com/614restore/TrussCTR-Mobile-1.0.git (push)

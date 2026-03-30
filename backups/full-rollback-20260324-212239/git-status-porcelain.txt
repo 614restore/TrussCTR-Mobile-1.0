@@ -1,0 +1,26 @@
+ M capacitor.config.ts
+ M ios/App/App.xcodeproj/project.pbxproj
+ M ios/App/App/Plugins/BridgeViewController.swift
+ M ios/App/App/Plugins/MultiShotCameraPlugin.swift
+ M src/App.tsx
+ M src/components/Layout.tsx
+ M src/context/AuthContext.tsx
+ M src/lib/contactSchedule.ts
+ M src/lib/pipelineStages.ts
+ M src/pages/Calendar.tsx
+ M src/pages/ContactDetail.tsx
+ M src/pages/MaterialOrders.tsx
+ M src/pages/More.tsx
+ M src/pages/Pipeline.tsx
+ M src/pages/PitchGauge.tsx
+ M src/pages/Settings.tsx
+ M tsconfig.json
+ M vite.config.ts
+?? .cursor/
+?? .github/copilot-instructions.md
+?? CLAUDE.md
+?? backups/
+?? ios/App/App.xcodeproj/project.xcworkspace/contents.xcworkspacedata
+?? ios/App/App/SceneDelegate.swift
+?? ios/App/SceneDelegate.swift
+?? src/lib/pushNotifications.ts

@@ -1,0 +1,3396 @@
+diff --git a/capacitor.config.ts b/capacitor.config.ts
+index 96ac2a6..584b2b3 100644
+--- a/capacitor.config.ts
++++ b/capacitor.config.ts
+@@ -20,6 +20,7 @@ const config: CapacitorConfig = {
+     },
+     SplashScreen: {
+       launchShowDuration: 2000,
++      launchAutoHide: true,
+       backgroundColor: '#1e293b',
+       showSpinner: false,
+     },
+diff --git a/ios/App/App.xcodeproj/project.pbxproj b/ios/App/App.xcodeproj/project.pbxproj
+index 0fa7e2d..f829c45 100644
+--- a/ios/App/App.xcodeproj/project.pbxproj
++++ b/ios/App/App.xcodeproj/project.pbxproj
+@@ -15,6 +15,7 @@
+ 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
+ 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
+ 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
++		8BC98F1C2F6DA87700911100 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BC98F1B2F6DA87700911100 /* SceneDelegate.swift */; };
+ 		A1B2C3D4E5F6070800000002 /* Plugins/MultiShotCameraPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6070800000001 /* Plugins/MultiShotCameraPlugin.swift */; };
+ 		B1C2D3E4F506070800000004 /* Plugins/BridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C2D3E4F506070800000003 /* Plugins/BridgeViewController.swift */; };
+ /* End PBXBuildFile section */
+@@ -30,6 +31,7 @@
+ 		504EC3131FED79650016851F /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+ 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
+ 		8B070B682F6C4FDE0030FA51 /* App.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = App.entitlements; sourceTree = "<group>"; };
++		8BC98F1B2F6DA87700911100 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+ 		958DCC722DB07C7200EA8C5F /* debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = debug.xcconfig; path = ../debug.xcconfig; sourceTree = SOURCE_ROOT; };
+ 		A1B2C3D4E5F6070800000001 /* Plugins/MultiShotCameraPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plugins/MultiShotCameraPlugin.swift; sourceTree = "<group>"; };
+ 		B1C2D3E4F506070800000003 /* Plugins/BridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Plugins/BridgeViewController.swift; sourceTree = "<group>"; };
+@@ -50,6 +52,7 @@
+ 		504EC2FB1FED79650016851F = {
+ 			isa = PBXGroup;
+ 			children = (
++				8BC98F1B2F6DA87700911100 /* SceneDelegate.swift */,
+ 				958DCC722DB07C7200EA8C5F /* debug.xcconfig */,
+ 				504EC3061FED79650016851F /* App */,
+ 				504EC3051FED79650016851F /* Products */,
+@@ -166,6 +169,7 @@
+ 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+ 				A1B2C3D4E5F6070800000002 /* Plugins/MultiShotCameraPlugin.swift in Sources */,
+ 				B1C2D3E4F506070800000004 /* Plugins/BridgeViewController.swift in Sources */,
++				8BC98F1C2F6DA87700911100 /* SceneDelegate.swift in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+diff --git a/ios/App/App/Plugins/BridgeViewController.swift b/ios/App/App/Plugins/BridgeViewController.swift
+index 283c76b..8a56a91 100644
+--- a/ios/App/App/Plugins/BridgeViewController.swift
++++ b/ios/App/App/Plugins/BridgeViewController.swift
+@@ -3,12 +3,10 @@ import Capacitor
+ @objc(BridgeViewController)
+ public class BridgeViewController: CAPBridgeViewController {
+ 
+-    // capacitorDidLoad() is called after the Capacitor bridge is fully
+-    // initialised and all npm plugins are registered. This is the correct
+-    // lifecycle point to register inline (non-npm) plugins such as
+-    // MultiShotCameraPlugin so that Capacitor.isPluginAvailable() always
+-    // returns true on the JS side.
++    // With Capacitor 8, registerPluginType() is ignored when autoRegisterPlugins
++    // is enabled. Registering an explicit plugin instance ensures this inline
++    // app plugin is exported to JS alongside the package-based plugins.
+     override public func capacitorDidLoad() {
+-        bridge?.registerPluginType(MultiShotCameraPlugin.self)
++        bridge?.registerPluginInstance(MultiShotCameraPlugin())
+     }
+ }
+diff --git a/ios/App/App/Plugins/MultiShotCameraPlugin.swift b/ios/App/App/Plugins/MultiShotCameraPlugin.swift
+index fca3fcf..6c7cb6c 100644
+--- a/ios/App/App/Plugins/MultiShotCameraPlugin.swift
++++ b/ios/App/App/Plugins/MultiShotCameraPlugin.swift
+@@ -20,14 +20,18 @@ public class MultiShotCameraPlugin: CAPPlugin, CAPBridgedPlugin {
+             let controller = MultiShotCameraViewController()
+             controller.saveMode = call.getString("saveMode") ?? "app_files"
+             controller.onDone = { urls in
+-                self.savedCall?.resolve(["photos": urls])
+-                self.savedCall = nil
+-                self.cameraController = nil
++                controller.dismiss(animated: true) {
++                    self.savedCall?.resolve(["photos": urls])
++                    self.savedCall = nil
++                    self.cameraController = nil
++                }
+             }
+             controller.onCancel = {
+-                self.savedCall?.resolve(["photos": []])
+-                self.savedCall = nil
+-                self.cameraController = nil
++                controller.dismiss(animated: true) {
++                    self.savedCall?.resolve(["photos": []])
++                    self.savedCall = nil
++                    self.cameraController = nil
++                }
+             }
+ 
+             self.cameraController = controller
+@@ -54,25 +58,52 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
+     private let captureButton = UIButton(type: .custom)
+     private let doneButton = UIButton(type: .system)
+     private let countLabel = UILabel()
++    private var isCaptureInFlight = false
+ 
+     override func viewDidLoad() {
+         super.viewDidLoad()
+         view.backgroundColor = .black
+-        setupSession()
+         setupUI()
++        configureSession()
+     }
+ 
+     override func viewDidAppear(_ animated: Bool) {
+         super.viewDidAppear(animated)
+-        session.startRunning()
++        if !session.isRunning {
++            session.startRunning()
++        }
+     }
+ 
+     override func viewWillDisappear(_ animated: Bool) {
+         super.viewWillDisappear(animated)
+-        session.stopRunning()
++        if session.isRunning {
++            session.stopRunning()
++        }
++    }
++
++    override func viewDidLayoutSubviews() {
++        super.viewDidLayoutSubviews()
++        previewLayer?.frame = view.bounds
++    }
++
++    private func configureSession() {
++        switch AVCaptureDevice.authorizationStatus(for: .video) {
++        case .authorized:
++            setupSession()
++        case .notDetermined:
++            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
++                guard granted else { return }
++                DispatchQueue.main.async {
++                    self?.setupSession()
++                }
++            }
++        default:
++            break
++        }
+     }
+ 
+     private func setupSession() {
++        guard session.inputs.isEmpty else { return }
+         session.beginConfiguration()
+         session.sessionPreset = .photo
+ 
+@@ -145,6 +176,9 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
+     }
+ 
+     @objc private func capturePhoto() {
++        guard !isCaptureInFlight else { return }
++        isCaptureInFlight = true
++        captureButton.isEnabled = false
+         let settings = AVCapturePhotoSettings()
+         settings.flashMode = .off
+         output.capturePhoto(with: settings, delegate: self)
+@@ -152,25 +186,40 @@ final class MultiShotCameraViewController: UIViewController, AVCapturePhotoCaptu
+ 
+     @objc private func finish() {
+         onDone?(capturedURLs)
+-        dismiss(animated: true)
+     }
+ 
+     @objc private func cancel() {
+         onCancel?()
+-        dismiss(animated: true)
+     }
+ 
+     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
++        defer {
++            DispatchQueue.main.async {
++                self.isCaptureInFlight = false
++                self.captureButton.isEnabled = true
++            }
++        }
++
+         guard error == nil, let data = photo.fileDataRepresentation() else { return }
+-        let fileName = "capture_\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
+-        let documentsURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+-        let storedURL = (documentsURL ?? FileManager.default.temporaryDirectory).appendingPathComponent(fileName)
++        let fileName = "capture_\(UUID().uuidString).jpg"
++        let cachesURL = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
++        let storedURL = (cachesURL ?? FileManager.default.temporaryDirectory).appendingPathComponent(fileName)
++        let storedData: Data
++
++        if let image = UIImage(data: data), let compressedData = image.jpegData(compressionQuality: 0.82) {
++            storedData = compressedData
++        } else {
++            storedData = data
++        }
++
+         do {
+-            try data.write(to: storedURL, options: .atomic)
+-            capturedURLs.append(storedURL.absoluteString)
+-            countLabel.text = "\(capturedURLs.count)"
++            try storedData.write(to: storedURL, options: .atomic)
++            DispatchQueue.main.async {
++                self.capturedURLs.append(storedURL.path)
++                self.countLabel.text = "\(self.capturedURLs.count)"
++            }
+             if saveMode == "photo_library" {
+-                saveToPhotoLibrary(data: data)
++                saveToPhotoLibrary(data: storedData)
+             }
+         } catch {
+             // ignore write failures
+diff --git a/src/App.tsx b/src/App.tsx
+index 88d8ff7..8118ea2 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -1,109 +1,142 @@
++import { Suspense, lazy, useEffect } from 'react';
+ import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+ import { Capacitor } from '@capacitor/core';
+-import Layout from './components/Layout';
++import { SplashScreen } from '@capacitor/splash-screen';
+ import ErrorBoundary from './components/ErrorBoundary';
+-import Dashboard from './pages/Dashboard';
+-import Pipeline from './pages/Pipeline';
+-import ContactDetail from './pages/ContactDetail';
+-import CalendarPage from './pages/Calendar';
+-import FieldTools from './pages/FieldTools';
+-import More from './pages/More';
+-import Team from './pages/Team';
+-import Reports from './pages/Reports';
+-import CompanyProfile from './pages/CompanyProfile';
+-import WorkOrders from './pages/WorkOrders';
+-import Estimates from './pages/Estimates';
+-import CrewSchedule from './pages/CrewSchedule';
+-import MaterialOrders from './pages/MaterialOrders';
+-import WorkOrderDetail from './pages/WorkOrderDetail';
+-import EstimateDetail from './pages/EstimateDetail';
+-import EstimateSigner from './pages/EstimateSigner';
+-import Documents from './pages/Documents';
+-import PhotoChecklist from './pages/PhotoChecklist';
+-import Settings from './pages/Settings';
+-import HelpSupport from './pages/HelpSupport';
+-import Notifications from './pages/Notifications';
+-import Login from './pages/Login';
+-import ResetPassword from './pages/ResetPassword';
+-import DocumentManager from './pages/DocumentManager';
+-import DocumentSigner from './pages/DocumentSigner';
+-import DocumentViewer from './pages/DocumentViewer';
+-import ReportBuilder from './pages/ReportBuilder';
+-import RetailEstimator from './pages/RetailEstimator';
+-import SmartInspection from './pages/SmartInspection';
+-import PitchGauge from './pages/PitchGauge';
+ import { AuthProvider, useAuth } from './context/AuthContext';
+ 
++const Layout = lazy(() => import('./components/Layout'));
++const Dashboard = lazy(() => import('./pages/Dashboard'));
++const Pipeline = lazy(() => import('./pages/Pipeline'));
++const ContactDetail = lazy(() => import('./pages/ContactDetail'));
++const CalendarPage = lazy(() => import('./pages/Calendar'));
++const FieldTools = lazy(() => import('./pages/FieldTools'));
++const More = lazy(() => import('./pages/More'));
++const Team = lazy(() => import('./pages/Team'));
++const Reports = lazy(() => import('./pages/Reports'));
++const CompanyProfile = lazy(() => import('./pages/CompanyProfile'));
++const WorkOrders = lazy(() => import('./pages/WorkOrders'));
++const Estimates = lazy(() => import('./pages/Estimates'));
++const CrewSchedule = lazy(() => import('./pages/CrewSchedule'));
++const MaterialOrders = lazy(() => import('./pages/MaterialOrders'));
++const WorkOrderDetail = lazy(() => import('./pages/WorkOrderDetail'));
++const EstimateDetail = lazy(() => import('./pages/EstimateDetail'));
++const EstimateSigner = lazy(() => import('./pages/EstimateSigner'));
++const Documents = lazy(() => import('./pages/Documents'));
++const PhotoChecklist = lazy(() => import('./pages/PhotoChecklist'));
++const Settings = lazy(() => import('./pages/Settings'));
++const HelpSupport = lazy(() => import('./pages/HelpSupport'));
++const Notifications = lazy(() => import('./pages/Notifications'));
++const Login = lazy(() => import('./pages/Login'));
++const ResetPassword = lazy(() => import('./pages/ResetPassword'));
++const DocumentManager = lazy(() => import('./pages/DocumentManager'));
++const DocumentSigner = lazy(() => import('./pages/DocumentSigner'));
++const DocumentViewer = lazy(() => import('./pages/DocumentViewer'));
++const ReportBuilder = lazy(() => import('./pages/ReportBuilder'));
++const RetailEstimator = lazy(() => import('./pages/RetailEstimator'));
++const SmartInspection = lazy(() => import('./pages/SmartInspection'));
++const PitchGauge = lazy(() => import('./pages/PitchGauge'));
++
++function AppLoadingScreen({ message }: { message: string }) {
++  return (
++    <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
++      <div className="animate-spin rounded-full h-12 w-12 border-4 border-accent border-t-transparent mb-4"></div>
++      <p className="text-slate-500 text-sm font-medium animate-pulse">{message}</p>
++      <button
++        onClick={() => window.location.reload()}
++        className="mt-8 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors"
++      >
++        Taking too long? Tap to reload
++      </button>
++    </div>
++  );
++}
++
+ function AppRoutes() {
+   const { session, loading } = useAuth();
+ 
+   if (loading) {
+-    return (
+-      <div className="h-screen flex flex-col items-center justify-center bg-slate-50 p-6 text-center">
+-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-accent border-t-transparent mb-4"></div>
+-        <p className="text-slate-500 text-sm font-medium animate-pulse">Initializing application...</p>
+-        <button 
+-          onClick={() => window.location.reload()}
+-          className="mt-8 text-slate-400 text-xs font-bold uppercase tracking-widest hover:text-slate-600 transition-colors"
+-        >
+-          Taking too long? Tap to reload
+-        </button>
+-      </div>
+-    );
++    // On native: return null — the native splash screen covers this gap.
++    // Showing a light in-app spinner here makes it look like the splash never ends.
++    if (Capacitor.isNativePlatform()) return null;
++    // On web only: show the spinner (no native splash to cover startup).
++    return <AppLoadingScreen message="Initializing application..." />;
+   }
+ 
+   return (
+-    <Routes>
+-      {/* Always-accessible route — must work with or without a session */}
+-      <Route path="/reset-password" element={<ResetPassword />} />
+-      {!session ? (
+-        <>
+-          <Route path="/login" element={<Login />} />
+-          <Route path="*" element={<Navigate to="/login" replace />} />
+-        </>
+-      ) : (
+-        <Route element={<Layout />}>
+-          <Route path="/" element={<Dashboard />} />
+-          <Route path="/contacts" element={<Pipeline />} />
+-          <Route path="/contacts/:id" element={<ContactDetail />} />
++    <Suspense fallback={<AppLoadingScreen message="Loading screen..." />}>
++      <Routes>
++        {/* Always-accessible route — must work with or without a session */}
++        <Route path="/reset-password" element={<ResetPassword />} />
++        {!session ? (
++          <>
++            <Route path="/login" element={<Login />} />
++            <Route path="*" element={<Navigate to="/login" replace />} />
++          </>
++        ) : (
++          <Route element={<Layout />}>
++            <Route path="/" element={<Dashboard />} />
++            <Route path="/contacts" element={<Pipeline />} />
++            <Route path="/contacts/:id" element={<ContactDetail />} />
+ 
+-          {/* Contact sub-routes */}
+-          <Route path="/contacts/:id/documents" element={<DocumentManager />} />
+-          <Route path="/contacts/:id/documents/:docType" element={<DocumentSigner />} />
+-          <Route path="/documents/view/:documentId" element={<DocumentViewer />} />
+-          <Route path="/contacts/:id/report" element={<ReportBuilder />} />
+-          <Route path="/contacts/:id/estimate" element={<RetailEstimator />} />
+-          <Route path="/contacts/:id/inspection" element={<SmartInspection />} />
++            {/* Contact sub-routes */}
++            <Route path="/contacts/:id/documents" element={<DocumentManager />} />
++            <Route path="/contacts/:id/documents/:docType" element={<DocumentSigner />} />
++            <Route path="/documents/view/:documentId" element={<DocumentViewer />} />
++            <Route path="/contacts/:id/report" element={<ReportBuilder />} />
++            <Route path="/contacts/:id/estimate" element={<RetailEstimator />} />
++            <Route path="/contacts/:id/inspection" element={<SmartInspection />} />
+ 
+-          <Route path="/calendar" element={<CalendarPage />} />
+-          <Route path="/tools" element={<FieldTools />} />
+-          <Route path="/more" element={<More />} />
+-          <Route path="/team" element={<Team />} />
+-          <Route path="/reports" element={<Reports />} />
+-          <Route path="/company" element={<CompanyProfile />} />
+-          <Route path="/work-orders" element={<WorkOrders />} />
+-          <Route path="/estimates-list" element={<Estimates />} />
+-          <Route path="/crew-schedule" element={<CrewSchedule />} />
+-          <Route path="/material-orders" element={<MaterialOrders />} />
+-          <Route path="/work-orders/:id" element={<WorkOrderDetail />} />
+-          <Route path="/estimates/:id" element={<EstimateDetail />} />
+-          <Route path="/estimates/:id/sign" element={<EstimateSigner />} />
+-          <Route path="/documents" element={<Documents />} />
+-          <Route path="/photo-checklist" element={<PhotoChecklist />} />
+-          <Route path="/settings" element={<Settings />} />
+-          <Route path="/help" element={<HelpSupport />} />
+-          <Route path="/notifications" element={<Notifications />} />
+-          <Route path="/pitch-gauge" element={<PitchGauge />} />
+-          <Route path="*" element={<Navigate to="/" replace />} />
+-        </Route>
+-      )}
+-    </Routes>
++            <Route path="/calendar" element={<CalendarPage />} />
++            <Route path="/tools" element={<FieldTools />} />
++            <Route path="/more" element={<More />} />
++            <Route path="/team" element={<Team />} />
++            <Route path="/reports" element={<Reports />} />
++            <Route path="/company" element={<CompanyProfile />} />
++            <Route path="/work-orders" element={<WorkOrders />} />
++            <Route path="/estimates-list" element={<Estimates />} />
++            <Route path="/crew-schedule" element={<CrewSchedule />} />
++            <Route path="/material-orders" element={<MaterialOrders />} />
++            <Route path="/work-orders/:id" element={<WorkOrderDetail />} />
++            <Route path="/estimates/:id" element={<EstimateDetail />} />
++            <Route path="/estimates/:id/sign" element={<EstimateSigner />} />
++            <Route path="/documents" element={<Documents />} />
++            <Route path="/photo-checklist" element={<PhotoChecklist />} />
++            <Route path="/settings" element={<Settings />} />
++            <Route path="/help" element={<HelpSupport />} />
++            <Route path="/notifications" element={<Notifications />} />
++            <Route path="/pitch-gauge" element={<PitchGauge />} />
++            <Route path="*" element={<Navigate to="/" replace />} />
++          </Route>
++        )}
++      </Routes>
++    </Suspense>
+   );
+ }
+ 
+ export default function App() {
+   const Router = Capacitor.isNativePlatform() ? HashRouter : BrowserRouter;
+ 
++  useEffect(() => {
++    if (!Capacitor.isNativePlatform()) return;
++
++    const hideSplash = () => {
++      SplashScreen.hide().catch(() => {
++        // Ignore duplicate or unsupported calls outside the native shell.
++      });
++    };
++
++    const frameId = window.requestAnimationFrame(() => {
++      window.setTimeout(hideSplash, 100);
++    });
++    const fallbackId = window.setTimeout(hideSplash, 1500);
++
++    return () => {
++      window.cancelAnimationFrame(frameId);
++      window.clearTimeout(fallbackId);
++    };
++  }, []);
++
+   return (
+     <ErrorBoundary>
+       <AuthProvider>
+diff --git a/src/components/Layout.tsx b/src/components/Layout.tsx
+index b86b8f8..92057e6 100644
+--- a/src/components/Layout.tsx
++++ b/src/components/Layout.tsx
+@@ -3,61 +3,12 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
+ import { LayoutDashboard, Users, Calendar, Wrench, MoreHorizontal } from 'lucide-react';
+ import { clsx, type ClassValue } from 'clsx';
+ import { twMerge } from 'tailwind-merge';
+-import { Capacitor } from '@capacitor/core';
+-import { PushNotifications } from '@capacitor/push-notifications';
+-import { supabase } from '../lib/supabase';
++import { registerPushToken } from '../lib/pushNotifications';
+ 
+ function cn(...inputs: ClassValue[]) {
+   return twMerge(clsx(inputs));
+ }
+ 
+-async function registerPushToken() {
+-  if (!Capacitor.isNativePlatform()) return;
+-
+-  try {
+-    const permission = await PushNotifications.requestPermissions();
+-    if (permission.receive !== 'granted') return;
+-
+-    await PushNotifications.register();
+-
+-    PushNotifications.addListener('registration', async ({ value: token }) => {
+-      try {
+-        const { data: { user } } = await supabase.auth.getUser();
+-        if (!user) return;
+-
+-        const { data: profileRow } = await supabase
+-          .from('profiles')
+-          .select('company_id')
+-          .eq('id', user.id)
+-          .maybeSingle();
+-
+-        const companyId = profileRow ? (profileRow as any).company_id : null;
+-
+-        // Cast to any: device_tokens is not yet in the generated types —
+-        // it will be added after the 002_create_device_tokens migration is run.
+-        await (supabase.from('device_tokens') as any).upsert(
+-          {
+-            user_id:    user.id,
+-            company_id: companyId,
+-            token,
+-            platform:   Capacitor.getPlatform(),
+-            updated_at: new Date().toISOString(),
+-          },
+-          { onConflict: 'user_id,token' }
+-        );
+-      } catch (err) {
+-        console.warn('[Push] Token registration failed:', err);
+-      }
+-    });
+-
+-    PushNotifications.addListener('registrationError', (err) => {
+-      console.warn('[Push] Registration error:', err);
+-    });
+-  } catch (err) {
+-    console.warn('[Push] Push notification setup failed:', err);
+-  }
+-}
+-
+ export default function Layout() {
+   const location = useLocation();
+ 
+diff --git a/src/context/AuthContext.tsx b/src/context/AuthContext.tsx
+index c3045ef..5435b1f 100644
+--- a/src/context/AuthContext.tsx
++++ b/src/context/AuthContext.tsx
+@@ -1,5 +1,6 @@
+ import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
+ import { supabase } from '../lib/supabase';
++import { SplashScreen } from '@capacitor/splash-screen';
+ 
+ interface AuthContextType {
+   session: any;
+@@ -29,6 +30,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+   useEffect(() => {
+     let isMounted = true;
+ 
++    // Hard timeout: always unblock the app within 1.5 seconds even if Supabase hangs.
++    // On native, the splash covers ~2s — this ensures the app never gets stuck behind
++    // a slow token refresh or network call.
++    const loadingTimeout = window.setTimeout(() => {
++      if (isMounted) {
++        console.warn('[Auth] Loading timeout — forcing app unblock');
++        setLoading(false);
++      }
++    }, 1500);
++
+     const init = async () => {
+       try {
+         const { data, error } = await supabase.auth.getSession();
+@@ -39,16 +50,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+         setSession(session);
+         setUser(session?.user ?? null);
+ 
++        // Unblock the app immediately — profile loads in background
++        setLoading(false);
++
+         if (session?.user) {
+           lastUserId.current = session.user.id;
+-          await fetchProfile(session.user.id, session.user.email);
++          fetchProfile(session.user.id, session.user.email); // no await — background
+         } else {
+           setProfile(null);
+-          setLoading(false);
+         }
+       } catch (err) {
+         console.error('Auth init error:', err);
+         if (isMounted) setLoading(false);
++      } finally {
++        window.clearTimeout(loadingTimeout);
+       }
+     };
+ 
+@@ -102,6 +117,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+ 
+     return () => {
+       isMounted = false;
++      window.clearTimeout(loadingTimeout);
+       subscription.unsubscribe();
+       document.removeEventListener('visibilitychange', handleVisibilityChange);
+     };
+@@ -115,56 +131,36 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+ 
+     try {
+       const cleanEmail = email?.trim();
+-      console.log('Fetching profile for:', { userId, cleanEmail });
+ 
+-      const fetchById = async () => {
+-        return await supabase
++      // Single query: fetch profile + company in one round trip via join
++      const tryFetch = async (filter: { field: string; value: string }) => {
++        return supabase
+           .from('profiles')
+-          .select('*')
+-          .eq('id', userId)
++          .select('*, companies(*)')
++          .eq(filter.field, filter.value)
+           .maybeSingle();
+       };
+ 
+-      let { data, error } = await fetchById();
++      let { data, error } = await tryFetch({ field: 'id', value: userId });
+       if (error?.message?.includes('Lock was stolen')) {
+         await new Promise((r) => setTimeout(r, 250));
+-        ({ data, error } = await fetchById());
++        ({ data, error } = await tryFetch({ field: 'id', value: userId }));
+       }
+ 
+-      if (error) {
+-        console.error('Error fetching from profiles by id:', error);
+-      }
++      if (error) console.error('Error fetching profile by id:', error);
+ 
++      // Fallback: try by email if not found by id
+       if (!data && cleanEmail) {
+-        console.log('Profile not found by id, trying email in profiles...');
+-        const fetchByEmail = async () => {
+-          return await supabase
+-            .from('profiles')
+-            .select('*')
+-            .eq('email', cleanEmail)
+-            .maybeSingle();
+-        };
+-
+-        let { data: emailData, error: emailError } = await fetchByEmail();
++        let { data: emailData, error: emailError } = await tryFetch({ field: 'email', value: cleanEmail });
+         if (emailError?.message?.includes('Lock was stolen')) {
+           await new Promise((r) => setTimeout(r, 250));
+-          ({ data: emailData, error: emailError } = await fetchByEmail());
+-        }
+-
+-        if (!emailError && emailData) {
+-          data = emailData;
++          ({ data: emailData, error: emailError } = await tryFetch({ field: 'email', value: cleanEmail }));
+         }
++        if (!emailError && emailData) data = emailData;
+       }
+ 
+       if (data) {
+-        const profileData = data as any;
+-        const { data: companyData } = await supabase
+-          .from('companies')
+-          .select('*')
+-          .eq('id', profileData.company_id)
+-          .maybeSingle();
+-
+-        setProfile(companyData ? { ...profileData, companies: companyData } : profileData);
++        setProfile(data as any);
+       }
+     } catch (err) {
+       console.error('Error fetching profile:', err);
+@@ -174,6 +170,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+     }
+   };
+ 
++  // Hide the native splash screen as soon as auth finishes loading
++  useEffect(() => {
++    if (!loading) {
++      SplashScreen.hide().catch(() => {/* web/non-native, ignore */});
++    }
++  }, [loading]);
++
+   // Safety-net: if user is present but profile is null after loading,
+   // schedule a recovery re-fetch. This covers any edge case the event handlers miss.
+   useEffect(() => {
+diff --git a/src/lib/contactSchedule.ts b/src/lib/contactSchedule.ts
+index 2f4848f..bce83fc 100644
+--- a/src/lib/contactSchedule.ts
++++ b/src/lib/contactSchedule.ts
+@@ -18,6 +18,21 @@ export type ContactScheduleData = {
+ 
+ const SCHEDULE_PREFIX = '[TRUSSCTR_SCHEDULE]';
+ 
++function extractScheduleChunk(notes: string) {
++  const prefixIndex = notes.indexOf(SCHEDULE_PREFIX);
++  if (prefixIndex === -1) return null;
++
++  const start = prefixIndex + SCHEDULE_PREFIX.length;
++  const firstBreak = notes.indexOf('\n\n', start);
++  const scheduleChunk = firstBreak === -1 ? notes.slice(start) : notes.slice(start, firstBreak);
++  const plainNotes = firstBreak === -1 ? notes.slice(0, prefixIndex).trim() : `${notes.slice(0, prefixIndex)}${notes.slice(firstBreak + 2)}`.trim();
++
++  return {
++    scheduleChunk,
++    plainNotes,
++  };
++}
++
+ export const DEFAULT_CONTACT_SCHEDULE: ContactScheduleData = {
+   milestones: [
+     { id: 'inspection', label: 'Inspection', date: null, completedAt: null },
+@@ -36,32 +51,50 @@ export function parseContactSchedule(notes?: string | null) {
+     };
+   }
+ 
+-  if (!notes.startsWith(SCHEDULE_PREFIX)) {
++  const extracted = extractScheduleChunk(notes);
++
++  if (!extracted) {
+     return {
+       schedule: DEFAULT_CONTACT_SCHEDULE,
+       plainNotes: notes,
+     };
+   }
+ 
+-  const firstBreak = notes.indexOf('\n\n');
+-  const scheduleChunk = firstBreak === -1 ? notes.slice(SCHEDULE_PREFIX.length) : notes.slice(SCHEDULE_PREFIX.length, firstBreak);
+-  const plainNotes = firstBreak === -1 ? '' : notes.slice(firstBreak + 2);
+-
+   try {
+-    const parsed = JSON.parse(scheduleChunk) as ContactScheduleData;
++    const parsed = JSON.parse(extracted.scheduleChunk) as ContactScheduleData;
+     const milestones = DEFAULT_CONTACT_SCHEDULE.milestones.map((defaultMilestone) => {
+       const existing = parsed?.milestones?.find((item) => item.id === defaultMilestone.id);
+       return existing ? { ...defaultMilestone, ...existing } : defaultMilestone;
+     });
+ 
++    // Recursively strip nested schedule markers that may have been double-serialized
++    let cleanPlainNotes = extracted.plainNotes;
++    while (cleanPlainNotes.includes(SCHEDULE_PREFIX)) {
++      const inner = extractScheduleChunk(cleanPlainNotes);
++      if (!inner) {
++        cleanPlainNotes = cleanPlainNotes.replace(/\[TRUSSCTR_SCHEDULE\]\{[\s\S]*$/, '').trim();
++        break;
++      }
++      cleanPlainNotes = inner.plainNotes;
++    }
++
+     return {
+       schedule: { milestones },
+-      plainNotes,
++      plainNotes: cleanPlainNotes,
+     };
+   } catch {
++    let cleanPlainNotes = extracted.plainNotes || notes.replace(SCHEDULE_PREFIX, '').trim();
++    while (cleanPlainNotes.includes(SCHEDULE_PREFIX)) {
++      const inner = extractScheduleChunk(cleanPlainNotes);
++      if (!inner) {
++        cleanPlainNotes = cleanPlainNotes.replace(/\[TRUSSCTR_SCHEDULE\]\{[\s\S]*$/, '').trim();
++        break;
++      }
++      cleanPlainNotes = inner.plainNotes;
++    }
+     return {
+       schedule: DEFAULT_CONTACT_SCHEDULE,
+-      plainNotes: notes,
++      plainNotes: cleanPlainNotes,
+     };
+   }
+ }
+diff --git a/src/lib/pipelineStages.ts b/src/lib/pipelineStages.ts
+index ba00473..2b4d75d 100644
+--- a/src/lib/pipelineStages.ts
++++ b/src/lib/pipelineStages.ts
+@@ -1,14 +1,29 @@
+ import { CustomerStatus } from '../types/supabase';
+ 
++const CANONICAL_STAGE_ORDER: CustomerStatus[] = [
++  'lead',
++  'contacted',
++  'appointment_set',
++  'inspected',
++  'estimate_sent',
++  'approved',
++  'scheduled',
++  'in_progress',
++  'completed',
++];
++
+ const DISPLAY_LABELS: Record<string, string> = {
+   lead: 'Lead',
+   contacted: 'Contacted',
+   appointment_set: 'Appointment Set',
++  appt_set: 'Appointment Set',
+   inspection_scheduled: 'Appointment Set',
+   inspected: 'Inspection',
+   inspection_complete: 'Inspection',
++  inspection_completed: 'Inspection',
+   estimate_sent: 'Follow Up / Negotiating',
+   approved: 'Sold',
++  signed: 'Sold',
+   signed_won: 'Sold',
+   scheduled: 'Scheduled',
+   in_progress: 'In Progress',
+@@ -22,11 +37,14 @@ const NEXT_LABELS: Record<string, string> = {
+   lead: 'Contacted',
+   contacted: 'Appointment Set',
+   appointment_set: 'Inspection',
++  appt_set: 'Inspection',
+   inspection_scheduled: 'Inspection',
+   inspected: 'Estimating',
+   inspection_complete: 'Estimating',
++  inspection_completed: 'Estimating',
+   estimate_sent: 'Sold',
+   approved: 'Scheduled',
++  signed: 'Scheduled',
+   signed_won: 'Scheduled',
+   scheduled: 'In Progress',
+   in_progress: 'Clean Up',
+@@ -36,12 +54,39 @@ const NEXT_LABELS: Record<string, string> = {
+   retail: 'Scheduled',
+ };
+ 
++export function normalizePipelineStatus(status?: CustomerStatus | string | null): CustomerStatus {
++  switch (status) {
++    case 'new_lead':
++    case 'prospect':
++      return 'lead';
++    case 'appt_set':
++    case 'inspection_scheduled':
++      return 'appointment_set';
++    case 'inspection_complete':
++    case 'inspection_completed':
++      return 'inspected';
++    case 'signed':
++    case 'signed_won':
++      return 'approved';
++    case 'paid':
++      return 'completed';
++    case 'job_started':
++      return 'in_progress';
++    default:
++      return (status as CustomerStatus) || 'lead';
++  }
++}
++
++export function getPipelineStageOrder() {
++  return [...CANONICAL_STAGE_ORDER];
++}
++
+ export function getPipelineStageLabel(status?: string | null) {
+-  if (!status) return 'Lead';
+-  return DISPLAY_LABELS[status] || status.replaceAll('_', ' ');
++  const normalized = normalizePipelineStatus(status);
++  return DISPLAY_LABELS[status || ''] || DISPLAY_LABELS[normalized] || 'Lead';
+ }
+ 
+ export function getNextPipelineStageLabel(status?: CustomerStatus | string | null) {
+-  if (!status) return 'Contacted';
+-  return NEXT_LABELS[status] || 'Next Step';
++  const normalized = normalizePipelineStatus(status);
++  return NEXT_LABELS[status || ''] || NEXT_LABELS[normalized] || 'Next Step';
+ }
+diff --git a/src/pages/Calendar.tsx b/src/pages/Calendar.tsx
+index 8250950..2b8aef7 100644
+--- a/src/pages/Calendar.tsx
++++ b/src/pages/Calendar.tsx
+@@ -23,10 +23,13 @@ export default function CalendarPage() {
+   const labelParam = searchParams.get('label') || 'Event';
+   const decodedLabel = decodeURIComponent(labelParam);
+ 
+-  // When scheduling a next step, show ALL events on the calendar so you
+-  // can spot conflicts. Keep the original contactId for saving and return nav.
+-  const displayContactFilter = actionParam === 'schedule' ? null : contactId;
++  // Always load ALL events — the calendar always shows the full company schedule.
++  // contactId is used only for color-coding (green = this customer, blue = others)
++  // and for saving when action=schedule.
++  const displayContactFilter = null;
+   const saveContactId = contactId;
++  // The "featured" contact whose events are highlighted green
++  const highlightContactId = contactId;
+ 
+   const [currentMonth, setCurrentMonth] = useState(new Date());
+   const [selectedDate, setSelectedDate] = useState(new Date());
+@@ -41,12 +44,9 @@ export default function CalendarPage() {
+   const [saving, setSaving] = useState(false);
+   const [savedOk, setSavedOk] = useState(false);
+ 
+-  // Auto-open the sheet when navigated here with action=schedule
+-  useEffect(() => {
+-    if (actionParam === 'schedule' && saveContactId) {
+-      setSheetOpen(true);
+-    }
+-  }, [actionParam, saveContactId]);
++  // When navigated here with action=schedule, do NOT auto-open the sheet.
++  // The user needs to see all calendar events first, then tap a day to pick a
++  // date, then hit Add. A scheduling banner is shown instead (see JSX below).
+ 
+   // Keep selected date in sync with the date picker in the sheet
+   useEffect(() => {
+@@ -61,14 +61,31 @@ export default function CalendarPage() {
+     if (!profile?.company_id) return;
+     setLoading(true);
+     try {
+-      const [{ data: contacts, error: contactError }, { data: workOrders, error: workOrderError }] = await Promise.all([
++      // eslint-disable-next-line @typescript-eslint/no-explicit-any
++      const db = supabase as any;
++      const [
++        { data: contacts, error: contactError },
++        { data: workOrders, error: workOrderError },
++        { data: appointments, error: appointmentError },
++      ] = await Promise.all([
+         supabase.from('contacts').select('*').eq('company_id', profile.company_id),
+         supabase.from('work_orders').select('*').eq('company_id', profile.company_id).order('scheduled_date', { ascending: true }),
++        db.from('appointments').select('*').eq('company_id', profile.company_id),
+       ]);
+ 
+       if (contactError) throw contactError;
+       if (workOrderError) throw workOrderError;
+ 
++      // Diagnostic — visible in Xcode console so we can confirm the table exists and data is returned
++      if (appointmentError) {
++        console.error('[Calendar] appointments query error:', JSON.stringify(appointmentError));
++      } else {
++        console.log(`[Calendar] appointments fetched: ${(appointments || []).length} rows for company_id=${profile.company_id}`);
++        if ((appointments || []).length > 0) {
++          console.log('[Calendar] first appointment sample:', JSON.stringify((appointments as any[])[0]));
++        }
++      }
++
+       const workOrderRows = (workOrders || []) as WorkOrderRow[];
+       const contactRows = (contacts || []) as ContactRow[];
+       const workOrdersByContact = new Map<string, WorkOrderRow[]>();
+@@ -78,12 +95,68 @@ export default function CalendarPage() {
+         workOrdersByContact.set(order.contact_id, current);
+       }
+ 
++      // Build a contact lookup map for appointment display
++      const contactMap = new Map<string, ContactRow>();
++      for (const c of contactRows) {
++        contactMap.set(c.id, c);
++      }
++
+       const nextEvents = contactRows
+         .flatMap((contact) => buildContactPipelineEvents(contact, workOrdersByContact.get(contact.id) || []))
+         .filter((event) => (displayContactFilter ? event.contactId === displayContactFilter : true))
+         .sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
+ 
+-      setEvents(nextEvents);
++      // Convert appointments into PipelineEvent objects
++      // eslint-disable-next-line @typescript-eslint/no-explicit-any
++      const aptRows = ((appointments || []) as any[]).filter((apt) => apt.status !== 'cancelled');
++      const appointmentEvents: PipelineEvent[] = aptRows
++        .filter((apt) => !displayContactFilter || apt.contact_id === displayContactFilter)
++        .map((apt) => {
++          const contactRow = contactMap.get(apt.contact_id);
++          const contactName = contactRow
++            ? `${(contactRow as any).first_name || ''} ${(contactRow as any).last_name || ''}`.trim()
++            : 'Unknown Contact';
++          const location = contactRow ? (contactRow as any).address || '' : '';
++
++          let eventType: PipelineEvent['type'] = 'inspection';
++          if (apt.type === 'inspection' || apt.type === 'damage_assessment') {
++            eventType = 'inspection';
++          } else if (apt.type === 'build' || apt.type === 'construction') {
++            eventType = 'build';
++          }
++
++          // Build a safe ISO datetime — apt.time may be "HH:mm", "HH:mm:ss", or null
++          const timeStr = apt.time
++            ? apt.time.length === 5   // "HH:mm"
++              ? `${apt.time}:00`
++              : apt.time              // already "HH:mm:ss"
++            : '09:00:00';             // fallback when time is missing
++
++          return {
++            id: `apt-${apt.id}`,
++            contactId: apt.contact_id,
++            contactName,
++            title: apt.title || 'Appointment',
++            date: `${apt.date}T${timeStr}`,
++            type: eventType,
++            location: apt.location || location,
++            crew: apt.assigned_to || null,   // required by PipelineEvent
++            source: 'schedule',              // required by PipelineEvent
++          } as PipelineEvent;
++        });
++
++      // Merge pipeline events and appointment events, deduplicate by id, then sort
++      const existingIds = new Set(nextEvents.map((e) => e.id));
++      const merged = [...nextEvents];
++      for (const aptEvent of appointmentEvents) {
++        if (!existingIds.has(aptEvent.id)) {
++          merged.push(aptEvent);
++          existingIds.add(aptEvent.id);
++        }
++      }
++      merged.sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
++
++      setEvents(merged);
+ 
+       if (!actionParam) {
+         const firstUpcoming = getUpcomingPipelineEvents(nextEvents)[0];
+@@ -226,7 +299,15 @@ export default function CalendarPage() {
+         {calendarDays.map((day, i) => {
+           const isSelected = isSameDay(day, selectedDate);
+           const isCurrentMonth = isSameMonth(day, monthStart);
+-          const hasEvent = events.some((event) => isSameDay(parseISO(event.date), day));
++          const dayEvents = events.filter((event) => isSameDay(parseISO(event.date), day));
++          const hasHighlight = highlightContactId
++            ? dayEvents.some((e) => e.contactId === highlightContactId)
++            : false;
++          // Count distinct other appointments (capped at 3 dots max)
++          const otherCount = Math.min(
++            dayEvents.filter((e) => !highlightContactId || e.contactId !== highlightContactId).length,
++            3
++          );
+ 
+           return (
+             <div
+@@ -241,8 +322,17 @@ export default function CalendarPage() {
+               }`}
+             >
+               <span className="text-sm font-bold">{format(day, 'd')}</span>
+-              {hasEvent && !isSelected && (
+-                <div className="absolute bottom-2 h-1.5 w-1.5 rounded-full bg-accent" />
++              {!isSelected && (hasHighlight || otherCount > 0) && (
++                <div className="absolute bottom-2 flex gap-0.5 items-center">
++                  {/* Green dot always first when this customer has an event */}
++                  {hasHighlight && (
++                    <div className="h-2 w-2 rounded-full bg-green-500" />
++                  )}
++                  {/* One blue dot per other appointment, up to 3 */}
++                  {Array.from({ length: otherCount }).map((_, idx) => (
++                    <div key={idx} className="h-1.5 w-1.5 rounded-full bg-blue-400" />
++                  ))}
++                </div>
+               )}
+             </div>
+           );
+@@ -269,9 +359,39 @@ export default function CalendarPage() {
+     <div className="p-6 space-y-8">
+       {renderHeader()}
+ 
++      {/* Scheduling banner — shown when navigated here from a contact */}
++      {actionParam === 'schedule' && saveContactId && (
++        <div className="rounded-2xl bg-accent/10 border border-accent/20 px-4 py-3 flex items-center justify-between gap-3">
++          <div className="flex-1 min-w-0">
++            <p className="text-xs font-black text-accent uppercase tracking-widest">Scheduling Mode</p>
++            <p className="text-sm font-semibold text-primary mt-0.5 truncate">
++              Tap a date on the calendar, then tap <span className="text-accent font-black">+ Add</span> to save.
++            </p>
++          </div>
++          <button
++            onClick={() => navigate(`/contacts/${saveContactId}`)}
++            className="shrink-0 text-xs font-bold text-slate-500 bg-white rounded-xl px-3 py-2 border border-slate-200 active:scale-95 transition-transform"
++          >
++            Cancel
++          </button>
++        </div>
++      )}
++
+       <div className="card p-4">
+         {renderDays()}
+         {renderCells()}
++        {highlightContactId && (
++          <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-4">
++            <div className="flex items-center gap-1.5">
++              <div className="h-2 w-2 rounded-full bg-green-500" />
++              <span className="text-[10px] font-bold text-slate-500">This Customer</span>
++            </div>
++            <div className="flex items-center gap-1.5">
++              <div className="h-2 w-2 rounded-full bg-blue-400" />
++              <span className="text-[10px] font-bold text-slate-500">Other Appointments</span>
++            </div>
++          </div>
++        )}
+       </div>
+ 
+       <div className="space-y-4">
+@@ -299,17 +419,26 @@ export default function CalendarPage() {
+ 
+         <div className="space-y-3">
+           {filteredEvents.length > 0 ? (
+-            filteredEvents.map((event) => (
++            filteredEvents.map((event) => {
++              const isHighlighted = highlightContactId && event.contactId === highlightContactId;
++              return (
+               <button
+                 key={event.id}
+                 onClick={() => navigate(`/contacts/${event.contactId}`)}
+-                className="card w-full p-4 text-left active:bg-slate-50 transition-colors"
++                className={`card w-full p-4 text-left active:bg-slate-50 transition-colors border-l-4 ${
++                  isHighlighted ? 'border-l-green-500' : highlightContactId ? 'border-l-blue-400' : 'border-l-transparent'
++                }`}
+               >
+                 <div className="flex gap-4">
+-                  <div className={`w-1 rounded-full ${event.type === 'inspection' ? 'bg-amber-500' : event.type === 'build' ? 'bg-teal-500' : 'bg-primary'}`} />
++                  <div className={`w-1 rounded-full ${isHighlighted ? 'bg-green-500' : event.type === 'inspection' ? 'bg-amber-500' : event.type === 'build' ? 'bg-teal-500' : 'bg-blue-400'}`} />
+                   <div className="flex-1 space-y-2">
+                     <div className="flex justify-between items-start gap-3">
+-                      <h4 className="font-bold text-primary text-sm">{event.title}</h4>
++                      <div>
++                        <h4 className="font-bold text-primary text-sm">{event.title}</h4>
++                        {isHighlighted && (
++                          <span className="text-[9px] font-black uppercase tracking-widest text-green-600">This Customer</span>
++                        )}
++                      </div>
+                       <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                         <Clock size={10} /> {format(parseISO(event.date), 'p')}
+                       </span>
+@@ -333,7 +462,8 @@ export default function CalendarPage() {
+                   </div>
+                 </div>
+               </button>
+-            ))
++              );
++            })
+           ) : (
+             <div className="card p-8 flex flex-col items-center justify-center text-center space-y-2 border-2 border-dashed border-slate-200 bg-transparent shadow-none">
+               <CalendarIcon size={32} className="text-slate-200" />
+@@ -420,6 +550,52 @@ export default function CalendarPage() {
+                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+                 />
+               </div>
++
++              {/* Upcoming Appointments — visible inside the sheet so users can spot conflicts */}
++              {(() => {
++                const now = new Date();
++                now.setHours(0, 0, 0, 0);
++                const upcoming = events
++                  .filter((e) => new Date(e.date) >= now)
++                  .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
++                  .slice(0, 15);
++                if (upcoming.length === 0) return null;
++                return (
++                  <div className="mt-6 space-y-2">
++                    <p className="text-xs font-bold uppercase tracking-widest text-slate-400">All Upcoming Appointments</p>
++                    <div className="space-y-2">
++                      {upcoming.map((event) => (
++                        <div key={event.id} className="flex items-center gap-3 rounded-xl bg-slate-50 px-3 py-2.5">
++                          <div
++                            className={`w-1 self-stretch rounded-full ${
++                              event.type === 'inspection'
++                                ? 'bg-amber-500'
++                                : event.type === 'build'
++                                ? 'bg-teal-500'
++                                : 'bg-primary'
++                            }`}
++                          />
++                          <div className="flex-1 min-w-0">
++                            <p className="text-xs font-bold text-primary truncate">{event.contactName}</p>
++                            <p className="text-[11px] text-slate-500 truncate">{event.title}</p>
++                            {event.location ? (
++                              <p className="text-[10px] text-slate-400 truncate">{event.location}</p>
++                            ) : null}
++                          </div>
++                          <div className="text-right shrink-0">
++                            <p className="text-[11px] font-bold text-slate-600">
++                              {format(parseISO(event.date), 'MMM d')}
++                            </p>
++                            <p className="text-[10px] text-slate-400">
++                              {format(parseISO(event.date), 'p')}
++                            </p>
++                          </div>
++                        </div>
++                      ))}
++                    </div>
++                  </div>
++                );
++              })()}
+             </div>
+ 
+             <div
+diff --git a/src/pages/ContactDetail.tsx b/src/pages/ContactDetail.tsx
+index 48a7aa8..9f07032 100644
+--- a/src/pages/ContactDetail.tsx
++++ b/src/pages/ContactDetail.tsx
+@@ -1,25 +1,54 @@
+ import React, { useEffect, useRef, useState } from 'react';
+-import { useParams, useNavigate } from 'react-router-dom';
++import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+ import {
+   ChevronLeft, Phone, MessageSquare, Mail, Edit2,
+   Info, History, FileText, DollarSign, Shield,
+   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
+-  ClipboardList, PenLine, Wrench, TrendingUp
++  ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon,
+ } from 'lucide-react';
+ import { motion, AnimatePresence } from 'framer-motion';
+ import { supabase } from '../lib/supabase';
+ import { useAuth } from '../context/AuthContext';
+ import { CustomerStatus } from '../types/supabase';
+ import { formatPhone, formatCurrency } from '../lib/utils';
+-import { Capacitor, registerPlugin } from '@capacitor/core';
+ import { buildDocumentDisplayUrl, buildStoredDocumentUrl } from '../lib/documentAccess';
+ import { parseContactSchedule, serializeContactSchedule, updateScheduleMilestone, type ContactMilestone, type ContactMilestoneId } from '../lib/contactSchedule';
+-import { getInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
+-import { getNextPipelineStageLabel, getPipelineStageLabel } from '../lib/pipelineStages';
++import { getNextPipelineStageLabel, getPipelineStageLabel, getPipelineStageOrder, normalizePipelineStatus } from '../lib/pipelineStages';
+ import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
+ import { applyMention, extractMentionHandles, findActiveMentionQuery, getMentionSuggestions, getMentionTargets, parseNoteMentions, serializeNoteMentions, validateMentions } from '../lib/noteMentions';
+-
+-const MultiShotCamera = registerPlugin<{ open: (options?: { saveMode?: InspectionPhotoStorageMode }) => Promise<{ photos: string[] }> }>('MultiShotCamera');
++import { Capacitor } from '@capacitor/core';
++
++/**
++ * Resize + re-compress an image blob before uploading.
++ * iPhone photos are 5–15 MB; this brings them to ~200–600 KB (8–20× smaller)
++ * which makes both the Capacitor file-bridge read AND the Supabase upload
++ * dramatically faster on slow job-site connections.
++ */
++function compressImage(blob: Blob, maxPx = 1920, quality = 0.82): Promise<Blob> {
++  return new Promise((resolve, reject) => {
++    const img = new Image();
++    const objUrl = URL.createObjectURL(blob);
++    img.onload = () => {
++      URL.revokeObjectURL(objUrl);
++      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
++      const w = Math.round(img.width * scale);
++      const h = Math.round(img.height * scale);
++      const canvas = document.createElement('canvas');
++      canvas.width = w;
++      canvas.height = h;
++      const ctx = canvas.getContext('2d');
++      if (!ctx) { reject(new Error('Canvas 2D context unavailable')); return; }
++      ctx.drawImage(img, 0, 0, w, h);
++      canvas.toBlob(
++        (out) => (out ? resolve(out) : reject(new Error('Canvas toBlob returned null'))),
++        'image/jpeg',
++        quality,
++      );
++    };
++    img.onerror = () => { URL.revokeObjectURL(objUrl); reject(new Error('Image load failed')); };
++    img.src = objUrl;
++  });
++}
+ 
+ const TABS = [
+   { id: 'overview', label: 'Overview', icon: Info },
+@@ -31,16 +60,76 @@ const TABS = [
+   { id: 'insurance', label: 'Insurance', icon: Shield },
+ ];
+ 
+-const STAGES: CustomerStatus[] = [
+-  'lead', 'contacted', 'appointment_set', 'inspected', 'estimate_sent', 
+-  'approved', 'scheduled', 'in_progress', 'completed', 'paid'
+-];
++const TAB_IDS = new Set(TABS.map((tab) => tab.id));
++
++function normalizeContactTab(value: string | null) {
++  if (!value) return 'overview';
++  return TAB_IDS.has(value) ? value : 'overview';
++}
++
++/** Strips serialization markers and returns the clean human-readable text. */
++function formatTimelineMessage(item: any): string {
++  if (item?.type === 'stage_change') {
++    const content = String(item?.content || '').trim();
++    const match = content.match(/^Stage updated:\s*(.+?)\s*→\s*(.+)$/i);
++    if (match) {
++      return `Job status moved from ${match[1]} to ${match[2]}.`;
++    }
++    return content;
++  }
++
++  const parsedMentions = parseNoteMentions(String(item?.content || ''));
++  const parsedSchedule = parseContactSchedule(parsedMentions.plainContent);
++  // If the content contained a schedule marker, only return plainNotes (never the raw JSON)
++  if (parsedMentions.plainContent.includes('[TRUSSCTR_SCHEDULE]')) {
++    return parsedSchedule.plainNotes || 'Schedule updated.';
++  }
++  // Last-resort strip in case any other serialization marker slipped through
++  const stripped = parsedMentions.plainContent.replace(/\[TRUSSCTR_[A-Z_]+\]\{[\s\S]*$/, '').trim();
++  return parsedSchedule.plainNotes || stripped || 'Activity updated.';
++}
++
++/** Infers a human-readable event label + lucide icon name from the item. */
++function getTimelineEventMeta(item: any): { label: string; iconName: string; color: string } {
++  if (item?.type === 'stage_change') {
++    return { label: 'Stage Change', iconName: 'trending_up', color: 'text-accent bg-accent/10' };
++  }
++  const content = String(item?.content || '').toLowerCase();
++  if (content.startsWith('roof inspection report') || content.includes('smart inspection') || content.includes('inspection report')) {
++    return { label: 'Inspection', iconName: 'shield', color: 'text-blue-600 bg-blue-50' };
++  }
++  if (content.startsWith('work order') || content.includes('work order')) {
++    return { label: 'Work Order', iconName: 'wrench', color: 'text-amber-600 bg-amber-50' };
++  }
++  if (content.includes('estimate signed') || content.includes('signed') || content.includes('document')) {
++    return { label: 'Document', iconName: 'file_signature', color: 'text-violet-600 bg-violet-50' };
++  }
++  if (content.includes('estimate sent') || content.includes('estimate') || content.includes('quote')) {
++    return { label: 'Estimate', iconName: 'file_text', color: 'text-teal-600 bg-teal-50' };
++  }
++  if (content.includes('deposit') || content.includes('payment') || content.includes('paid')) {
++    return { label: 'Payment', iconName: '💵', color: 'bg-green-50' };
++  }
++  if (content.includes('before & after') || content.includes('report saved')) {
++    return { label: 'Report', iconName: '📸', color: 'bg-pink-50' };
++  }
++  if (item?.type === 'call') {
++    return { label: 'Call', iconName: 'phone', color: 'text-slate-500 bg-slate-100' };
++  }
++  if (item?.type === 'sms') {
++    return { label: 'SMS', iconName: 'message_square', color: 'text-slate-500 bg-slate-100' };
++  }
++  return { label: 'Note', iconName: 'file_text', color: 'text-slate-500 bg-slate-100' };
++}
++
++const STAGES: CustomerStatus[] = getPipelineStageOrder();
+ 
+ export default function ContactDetail() {
+   const { id } = useParams();
+   const navigate = useNavigate();
++  const [searchParams, setSearchParams] = useSearchParams();
+   const { user, profile } = useAuth();
+-  const [activeTab, setActiveTab] = useState('overview');
++  const [activeTab, setActiveTab] = useState(() => normalizeContactTab(searchParams.get('tab')));
+   const [contact, setContact] = useState<any>(null);
+   const [loading, setLoading] = useState(true);
+   const [documents, setDocuments] = useState<any[]>([]);
+@@ -73,6 +162,25 @@ export default function ContactDetail() {
+     }
+   }, [activeTab]);
+ 
++  useEffect(() => {
++    const nextTab = normalizeContactTab(searchParams.get('tab'));
++    setActiveTab((current) => (current === nextTab ? current : nextTab));
++  }, [searchParams]);
++
++  const changeTab = (tabId: string) => {
++    const nextTab = normalizeContactTab(tabId);
++    setActiveTab(nextTab);
++    setSearchParams((current) => {
++      const next = new URLSearchParams(current);
++      if (nextTab === 'overview') {
++        next.delete('tab');
++      } else {
++        next.set('tab', nextTab);
++      }
++      return next;
++    }, { replace: true });
++  };
++
+   useEffect(() => {
+     const updateTabOverflow = () => {
+       const node = tabScrollerRef.current;
+@@ -153,7 +261,9 @@ export default function ContactDetail() {
+           updates[f] = Number.isNaN(n) ? null : n;
+         }
+       });
+-      updates.notes = serializeContactSchedule(parsed.schedule, updates.notes || '');
++      // Strip any accidental schedule markers from the plain notes before re-serializing
++      const rawPlainNotes = String(updates.notes || '').replace(/\[TRUSSCTR_SCHEDULE\]\{[\s\S]*$/, '').trim();
++      updates.notes = serializeContactSchedule(parsed.schedule, rawPlainNotes);
+       if (statusChanged) {
+         updates.status_changed_at = new Date().toISOString();
+       }
+@@ -331,9 +441,12 @@ export default function ContactDetail() {
+           {TABS.map((tab) => {
+             const Icon = tab.icon;
+             const isActive = activeTab === tab.id;
+-            const inspectionDone = tab.id === 'inspection' && ['inspection_complete', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'].includes(contact.status);
++            const normalizedContactStatus = normalizePipelineStatus(contact.status);
++            const inspectionDone =
++              tab.id === 'inspection' &&
++              ['inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed'].includes(normalizedContactStatus);
+             return (
+-              <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
++              <button key={tab.id} onClick={() => changeTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
+                 <Icon size={18} />
+                 <span className={`text-sm font-bold whitespace-nowrap ${tab.id === 'inspection' ? (inspectionDone ? 'text-emerald-600' : 'text-rose-500') : ''}`}>{tab.label}</span>
+               </button>
+@@ -451,7 +564,7 @@ export default function ContactDetail() {
+             <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-5">
+               <div className="space-y-3">
+                 <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
+-                <button onClick={() => { setShowActions(false); setActiveTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
++                <button onClick={() => { setShowActions(false); changeTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
+               </div>
+             </div>
+             <div
+@@ -521,7 +634,7 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
+ 
+     const reachedStatuses = new Set<string>();
+     const statusOrder: CustomerStatus[] = ['appointment_set', 'inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed', 'paid'];
+-    const currentIndex = statusOrder.indexOf(contact.status);
++    const currentIndex = statusOrder.indexOf(normalizePipelineStatus(contact.status));
+     if (currentIndex >= 0) {
+       for (let index = 0; index <= currentIndex; index += 1) {
+         reachedStatuses.add(statusOrder[index]);
+@@ -611,8 +724,9 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
+   const allEvents = buildContactPipelineEvents(contact, workOrders);
+   const upcomingEvents = getUpcomingPipelineEvents(allEvents).slice(0, 3);
+   const nextEvent = upcomingEvents[0] || allEvents[0] || null;
+-  const currentStageLabel = getPipelineStageLabel(contact.status);
+-  const nextStageLabel = getNextPipelineStageLabel(contact.status);
++  const normalizedStatus = normalizePipelineStatus(contact.status);
++  const currentStageLabel = getPipelineStageLabel(normalizedStatus);
++  const nextStageLabel = getNextPipelineStageLabel(normalizedStatus);
+ 
+   // Smart navigation: tap the Next Step card to go directly where you need to be
+   const getNextStepAction = (status: CustomerStatus): {
+@@ -699,20 +813,22 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
+     }
+   };
+ 
+-  const nextStepAction = getNextStepAction(contact.status);
++  const nextStepAction = getNextStepAction(normalizedStatus);
+   const NextStepIcon = nextStepAction.icon;
++  const currentProgressIndex = STAGES.indexOf(normalizedStatus);
+ 
+   return (
+     <div className="space-y-6">
+       <div className="card p-5 space-y-4">
+         <div className="flex justify-between items-center">
+           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Current Status</h3>
+-          <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">{contact.status.replace(/_/g, ' ')}</span>
++          <span className="bg-accent/10 text-accent text-[10px] font-bold px-2 py-1 rounded-md uppercase">
++            {currentStageLabel}
++          </span>
+         </div>
+         <div className="flex gap-1">
+           {STAGES.map((stage, i) => {
+-            const currentIndex = STAGES.indexOf(contact.status);
+-            return <div key={stage} className={`h-1.5 flex-1 rounded-full ${i <= currentIndex ? 'bg-accent' : 'bg-slate-100'}`} />;
++            return <div key={stage} className={`h-1.5 flex-1 rounded-full ${i <= currentProgressIndex ? 'bg-accent' : 'bg-slate-100'}`} />;
+           })}
+         </div>
+       </div>
+@@ -847,6 +963,12 @@ function OverviewTab({ contact, onRefresh }: { contact: any; onRefresh: () => vo
+ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
+   const navigate = useNavigate();
+   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
++  const isIosInspectionCapture = Capacitor.getPlatform() === 'ios';
++  const cameraFallbackInputRef = React.useRef<HTMLInputElement | null>(null);
++  const inlineVideoRef = React.useRef<HTMLVideoElement | null>(null);
++  const inlineCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
++  const inlineStreamRef = React.useRef<MediaStream | null>(null);
++  const pendingCaptureBlobsRef = React.useRef<Blob[]>([]);
+   const [step, setStep] = useState<'questions' | 'photos' | 'report'>('questions');
+   const [checklist, setChecklist] = useState({ roofAge: '', material: '', damageTypes: [] as string[], leaks: false });
+   const [saving, setSaving] = useState(false);
+@@ -858,8 +980,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+   const [activeElevation, setActiveElevation] = useState<'North' | 'South' | 'East' | 'West' | 'Garage' | 'Detached'>('North');
+   const [photos, setPhotos] = useState<{ url: string; displayUrl: string; note: string; elevation: string; size: number }[]>([]);
+   const [uploading, setUploading] = useState(false);
++  const [uploadMessage, setUploadMessage] = useState('');
++  const [inlineCameraOpen, setInlineCameraOpen] = useState(false);
++  const [inlineCaptureCount, setInlineCaptureCount] = useState(0);
+   const [markupIndex, setMarkupIndex] = useState<number | null>(null);
+   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
++  // Synchronous guard — prevents "Lock was stolen by another request" when
++  // the user taps the camera button twice before the async state update re-renders.
++  const cameraOpenRef = React.useRef(false);
+   const [isDrawing, setIsDrawing] = useState(false);
+   const [lastPoint, setLastPoint] = useState<{ x: number; y: number } | null>(null);
+   const [completedInspection, setCompletedInspection] = useState<any>(null);
+@@ -879,6 +1007,165 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+   const effectiveFootprint = computedFootprint || (footprintArea ? Number(footprintArea) : 0);
+   const roofSurfaceArea = effectiveFootprint ? effectiveFootprint * pitchMultiplier : 0;
+ 
++  const withLockRetry = async <T,>(fn: () => Promise<T>, retries = 2, delayMs = 250): Promise<T> => {
++    let lastError: unknown;
++    for (let attempt = 0; attempt <= retries; attempt += 1) {
++      try {
++        return await fn();
++      } catch (error) {
++        lastError = error;
++        const message = error instanceof Error ? error.message : String(error);
++        if (!message.includes('Lock was stolen') || attempt === retries) {
++          throw error;
++        }
++        await new Promise((resolve) => window.setTimeout(resolve, delayMs * (attempt + 1)));
++      }
++    }
++    throw lastError instanceof Error ? lastError : new Error(String(lastError));
++  };
++
++  const withTimeout = async <T,>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
++    let timeoutId: number | undefined;
++    const timeoutPromise = new Promise<never>((_, reject) => {
++      timeoutId = window.setTimeout(() => {
++        reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`));
++      }, ms);
++    });
++
++    try {
++      return await Promise.race([promise, timeoutPromise]);
++    } finally {
++      if (timeoutId) {
++        window.clearTimeout(timeoutId);
++      }
++    }
++  };
++
++  const ensureInspectionSession = async () => {
++    const { data, error } = await withTimeout(supabase.auth.getSession(), 8000, 'Session check');
++    if (error) throw error;
++    if (!data.session) {
++      throw new Error('No active session. Please sign in again.');
++    }
++    return data.session;
++  };
++
++  const stopInlineCamera = () => {
++    inlineStreamRef.current?.getTracks().forEach((track) => track.stop());
++    inlineStreamRef.current = null;
++    if (inlineVideoRef.current) {
++      inlineVideoRef.current.srcObject = null;
++    }
++    pendingCaptureBlobsRef.current = [];
++    setInlineCaptureCount(0);
++    setInlineCameraOpen(false);
++  };
++
++  const attachInlineStream = async (stream: MediaStream) => {
++    const video = inlineVideoRef.current;
++    if (!video) return;
++
++    video.srcObject = stream;
++    video.muted = true;
++    video.autoplay = true;
++    video.playsInline = true;
++
++    await new Promise<void>((resolve) => {
++      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
++        resolve();
++        return;
++      }
++
++      const handleLoadedMetadata = () => {
++        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
++        resolve();
++      };
++
++      video.addEventListener('loadedmetadata', handleLoadedMetadata);
++    });
++
++    await video.play().catch(() => undefined);
++  };
++
++  const startInlineCamera = async () => {
++    if (!navigator.mediaDevices?.getUserMedia) {
++      cameraFallbackInputRef.current?.click();
++      return;
++    }
++
++    const stream = await navigator.mediaDevices.getUserMedia({
++      video: {
++        facingMode: { ideal: 'environment' },
++        width: { ideal: 1920 },
++        height: { ideal: 1080 },
++      },
++      audio: false,
++    });
++
++    inlineStreamRef.current = stream;
++    pendingCaptureBlobsRef.current = [];
++    setInlineCaptureCount(0);
++    setInlineCameraOpen(true);
++    window.requestAnimationFrame(() => {
++      void attachInlineStream(stream);
++    });
++  };
++
++  const captureInlineFrame = async () => {
++    const video = inlineVideoRef.current;
++    const canvas = inlineCanvasRef.current;
++    if (!video || !canvas) return;
++
++    const width = video.videoWidth || 1920;
++    const height = video.videoHeight || 1080;
++    canvas.width = width;
++    canvas.height = height;
++
++    const context = canvas.getContext('2d');
++    if (!context) return;
++    context.drawImage(video, 0, 0, width, height);
++
++    const blob = await new Promise<Blob | null>((resolve) => {
++      canvas.toBlob(resolve, 'image/jpeg', 0.9);
++    });
++    if (!blob) return;
++
++    pendingCaptureBlobsRef.current = [...pendingCaptureBlobsRef.current, blob];
++    setInlineCaptureCount(pendingCaptureBlobsRef.current.length);
++  };
++
++  const finishInlineCamera = async () => {
++    const capturedBlobs = [...pendingCaptureBlobsRef.current];
++    stopInlineCamera();
++
++    if (!capturedBlobs.length) {
++      return;
++    }
++
++    setUploading(true);
++    try {
++      let failed = 0;
++      for (const [index, rawBlob] of capturedBlobs.entries()) {
++        try {
++          setUploadMessage(`Compressing photo ${index + 1} of ${capturedBlobs.length}...`);
++          const blob = await compressImage(rawBlob).catch(() => rawBlob);
++          setUploadMessage(`Uploading photo ${index + 1} of ${capturedBlobs.length}...`);
++          await uploadInspectionBlob(blob, `capture_${Date.now()}_${index + 1}.jpg`);
++        } catch (err) {
++          failed += 1;
++          console.error(`Inline camera upload ${index + 1} failed:`, err);
++        }
++      }
++
++      if (failed > 0) {
++        alert(`${failed} of ${capturedBlobs.length} photo(s) failed to upload. The rest were saved.`);
++      }
++    } finally {
++      setUploading(false);
++      setUploadMessage('');
++    }
++  };
++
+   const loadInspectionData = (data: any) => {
+     if (!data) return;
+     if (data.pitch) setPitch(data.pitch);
+@@ -909,6 +1196,15 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+     if (contact?.id) fetchInspection();
+   }, [contact?.id]);
+ 
++  useEffect(() => () => {
++    inlineStreamRef.current?.getTracks().forEach((track) => track.stop());
++  }, []);
++
++  useEffect(() => {
++    if (!inlineCameraOpen || !inlineStreamRef.current) return;
++    void attachInlineStream(inlineStreamRef.current);
++  }, [inlineCameraOpen]);
++
+   const toggleDamage = (type: string) => {
+     setChecklist((prev) => {
+       const isNone = type === 'None';
+@@ -968,36 +1264,39 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+ 
+   const uploadInspectionBlob = async (blob: Blob, originalName?: string) => {
+     if (!contact?.id || !userId) return;
++    setUploadMessage('Checking session...');
++    await ensureInspectionSession();
++
+     const ext = (originalName?.split('.').pop() || blob.type.split('/').pop() || 'jpg').toLowerCase();
+-    const fileName = `${activeElevation}_${Date.now()}.${ext}`;
++    const elevation = activeElevation;
++    const fileName = `${elevation}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+     const filePath = `${contact.id}/${fileName}`;
+-    const { error: uploadError } = await supabase.storage
+-      .from('projectceo-photos')
+-      .upload(filePath, blob, { contentType: blob.type || 'image/jpeg' });
++    const uploadBytes = await blob.arrayBuffer();
++
++    setUploadMessage('Sending photo to cloud...');
++    const { error: uploadError } = await withTimeout(withLockRetry(() =>
++      supabase.storage
++        .from('projectceo-photos')
++        .upload(filePath, uploadBytes, { contentType: blob.type || 'image/jpeg' })
++    ), 30000, 'Photo upload');
+     if (uploadError) throw uploadError;
+     const { data: { publicUrl } } = supabase.storage.from('projectceo-photos').getPublicUrl(filePath);
+-    const { data: signedData } = await supabase.storage.from('projectceo-photos').createSignedUrl(filePath, 60 * 60);
+-    let displayUrl = signedData?.signedUrl || publicUrl;
+-    try {
+-      const resp = await fetch(displayUrl);
+-      if (resp.ok) {
+-        const fetchedBlob = await resp.blob();
+-        displayUrl = URL.createObjectURL(fetchedBlob);
+-      }
+-    } catch {
+-      // fall back to signed/public URL
+-    }
+-    const { error: dbError } = await supabase.from('documents').insert({
+-      contact_id: contact.id,
+-      company_id: contact.company_id,
+-      name: `${activeElevation} Inspection Photo`,
+-      type: 'photo',
+-      url: publicUrl,
+-      size: blob.size,
+-      uploaded_by: userId,
+-    } as any);
++    const displayUrl = URL.createObjectURL(blob);
++
++    setUploadMessage('Saving photo record...');
++    const { error: dbError } = await withTimeout(withLockRetry(async () => (
++      await supabase.from('documents').insert({
++        contact_id: contact.id,
++        company_id: contact.company_id,
++        name: `${elevation} Inspection Photo`,
++        type: 'photo',
++        url: publicUrl,
++        size: blob.size,
++        uploaded_by: userId,
++      } as any)
++    )), 15000, 'Photo record save');
+     if (dbError) throw dbError;
+-    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation: activeElevation, size: blob.size }, ...prev]);
++    setPhotos((prev) => [{ url: publicUrl, displayUrl, note: '', elevation, size: blob.size }, ...prev]);
+     onDocumentsChanged?.();
+   };
+ 
+@@ -1005,6 +1304,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+     const file = e.target.files?.[0];
+     if (!file || !contact?.id || !userId) return;
+     setUploading(true);
++    setUploadMessage(`Uploading ${activeElevation} photo...`);
+     try {
+       await uploadInspectionBlob(file, file.name);
+     } catch (err) {
+@@ -1013,30 +1313,18 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+       alert(`Photo upload failed. ${message}`);
+     } finally {
+       setUploading(false);
++      setUploadMessage('');
+       e.target.value = '';
+     }
+   };
+ 
+   const capturePhoto = async () => {
+     if (!contact?.id || !userId) return;
+-    setUploading(true);
+     try {
+-      const result = await MultiShotCamera.open({ saveMode: getInspectionPhotoStorageMode() });
+-      const photosToUpload = result?.photos || [];
+-      for (const url of photosToUpload) {
+-        // Convert file:// path → capacitor://localhost/... so WKWebView can fetch it
+-        const webUrl = Capacitor.convertFileSrc(url);
+-        const resp = await fetch(webUrl);
+-        if (!resp.ok) throw new Error(`Failed to read photo (${resp.status})`);
+-        const blob = await resp.blob();
+-        await uploadInspectionBlob(blob, url);
+-      }
++      await startInlineCamera();
+     } catch (err) {
+-      console.error('Camera capture error:', err);
+-      const message = (err as any)?.message || 'Camera capture failed.';
+-      alert(`Camera capture failed. ${message}`);
+-    } finally {
+-      setUploading(false);
++      console.error('Inline camera error:', err);
++      cameraFallbackInputRef.current?.click();
+     }
+   };
+ 
+@@ -1129,15 +1417,20 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+         direction: 'outbound',
+       } as any);
+       if (error) throw error;
+-      // Try to move pipeline using web-app status; fallback to mobile status if enum blocks it.
++      // Try to move pipeline to inspection_complete (web-app status).
++      // If that fails (enum mismatch), fall back to inspection_scheduled.
+       const now = new Date().toISOString();
+       const { error: statusError } = await (supabase.from('contacts') as any)
+         .update({ status: 'inspection_complete', status_changed_at: now })
+         .eq('id', contact.id);
+       if (statusError) {
+-        await (supabase.from('contacts') as any)
+-          .update({ status: 'inspected', status_changed_at: now })
++        console.error('completeInspection: inspection_complete status failed, trying inspection_scheduled:', statusError);
++        const { error: fallbackError } = await (supabase.from('contacts') as any)
++          .update({ status: 'inspection_scheduled', status_changed_at: now })
+           .eq('id', contact.id);
++        if (fallbackError) {
++          console.error('completeInspection: inspection_scheduled fallback also failed:', fallbackError);
++        }
+       }
+       try {
+         const { data } = await (supabase.from('inspections') as any).upsert({
+@@ -1159,6 +1452,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+       } catch {
+         // ignore if inspections table missing
+       }
++      onDocumentsChanged?.();
+       alert('Inspection completed and saved to timeline!');
+       setStep('report');
+     } catch (err) {
+@@ -1324,7 +1618,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+               className="aspect-[4/3] w-full bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors disabled:opacity-60"
+             >
+               <span className="text-sm font-bold text-slate-500">
+-                {uploading ? 'Uploading...' : `Tap to capture ${activeElevation} photos`}
++                {uploading ? uploadMessage || 'Uploading...' : `Tap to capture ${activeElevation} photos`}
+               </span>
+               <span className="text-[10px] text-slate-400">Keep shooting, then tap Done once that elevation is complete.</span>
+             </button>
+@@ -1332,7 +1626,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+             <label className="block w-full cursor-pointer">
+               <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoUpload} />
+               <div className="aspect-[4/3] bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
+-                <span className="text-sm font-bold text-slate-500">{uploading ? 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
++                <span className="text-sm font-bold text-slate-500">{uploading ? uploadMessage || 'Uploading...' : `Tap to add ${activeElevation} photo`}</span>
+               </div>
+             </label>
+           )}
+@@ -1342,6 +1636,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+               Choose from Library
+               <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+             </label>
++            <input
++              ref={cameraFallbackInputRef}
++              type="file"
++              accept="image/*"
++              capture="environment"
++              className="hidden"
++              onChange={handlePhotoUpload}
++            />
+           </div>
+           <div className="grid grid-cols-2 gap-3">
+             {photos.map((p, i) => (
+@@ -1357,12 +1659,53 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+               </div>
+             ))}
+           </div>
+-          <button onClick={completeInspection} disabled={saving} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
+-            {saving ? 'Saving...' : 'Complete Inspection'}
++          <button onClick={completeInspection} disabled={saving || uploading} className="w-full bg-primary text-white py-3 rounded-xl text-sm font-bold shadow-lg active:scale-95 transition-transform disabled:opacity-50">
++            {uploading ? (uploadMessage || 'Uploading photos...') : saving ? 'Saving...' : 'Complete Inspection'}
+           </button>
+         </div>
+       )}
+ 
++      {inlineCameraOpen && (
++        <div className="fixed inset-0 z-[120] bg-black flex flex-col">
++          <div
++            className="flex items-center justify-between px-4 pb-3 text-white border-b border-white/10"
++            style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}
++          >
++            <button onClick={stopInlineCamera} className="text-sm font-bold">Cancel</button>
++            <div className="text-center">
++              <p className="text-sm font-bold">{activeElevation} Photos</p>
++              <p className="text-xs text-white/70">{inlineCaptureCount} captured</p>
++            </div>
++            <button onClick={finishInlineCamera} className="text-sm font-bold text-accent">Done</button>
++          </div>
++          <div className="flex-1 relative bg-black">
++            <video
++              ref={inlineVideoRef}
++              autoPlay
++              playsInline
++              muted
++              className="h-full w-full object-cover"
++            />
++            <div
++              className="absolute inset-x-0 bottom-0 px-6 pt-6 bg-gradient-to-t from-black/80 to-transparent"
++              style={{ paddingBottom: 'calc(3.5rem + env(safe-area-inset-bottom))' }}
++            >
++              <div className="flex items-center justify-center gap-6">
++                <button
++                  onClick={captureInlineFrame}
++                  className="h-20 w-20 rounded-full border-4 border-white bg-white/20"
++                  aria-label="Capture photo"
++                />
++              </div>
++              <p className="mt-4 text-center text-xs text-white/80">
++                Keep taking photos, then tap Done to upload this {activeElevation.toLowerCase()} set.
++              </p>
++            </div>
++          </div>
++          <canvas ref={inlineCanvasRef} className="hidden" />
++        </div>
++      )}
++
+       {step === 'report' && (
+         <div className="card p-5 space-y-3">
+           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Inspection Report</h3>
+@@ -1410,12 +1753,14 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any;
+ }
+ 
+ function StatusTab({ contact }: { contact: any }) {
++  const normalizedStatus = normalizePipelineStatus(contact.status);
++  const currentIndex = STAGES.indexOf(normalizedStatus);
++
+   return (
+     <div className="space-y-6">
+       <h3 className="text-sm font-bold text-primary">Job Timeline</h3>
+       <div className="space-y-8 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
+         {STAGES.map((stage, i) => {
+-          const currentIndex = STAGES.indexOf(contact.status);
+           const isDone = i <= currentIndex;
+           return (
+             <div key={stage} className="flex gap-6 relative">
+@@ -1644,38 +1989,61 @@ function TimelineTab({ timeline, onRefresh, contact, userId, companyId }: { time
+         </button>
+       </div>
+       <div className="space-y-4">
+-        {localTimeline.length > 0 ? localTimeline.map((item, i) => (
+-          <div key={i} className="card p-4 space-y-2">
++        {localTimeline.length > 0 ? localTimeline.map((item, i) => {
++          const meta = getTimelineEventMeta(item);
++          const message = formatTimelineMessage(item);
++          // Split message into lines, then each line into @mention segments
++          const lines = message.split('\n');
++          const ts = item.created_at ? new Date(item.created_at) : null;
++          const dateStr = ts ? ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
++          const timeStr = ts ? ts.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
++
++          return (
++          <div key={item.id || i} className="card p-4 space-y-2.5">
++            {/* Header row */}
+             <div className="flex justify-between items-start">
+               <div className="flex items-center gap-2">
+-                <div className={`h-6 w-6 rounded-md flex items-center justify-center ${item.type === 'stage_change' ? 'bg-accent/10 text-accent' : 'bg-slate-100 text-slate-500'}`}>
+-                  {item.type === 'call'         && <Phone      size={12} />}
+-                  {item.type === 'note'         && <FileText   size={12} />}
+-                  {item.type === 'sms'          && <MessageSquare size={12} />}
+-                  {item.type === 'stage_change' && <TrendingUp size={12} />}
++                <div className={`h-6 w-6 rounded-md flex items-center justify-center shrink-0 ${meta.color}`}>
++                  {meta.iconName === 'trending_up'    && <TrendingUp    size={12} />}
++                  {meta.iconName === 'shield'         && <Shield        size={12} />}
++                  {meta.iconName === 'wrench'         && <Wrench        size={12} />}
++                  {meta.iconName === 'file_signature' && <FileText      size={12} />}
++                  {meta.iconName === 'file_text'      && <FileText      size={12} />}
++                  {meta.iconName === 'phone'          && <Phone         size={12} />}
++                  {meta.iconName === 'message_square' && <MessageSquare size={12} />}
++                  {(meta.iconName === '💵' || meta.iconName === '📸') && (
++                    <span className="text-[13px] leading-none">{meta.iconName}</span>
++                  )}
+                 </div>
+-                <span className={`text-[10px] font-bold uppercase ${item.type === 'stage_change' ? 'text-accent' : 'text-slate-400'}`}>
+-                  {item.type === 'stage_change' ? 'Stage Change' : item.type}
++                <span className={`text-[10px] font-bold uppercase tracking-wider ${meta.iconName === 'trending_up' ? 'text-accent' : 'text-slate-500'}`}>
++                  {meta.label}
+                 </span>
+               </div>
+-              <span className="text-[10px] text-slate-400">{new Date(item.created_at).toLocaleDateString()}</span>
++              <div className="text-right">
++                <p className="text-[10px] text-slate-400 font-medium">{dateStr}</p>
++                {timeStr && <p className="text-[10px] text-slate-300">{timeStr}</p>}
++              </div>
++            </div>
++
++            {/* Message — newlines rendered as real line breaks */}
++            <div className="text-sm text-primary leading-relaxed space-y-1">
++              {lines.map((line, li) => {
++                if (!line.trim()) return null;
++                const segments = line.split(/(@[a-zA-Z0-9_]+)/g);
++                return (
++                  <p key={`${item.id || i}-line-${li}`}>
++                    {segments.map((seg, si) => (
++                      <span key={`${item.id || i}-${li}-${si}`} className={seg.startsWith('@') ? 'font-bold text-accent' : ''}>
++                        {seg}
++                      </span>
++                    ))}
++                  </p>
++                );
++              })}
+             </div>
+-            <p className="text-sm text-primary">
+-              {(() => {
+-                const parsed = parseNoteMentions(item.content);
+-                const segments = parsed.plainContent.split(/(@[a-zA-Z0-9_]+)/g);
+-                return segments.map((segment, index) => {
+-                  const isMention = segment.startsWith('@');
+-                  return (
+-                    <span key={`${item.id || i}-${index}`} className={isMention ? 'font-bold text-accent' : ''}>
+-                      {segment}
+-                    </span>
+-                  );
+-                });
+-              })()}
+-            </p>
+           </div>
+-        )) : (
++          );
++        }) : (
+           <div className="text-center py-12 text-slate-400">
+             <History size={48} className="mx-auto mb-4 opacity-20" />
+             <p className="text-sm">No activity recorded yet</p>
+@@ -1879,23 +2247,32 @@ function DocumentsTab({ contactId, documents, onUpload, onLegalUpload }: { conta
+ 
+ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; userId?: string; onEdit: () => void; onRefresh: () => void }) {
+   const navigate = useNavigate();
++  const [estimates, setEstimates] = useState<any[]>([]);
+   const [latestEstimate, setLatestEstimate] = useState<any>(null);
+   const [latestWorkOrder, setLatestWorkOrder] = useState<any>(null);
++  const [financialDocuments, setFinancialDocuments] = useState<any[]>([]);
+   const [savingField, setSavingField] = useState<'deposit' | 'final' | null>(null);
+   const [creatingWorkOrder, setCreatingWorkOrder] = useState(false);
++  const [loadingArtifacts, setLoadingArtifacts] = useState(true);
++
++  const isFinancialDocument = (doc: any) => {
++    const type = String(doc?.type || '').toLowerCase();
++    const name = String(doc?.name || '').toLowerCase();
++    return ['estimate', 'invoice', 'contract'].includes(type) || /(invoice|estimate|contract|payment|receipt|finance)/.test(name);
++  };
+ 
+   useEffect(() => {
+     const fetchFinancialArtifacts = async () => {
+       if (!contact?.id) return;
++      setLoadingArtifacts(true);
+       try {
+-        const [{ data: estimate }, { data: workOrder }] = await Promise.all([
++        const [{ data: estimateRows }, { data: workOrder }, { data: documentRows }] = await Promise.all([
+           supabase
+             .from('estimates')
+             .select('*')
+             .eq('contact_id', contact.id)
+             .order('created_at', { ascending: false })
+-            .limit(1)
+-            .maybeSingle(),
++            .returns<any[]>(),
+           supabase
+             .from('work_orders')
+             .select('*')
+@@ -1903,17 +2280,51 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
+             .order('created_at', { ascending: false })
+             .limit(1)
+             .maybeSingle(),
++          supabase
++            .from('documents')
++            .select('*')
++            .eq('contact_id', contact.id)
++            .order('created_at', { ascending: false })
++            .returns<any[]>(),
+         ]);
+-        setLatestEstimate(estimate || null);
++        const allEstimates = estimateRows || [];
++        const allFinancialDocuments = (documentRows || []).filter(isFinancialDocument);
++        setEstimates(allEstimates);
++        setLatestEstimate(allEstimates[0] || null);
+         setLatestWorkOrder(workOrder || null);
++        setFinancialDocuments(allFinancialDocuments);
+       } catch (err) {
+         console.error('Error loading financial data:', err);
++      } finally {
++        setLoadingArtifacts(false);
+       }
+     };
+ 
+     fetchFinancialArtifacts();
+   }, [contact?.id]);
+ 
++  const paymentEntries = [
++    {
++      key: 'deposit' as const,
++      label: 'Deposit',
++      amount: Number(contact.deposit_amount || 0),
++      paid: !!contact.deposit_paid,
++      date: contact.deposit_date,
++    },
++    {
++      key: 'final' as const,
++      label: 'Final Payment',
++      amount: Number(contact.final_payment_amount || 0),
++      paid: !!contact.final_payment_paid,
++      date: contact.final_payment_date,
++    },
++  ].filter((entry) => entry.amount > 0 || entry.paid || entry.date);
++
++  const contractValue = Number(contact.project_value || latestEstimate?.total || 0);
++  const totalPaid = paymentEntries.reduce((sum, entry) => sum + (entry.paid ? entry.amount : 0), 0);
++  const outstandingBalance = Math.max(contractValue - totalPaid, 0);
++  const deductible = Number(contact.deductible || 0);
++
+   const togglePayment = async (kind: 'deposit' | 'final') => {
+     setSavingField(kind);
+     try {
+@@ -2001,9 +2412,28 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
+         <p className="text-[10px] font-bold uppercase tracking-[0.24em] text-slate-400">Financial & Estimates</p>
+         <h3 className="mt-2 text-xl font-black">Customer financial workflow</h3>
+         <p className="mt-2 text-sm text-slate-300">
+-          Create and review estimates, record deposit and final payment, and jump into work orders without leaving this screen.
++          Review all estimates, financial documents, payment status, and outstanding balance for this customer in one place.
+         </p>
+       </div>
++      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
++        <div className="card p-5 space-y-2">
++          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Contract Value</p>
++          <p className="text-2xl font-black text-primary">{formatCurrency(contractValue)}</p>
++          <p className="text-xs text-slate-500">Project total on file for this customer.</p>
++        </div>
++        <div className="card p-5 space-y-2">
++          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Total Paid</p>
++          <p className="text-2xl font-black text-emerald-600">{formatCurrency(totalPaid)}</p>
++          <p className="text-xs text-slate-500">Combined recorded customer payments.</p>
++        </div>
++        <div className="card p-5 space-y-2">
++          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Outstanding Balance</p>
++          <p className="text-2xl font-black text-rose-600">{formatCurrency(outstandingBalance)}</p>
++          <p className="text-xs text-slate-500">
++            {deductible > 0 ? `Deductible on file: ${formatCurrency(deductible)}` : 'Based on project value minus recorded payments.'}
++          </p>
++        </div>
++      </div>
+       <div className="grid grid-cols-1 gap-4">
+         <div className="card p-5 space-y-4">
+           <div className="flex items-center justify-between">
+@@ -2034,30 +2464,120 @@ function FinancialTab({ contact, userId, onEdit, onRefresh }: { contact: any; us
+           </div>
+         </div>
+         <div className="card p-5 space-y-4">
+-          <div className="flex justify-between items-center">
+-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Deposit</h3>
+-            <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${contact.deposit_paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{contact.deposit_paid ? 'Paid' : 'Pending'}</span>
++          <div className="flex items-start justify-between gap-4">
++            <div>
++              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Payments</h3>
++              <p className="mt-1 text-sm text-slate-600">
++                Payments are recorded directly on this customer. An invoice document is optional and does not block payment entry.
++              </p>
++            </div>
++            <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase text-slate-500">
++              {paymentEntries.length} tracked
++            </span>
+           </div>
+-          <span className="text-xl font-bold text-primary">{formatCurrency(contact.deposit_amount)}</span>
+-          <div className="flex items-center justify-between text-[11px] text-slate-500">
+-            <span>{contact.deposit_date ? `Updated ${new Date(contact.deposit_date).toLocaleDateString()}` : 'No payment recorded yet'}</span>
+-            <button onClick={() => togglePayment('deposit')} disabled={savingField === 'deposit'} className="font-bold text-accent disabled:opacity-50">
+-              {savingField === 'deposit' ? 'Saving...' : contact.deposit_paid ? 'Mark Unpaid' : 'Record Deposit'}
+-            </button>
++          <div className="space-y-3">
++            {paymentEntries.length > 0 ? paymentEntries.map((entry) => (
++              <div key={entry.key} className="rounded-2xl bg-slate-50 p-4 space-y-3">
++                <div className="flex justify-between items-center">
++                  <div>
++                    <h4 className="text-sm font-bold text-primary">{entry.label}</h4>
++                    <p className="text-[11px] text-slate-500">
++                      {entry.date ? `Updated ${new Date(entry.date).toLocaleDateString()}` : 'No payment recorded yet'}
++                    </p>
++                  </div>
++                  <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${entry.paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
++                    {entry.paid ? 'Paid' : 'Pending'}
++                  </span>
++                </div>
++                <div className="flex items-center justify-between gap-4">
++                  <span className="text-xl font-bold text-primary">{formatCurrency(entry.amount)}</span>
++                  <button
++                    onClick={() => togglePayment(entry.key)}
++                    disabled={savingField === entry.key}
++                    className="rounded-xl bg-white border border-slate-200 px-4 py-2 text-xs font-bold text-accent disabled:opacity-50"
++                  >
++                    {savingField === entry.key ? 'Saving...' : entry.paid ? 'Mark Unpaid' : `Record ${entry.label}`}
++                  </button>
++                </div>
++              </div>
++            )) : (
++              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
++                No payment schedule is on file yet. Add the customer financial amounts from the edit screen to start tracking payments here.
++              </div>
++            )}
+           </div>
+         </div>
+         <div className="card p-5 space-y-4">
+-          <div className="flex justify-between items-center">
+-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Final Payment</h3>
+-            <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${contact.final_payment_paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>{contact.final_payment_paid ? 'Paid' : 'Pending'}</span>
++          <div className="flex items-center justify-between">
++            <div>
++              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Financial Documents</h3>
++              <p className="text-sm text-slate-600">Estimates, invoices, contracts, receipts, and money-related files for this customer.</p>
++            </div>
++            <button onClick={() => navigate(`/documents?contactId=${contact.id}`)} className="text-accent text-xs font-bold">
++              View All Docs
++            </button>
+           </div>
+-          <span className="text-xl font-bold text-primary">{formatCurrency(contact.final_payment_amount)}</span>
+-          <div className="flex items-center justify-between text-[11px] text-slate-500">
+-            <span>{contact.final_payment_date ? `Updated ${new Date(contact.final_payment_date).toLocaleDateString()}` : 'No payment recorded yet'}</span>
+-            <button onClick={() => togglePayment('final')} disabled={savingField === 'final'} className="font-bold text-accent disabled:opacity-50">
+-              {savingField === 'final' ? 'Saving...' : contact.final_payment_paid ? 'Mark Unpaid' : 'Record Final'}
++          <div className="space-y-3">
++            {loadingArtifacts ? (
++              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading financial documents...</div>
++            ) : financialDocuments.length > 0 ? financialDocuments.map((doc) => (
++              <button
++                key={doc.id}
++                onClick={() => navigate(`/documents/view/${doc.id}`)}
++                className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left transition-colors hover:bg-white"
++              >
++                <div className="flex items-center justify-between gap-4">
++                  <div>
++                    <p className="text-sm font-bold text-primary">{doc.name}</p>
++                    <p className="text-[11px] text-slate-500">
++                      {String(doc.type || 'document').toUpperCase()} • {new Date(doc.created_at).toLocaleDateString()}
++                    </p>
++                  </div>
++                  <span className="text-[11px] font-bold text-accent">Open</span>
++                </div>
++              </button>
++            )) : (
++              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
++                No customer financial documents have been saved yet.
++              </div>
++            )}
++          </div>
++        </div>
++        <div className="card p-5 space-y-4">
++          <div className="flex items-center justify-between">
++            <div>
++              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Estimate History</h3>
++              <p className="text-sm text-slate-600">All saved estimates for this customer, newest first.</p>
++            </div>
++            <button onClick={() => navigate(`/estimates-list?contactId=${contact.id}`)} className="text-accent text-xs font-bold">
++              View Estimates
+             </button>
+           </div>
++          <div className="space-y-3">
++            {loadingArtifacts ? (
++              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading estimate history...</div>
++            ) : estimates.length > 0 ? estimates.map((estimate) => (
++              <button
++                key={estimate.id}
++                onClick={() => navigate(`/estimates/${estimate.id}`)}
++                className="w-full rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left transition-colors hover:bg-white"
++              >
++                <div className="flex items-center justify-between gap-4">
++                  <div>
++                    <p className="text-sm font-bold text-primary">{estimate.title}</p>
++                    <p className="text-[11px] text-slate-500">
++                      {String(estimate.status || 'draft').replace('_', ' ')} • {new Date(estimate.created_at).toLocaleDateString()}
++                    </p>
++                  </div>
++                  <span className="text-sm font-bold text-accent">{formatCurrency(estimate.total)}</span>
++                </div>
++              </button>
++            )) : (
++              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
++                No estimates have been created for this customer yet.
++              </div>
++            )}
++          </div>
+         </div>
+         <div className="card p-5 space-y-4">
+           <div className="flex items-center justify-between">
+diff --git a/src/pages/MaterialOrders.tsx b/src/pages/MaterialOrders.tsx
+index 2ce361d..7050df0 100644
+--- a/src/pages/MaterialOrders.tsx
++++ b/src/pages/MaterialOrders.tsx
+@@ -1,177 +1,602 @@
+-import React, { useState, useEffect } from 'react';
+-import { Package, Plus, Search, ChevronLeft, Filter, Truck, ShoppingCart } from 'lucide-react';
++import React, { useState, useEffect, useMemo } from 'react';
++import {
++  Package, Plus, Search, ChevronLeft, ChevronRight, Truck,
++  ShoppingCart, X, Check, DollarSign, Calendar, Building2,
++  User, FileText, Clock, CheckCircle, XCircle,
++} from 'lucide-react';
+ import { useNavigate } from 'react-router-dom';
+ import { supabase } from '../lib/supabase';
+ import { useAuth } from '../context/AuthContext';
+-import { motion, AnimatePresence } from 'framer-motion';
+ import { formatCurrency } from '../lib/utils';
+ 
++// ─── Types ────────────────────────────────────────────────────────────────────
++type OrderStatus = 'pending' | 'ordered' | 'delivered' | 'cancelled';
++
++interface MaterialOrder {
++  id: string;
++  company_id: string;
++  supplier_id: string | null;
++  contact_id: string | null;
++  job_id: string | null;
++  order_number: string;
++  order_date: string;
++  expected_delivery_date: string | null;
++  actual_delivery_date: string | null;
++  status: OrderStatus;
++  subtotal: number;
++  tax: number;
++  shipping: number;
++  total: number;
++  notes: string | null;
++  created_by: string;
++  created_at: string;
++  updated_at: string;
++  // joined
++  contact_name?: string;
++  contact_address?: string;
++  supplier_name?: string;
++}
++
++interface Supplier {
++  id: string;
++  name: string;
++}
++
++interface Contact {
++  id: string;
++  first_name: string;
++  last_name: string;
++  address?: string;
++}
++
++// ─── Helpers ──────────────────────────────────────────────────────────────────
++const STATUS_CONFIG: Record<OrderStatus, { label: string; bg: string; text: string; icon: React.ElementType }> = {
++  pending:   { label: 'Pending',   bg: 'bg-slate-100',  text: 'text-slate-600', icon: Clock },
++  ordered:   { label: 'Ordered',   bg: 'bg-blue-100',   text: 'text-blue-700',  icon: FileText },
++  delivered: { label: 'Delivered', bg: 'bg-green-100',  text: 'text-green-700', icon: CheckCircle },
++  cancelled: { label: 'Cancelled', bg: 'bg-red-100',    text: 'text-red-600',   icon: XCircle },
++};
++
++function StatusBadge({ status }: { status: OrderStatus }) {
++  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
++  const Icon = cfg.icon;
++  return (
++    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${cfg.bg} ${cfg.text}`}>
++      <Icon size={10} />
++      {cfg.label}
++    </span>
++  );
++}
++
++// ─── Component ────────────────────────────────────────────────────────────────
+ export default function MaterialOrders() {
+   const navigate = useNavigate();
+-  const { profile } = useAuth();
+-  const [orders, setOrders] = useState<any[]>([]);
+-  const [loading, setLoading] = useState(true);
+-  const [searchQuery, setSearchQuery] = useState('');
++  const { profile, user } = useAuth();
++  const db = supabase as any;
+ 
+-  const [toast, setToast] = useState<string | null>(null);
++  const [orders, setOrders]       = useState<MaterialOrder[]>([]);
++  const [contacts, setContacts]   = useState<Contact[]>([]);
++  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
++  const [loading, setLoading]     = useState(true);
++  const [searchQuery, setSearchQuery]   = useState('');
++  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all');
++  const [sheetOpen, setSheetOpen] = useState(false);
++  const [saving, setSaving]       = useState(false);
++  const [savedOk, setSavedOk]     = useState(false);
+ 
+-  useEffect(() => {
+-    if (toast) {
+-      const timer = setTimeout(() => setToast(null), 3000);
+-      return () => clearTimeout(timer);
+-    }
+-  }, [toast]);
++  // Form state
++  const [formContact,  setFormContact]  = useState('');
++  const [formSupplier, setFormSupplier] = useState('');
++  const [formVendor,   setFormVendor]   = useState(''); // free-text when no supplier
++  const [formStatus,   setFormStatus]   = useState<OrderStatus>('pending');
++  const [formOrderDate, setFormOrderDate]   = useState(() => new Date().toISOString().split('T')[0]);
++  const [formDeliveryDate, setFormDeliveryDate] = useState('');
++  const [formSubtotal, setFormSubtotal] = useState('');
++  const [formTax,      setFormTax]      = useState('0');
++  const [formShipping, setFormShipping] = useState('0');
++  const [formNotes,    setFormNotes]    = useState('');
+ 
+-  const showToast = (message: string) => setToast(message);
++  // ── Fetch ─────────────────────────────────────────────────────────────────
++  const fetchAll = async () => {
++    if (!profile?.company_id) return;
++    setLoading(true);
++    try {
++      const [ordersRes, contactsRes, suppliersRes] = await Promise.all([
++        db.from('material_orders')
++          .select('*, contacts(first_name, last_name, address), suppliers(name)')
++          .eq('company_id', profile.company_id)
++          .order('order_date', { ascending: false }),
++        supabase.from('contacts').select('id, first_name, last_name, address').eq('company_id', profile.company_id).order('last_name'),
++        db.from('suppliers').select('id, name').eq('company_id', profile.company_id).eq('is_active', true).order('name'),
++      ]);
+ 
+-  useEffect(() => {
+-    if (profile?.company_id) {
+-      fetchMaterialOrders();
++      const rawOrders = (ordersRes.data || []) as any[];
++      const mapped: MaterialOrder[] = rawOrders.map((o) => ({
++        ...o,
++        contact_name: o.contacts
++          ? `${o.contacts.first_name || ''} ${o.contacts.last_name || ''}`.trim()
++          : null,
++        contact_address: o.contacts?.address || null,
++        supplier_name: o.suppliers?.name || null,
++      }));
++      setOrders(mapped);
++      setContacts((contactsRes.data || []) as Contact[]);
++      setSuppliers((suppliersRes.data || []) as Supplier[]);
++    } catch (err) {
++      console.error('[MaterialOrders] fetch error:', err);
++    } finally {
++      setLoading(false);
+     }
+-  }, [profile?.company_id]);
++  };
++
++  useEffect(() => { fetchAll(); }, [profile?.company_id]);
++
++  // ── Derived ───────────────────────────────────────────────────────────────
++  const filteredOrders = useMemo(() => {
++    return orders.filter((o) => {
++      const matchesSearch =
++        !searchQuery ||
++        o.order_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
++        o.contact_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
++        o.supplier_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
++        o.notes?.toLowerCase().includes(searchQuery.toLowerCase());
++      const matchesStatus = statusFilter === 'all' || o.status === statusFilter;
++      return matchesSearch && matchesStatus;
++    });
++  }, [orders, searchQuery, statusFilter]);
++
++  const totalSpend   = orders.reduce((s, o) => s + (o.total || 0), 0);
++  const pendingCount = orders.filter((o) => o.status === 'pending' || o.status === 'ordered').length;
++  const deliveredCount = orders.filter((o) => o.status === 'delivered').length;
++
++  const formTotal = useMemo(() => {
++    const sub = parseFloat(formSubtotal || '0') || 0;
++    const tax = parseFloat(formTax || '0') || 0;
++    const ship = parseFloat(formShipping || '0') || 0;
++    return sub + tax + ship;
++  }, [formSubtotal, formTax, formShipping]);
+ 
+-  const fetchMaterialOrders = async () => {
++  // ── Create ────────────────────────────────────────────────────────────────
++  const resetForm = () => {
++    setFormContact('');
++    setFormSupplier('');
++    setFormVendor('');
++    setFormStatus('pending');
++    setFormOrderDate(new Date().toISOString().split('T')[0]);
++    setFormDeliveryDate('');
++    setFormSubtotal('');
++    setFormTax('0');
++    setFormShipping('0');
++    setFormNotes('');
++    setSavedOk(false);
++  };
++
++  const handleSave = async () => {
++    if (saving || !profile?.company_id || !user) return;
++    setSaving(true);
+     try {
+-      // For now, we'll fetch work orders that have material costs or descriptions
+-      const { data, error } = await supabase
+-        .from('work_orders')
+-        .select(`
+-          *,
+-          contacts (
+-            first_name,
+-            last_name,
+-            address
+-          )
+-        `)
+-        .eq('company_id', profile.company_id)
+-        .not('materials', 'is', null)
+-        .order('created_at', { ascending: false });
+-      
++      let supplierId = formSupplier || null;
++
++      // If vendor text entered but no supplier selected — find or create supplier
++      if (!supplierId && formVendor.trim()) {
++        const vendorName = formVendor.trim();
++        const { data: existing } = await db
++          .from('suppliers')
++          .select('id')
++          .eq('company_id', profile.company_id)
++          .ilike('name', vendorName)
++          .maybeSingle();
++
++        if (existing?.id) {
++          supplierId = existing.id;
++        } else {
++          const { data: created } = await db
++            .from('suppliers')
++            .insert({ company_id: profile.company_id, name: vendorName, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
++            .select('id')
++            .single();
++          supplierId = created?.id ?? null;
++        }
++      }
++
++      const orderNumber = `MO-${Date.now().toString().slice(-6)}`;
++      const sub  = parseFloat(formSubtotal || '0') || 0;
++      const tax  = parseFloat(formTax      || '0') || 0;
++      const ship = parseFloat(formShipping || '0') || 0;
++
++      const payload = {
++        company_id:             profile.company_id,
++        supplier_id:            supplierId,
++        contact_id:             formContact || null,
++        order_number:           orderNumber,
++        order_date:             formOrderDate,
++        expected_delivery_date: formDeliveryDate || null,
++        status:                 formStatus,
++        subtotal:               sub,
++        tax:                    tax,
++        shipping:               ship,
++        total:                  sub + tax + ship,
++        notes:                  formNotes.trim() || null,
++        created_by:             user.id,
++        created_at:             new Date().toISOString(),
++        updated_at:             new Date().toISOString(),
++      };
++
++      const { error } = await db.from('material_orders').insert(payload);
+       if (error) throw error;
+-      setOrders(data || []);
++
++      setSavedOk(true);
++      await fetchAll();
++      setTimeout(() => {
++        setSheetOpen(false);
++        resetForm();
++      }, 1200);
+     } catch (err) {
+-      console.error('Error fetching material orders:', err);
++      console.error('[MaterialOrders] save error:', err);
++      alert('Failed to save order. Please try again.');
+     } finally {
+-      setLoading(false);
++      setSaving(false);
+     }
+   };
+ 
+-  const filteredOrders = orders.filter(o => 
+-    o.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+-    o.contacts?.address?.toLowerCase().includes(searchQuery.toLowerCase())
+-  );
++  // ── Render ────────────────────────────────────────────────────────────────
++  const STATUS_TABS: Array<{ key: OrderStatus | 'all'; label: string }> = [
++    { key: 'all',       label: 'All' },
++    { key: 'pending',   label: 'Pending' },
++    { key: 'ordered',   label: 'Ordered' },
++    { key: 'delivered', label: 'Delivered' },
++  ];
+ 
+   return (
+-    <div className="min-h-screen bg-slate-50 pb-20">
++    <div className="min-h-screen bg-slate-50 pb-28">
+       {/* Header */}
+-      <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10">
+-        <div className="flex items-center gap-4 mb-6">
++      <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10 space-y-4">
++        <div className="flex items-center gap-4">
+           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
+             <ChevronLeft size={24} />
+           </button>
+           <h1 className="text-xl font-bold text-primary">Material Orders</h1>
+         </div>
+-
+-        <div className="flex gap-3">
+-          <div className="relative flex-1">
+-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+-            <input 
+-              type="text"
+-              placeholder="Search orders..."
+-              className="w-full bg-slate-100 border-none rounded-2xl py-3 pl-11 pr-4 text-sm focus:ring-2 focus:ring-accent/20"
+-              value={searchQuery}
+-              onChange={(e) => setSearchQuery(e.target.value)}
+-            />
+-          </div>
+-          <button className="bg-slate-100 p-3 rounded-2xl text-slate-600">
+-            <Filter size={20} />
+-          </button>
++        <div className="relative">
++          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
++          <input
++            type="text"
++            placeholder="Search orders, contacts, vendors…"
++            value={searchQuery}
++            onChange={(e) => setSearchQuery(e.target.value)}
++            className="w-full bg-slate-100 rounded-2xl py-3 pl-11 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20"
++          />
++        </div>
++        {/* Status filter tabs */}
++        <div className="flex gap-2 overflow-x-auto pb-0.5 -mx-1 px-1">
++          {STATUS_TABS.map(({ key, label }) => (
++            <button
++              key={key}
++              onClick={() => setStatusFilter(key)}
++              className={`shrink-0 rounded-xl px-3 py-1.5 text-xs font-bold transition-all ${
++                statusFilter === key
++                  ? 'bg-primary text-white'
++                  : 'bg-slate-100 text-slate-500'
++              }`}
++            >
++              {label}
++            </button>
++          ))}
+         </div>
+       </div>
+ 
+-      <div className="p-6 space-y-4">
++      <div className="p-6 space-y-5">
++        {/* Budget summary */}
++        {!loading && (
++          <div className="grid grid-cols-3 gap-3">
++            <div className="card p-4 space-y-1 text-center">
++              <DollarSign size={18} className="mx-auto text-accent" />
++              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total Spend</p>
++              <p className="text-sm font-black text-primary">{formatCurrency(totalSpend)}</p>
++            </div>
++            <div className="card p-4 space-y-1 text-center">
++              <Clock size={18} className="mx-auto text-blue-500" />
++              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">In Progress</p>
++              <p className="text-sm font-black text-primary">{pendingCount}</p>
++            </div>
++            <div className="card p-4 space-y-1 text-center">
++              <CheckCircle size={18} className="mx-auto text-green-500" />
++              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Delivered</p>
++              <p className="text-sm font-black text-primary">{deliveredCount}</p>
++            </div>
++          </div>
++        )}
++
++        {/* Orders list */}
+         {loading ? (
+-          [1, 2, 3].map(i => (
++          [1, 2, 3].map((i) => (
+             <div key={i} className="h-32 bg-white rounded-2xl animate-pulse border border-slate-100" />
+           ))
+         ) : filteredOrders.length > 0 ? (
+-          filteredOrders.map((order, i) => (
+-            <motion.div
+-              key={order.id}
+-              initial={{ opacity: 0, y: 10 }}
+-              animate={{ opacity: 1, y: 0 }}
+-              transition={{ delay: i * 0.05 }}
+-              className="card p-4 space-y-4"
+-            >
+-              <div className="flex justify-between items-start">
++          filteredOrders.map((order) => (
++            <div key={order.id} className="card p-4 space-y-3">
++              {/* Top row */}
++              <div className="flex items-start justify-between gap-3">
+                 <div className="flex items-center gap-3">
+-                  <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary">
++                  <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary shrink-0">
+                     <Package size={20} />
+                   </div>
+                   <div>
+-                    <h3 className="font-bold text-primary text-sm">{order.title}</h3>
+-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Order #{order.id.slice(0, 6)}</p>
++                    <p className="text-sm font-bold text-primary">{order.order_number || `Order`}</p>
++                    <p className="text-[10px] text-slate-400 font-medium">
++                      {order.order_date ? new Date(order.order_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
++                    </p>
+                   </div>
+                 </div>
+-                <span className="text-[10px] font-bold px-2 py-1 rounded-full uppercase bg-blue-500 text-white">
+-                  Ordered
+-                </span>
++                <StatusBadge status={order.status} />
+               </div>
+ 
+-              <div className="space-y-2">
+-                <div className="flex items-center gap-2 text-slate-500 text-xs">
+-                  <Truck size={14} />
+-                  <span>Delivery to: {order.contacts?.address}</span>
+-                </div>
+-                <div className="flex items-center gap-2 text-slate-500 text-xs">
+-                  <ShoppingCart size={14} />
+-                  <span>Est. Cost: {formatCurrency(order.material_cost || 0)}</span>
+-                </div>
++              {/* Details */}
++              <div className="space-y-1.5">
++                {order.contact_name && (
++                  <div className="flex items-center gap-2 text-slate-500 text-xs">
++                    <User size={12} className="shrink-0" />
++                    <span>{order.contact_name}</span>
++                    {order.contact_address && (
++                      <span className="text-slate-300">· {order.contact_address}</span>
++                    )}
++                  </div>
++                )}
++                {(order.supplier_name) && (
++                  <div className="flex items-center gap-2 text-slate-500 text-xs">
++                    <Building2 size={12} className="shrink-0" />
++                    <span>{order.supplier_name}</span>
++                  </div>
++                )}
++                {order.expected_delivery_date && (
++                  <div className="flex items-center gap-2 text-slate-500 text-xs">
++                    <Truck size={12} className="shrink-0" />
++                    <span>
++                      Expected{' '}
++                      {new Date(order.expected_delivery_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
++                    </span>
++                  </div>
++                )}
++                {order.notes && (
++                  <p className="text-xs text-slate-400 italic">{order.notes}</p>
++                )}
+               </div>
+ 
+-              <div className="pt-3 border-t border-slate-50 flex justify-between items-center">
+-                <p className="text-[10px] text-slate-400 font-medium">Vendor: <span className="text-slate-600">ABC Supply Co.</span></p>
+-                <button 
+-                  onClick={() => showToast('Tracking feature coming soon')}
+-                  className="text-accent text-xs font-bold"
++              {/* Footer */}
++              <div className="pt-3 border-t border-slate-50 flex items-center justify-between">
++                <div className="space-y-0.5">
++                  <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Total</p>
++                  <p className="text-base font-black text-primary">{formatCurrency(order.total || 0)}</p>
++                </div>
++                <button
++                  onClick={() => navigate(`/contacts/${order.contact_id}`)}
++                  disabled={!order.contact_id}
++                  className="flex items-center gap-1 text-xs font-bold text-accent active:scale-95 transition-transform disabled:opacity-30"
+                 >
+-                  Track Order
++                  View Contact <ChevronRight size={14} />
+                 </button>
+               </div>
+-            </motion.div>
++            </div>
+           ))
+         ) : (
+-          <div className="text-center py-12 space-y-4">
++          <div className="text-center py-16 space-y-4">
+             <div className="mx-auto h-16 w-16 bg-white rounded-2xl flex items-center justify-center text-slate-200 shadow-sm">
+               <Package size={32} />
+             </div>
+-            <p className="text-slate-400 text-sm">No material orders found</p>
++            <p className="text-slate-400 text-sm font-medium">
++              {searchQuery || statusFilter !== 'all' ? 'No orders match your filters' : 'No material orders yet'}
++            </p>
+           </div>
+         )}
+       </div>
+ 
+       {/* FAB */}
+-      <button 
+-        onClick={() => showToast('New Material Order feature coming soon')}
++      <button
++        onClick={() => { resetForm(); setSheetOpen(true); }}
+         className="fixed bottom-24 right-6 h-14 w-14 bg-accent text-white rounded-2xl shadow-xl shadow-accent/30 flex items-center justify-center active:scale-90 transition-transform z-10"
+       >
+         <Plus size={28} />
+       </button>
+ 
+-      {/* Toast */}
+-      <AnimatePresence>
+-        {toast && (
+-          <motion.div
+-            initial={{ opacity: 0, y: 50 }}
+-            animate={{ opacity: 1, y: 0 }}
+-            exit={{ opacity: 0, y: 50 }}
+-            className="fixed bottom-24 left-6 right-6 bg-slate-900 text-white p-4 rounded-2xl shadow-2xl z-50 flex items-center gap-3"
++      {/* ── Create Order Sheet ────────────────────────────────────────────── */}
++      {sheetOpen && (
++        <div className="fixed inset-0 z-50 flex flex-col justify-end">
++          <div className="absolute inset-0 bg-black/40" onClick={() => setSheetOpen(false)} />
++          <div
++            className="relative flex flex-col rounded-t-3xl bg-white"
++            style={{ maxHeight: 'min(90vh, calc(100dvh - env(safe-area-inset-top) - 1rem))' }}
+           >
+-            <div className="h-2 w-2 rounded-full bg-accent animate-pulse" />
+-            <p className="text-xs font-bold">{toast}</p>
+-          </motion.div>
+-        )}
+-      </AnimatePresence>
++            {/* Handle */}
++            <div className="absolute top-3 left-1/2 -translate-x-1/2 w-10 h-1 rounded-full bg-slate-200" />
++
++            {/* Scrollable form */}
++            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-8 space-y-5">
++              <div className="flex items-center justify-between">
++                <h2 className="text-xl font-black text-primary">New Material Order</h2>
++                <button onClick={() => setSheetOpen(false)} className="p-2 rounded-xl bg-slate-100 active:scale-95">
++                  <X size={18} className="text-slate-500" />
++                </button>
++              </div>
++
++              {/* Contact */}
++              <div className="space-y-1.5">
++                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
++                  <User size={12} /> Customer
++                </label>
++                <select
++                  value={formContact}
++                  onChange={(e) => setFormContact(e.target.value)}
++                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                >
++                  <option value="">— Select customer —</option>
++                  {contacts.map((c) => (
++                    <option key={c.id} value={c.id}>
++                      {`${c.first_name || ''} ${c.last_name || ''}`.trim() || c.id}
++                    </option>
++                  ))}
++                </select>
++              </div>
++
++              {/* Supplier */}
++              <div className="space-y-1.5">
++                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
++                  <Building2 size={12} /> Vendor / Supplier
++                </label>
++                {suppliers.length > 0 ? (
++                  <select
++                    value={formSupplier}
++                    onChange={(e) => { setFormSupplier(e.target.value); setFormVendor(''); }}
++                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                  >
++                    <option value="">— Select or type below —</option>
++                    {suppliers.map((s) => (
++                      <option key={s.id} value={s.id}>{s.name}</option>
++                    ))}
++                  </select>
++                ) : null}
++                {!formSupplier && (
++                  <input
++                    type="text"
++                    placeholder="Or type vendor name…"
++                    value={formVendor}
++                    onChange={(e) => setFormVendor(e.target.value)}
++                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent"
++                  />
++                )}
++              </div>
++
++              {/* Status */}
++              <div className="space-y-1.5">
++                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Status</label>
++                <div className="grid grid-cols-2 gap-2">
++                  {(['pending', 'ordered', 'delivered', 'cancelled'] as OrderStatus[]).map((s) => (
++                    <button
++                      key={s}
++                      type="button"
++                      onClick={() => setFormStatus(s)}
++                      className={`rounded-xl py-2.5 text-xs font-bold capitalize transition-all ${
++                        formStatus === s
++                          ? 'bg-primary text-white'
++                          : 'bg-slate-100 text-slate-500'
++                      }`}
++                    >
++                      {STATUS_CONFIG[s].label}
++                    </button>
++                  ))}
++                </div>
++              </div>
++
++              {/* Dates */}
++              <div className="grid grid-cols-2 gap-3">
++                <div className="space-y-1.5">
++                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
++                    <Calendar size={11} /> Order Date
++                  </label>
++                  <input
++                    type="date"
++                    value={formOrderDate}
++                    onChange={(e) => setFormOrderDate(e.target.value)}
++                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                  />
++                </div>
++                <div className="space-y-1.5">
++                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
++                    <Truck size={11} /> Delivery Date
++                  </label>
++                  <input
++                    type="date"
++                    value={formDeliveryDate}
++                    onChange={(e) => setFormDeliveryDate(e.target.value)}
++                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                  />
++                </div>
++              </div>
++
++              {/* Costs */}
++              <div className="space-y-1.5">
++                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
++                  <DollarSign size={12} /> Costs
++                </label>
++                <div className="grid grid-cols-3 gap-2">
++                  <div>
++                    <label className="text-[10px] text-slate-400 font-bold">Subtotal</label>
++                    <input
++                      type="number"
++                      inputMode="decimal"
++                      placeholder="0.00"
++                      value={formSubtotal}
++                      onChange={(e) => setFormSubtotal(e.target.value)}
++                      className="w-full mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                    />
++                  </div>
++                  <div>
++                    <label className="text-[10px] text-slate-400 font-bold">Tax</label>
++                    <input
++                      type="number"
++                      inputMode="decimal"
++                      placeholder="0.00"
++                      value={formTax}
++                      onChange={(e) => setFormTax(e.target.value)}
++                      className="w-full mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                    />
++                  </div>
++                  <div>
++                    <label className="text-[10px] text-slate-400 font-bold">Shipping</label>
++                    <input
++                      type="number"
++                      inputMode="decimal"
++                      placeholder="0.00"
++                      value={formShipping}
++                      onChange={(e) => setFormShipping(e.target.value)}
++                      className="w-full mt-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
++                    />
++                  </div>
++                </div>
++                <div className="flex items-center justify-between rounded-xl bg-primary/5 px-4 py-2.5 mt-1">
++                  <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Order Total</span>
++                  <span className="text-base font-black text-primary">{formatCurrency(formTotal)}</span>
++                </div>
++              </div>
++
++              {/* Notes */}
++              <div className="space-y-1.5">
++                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Notes (optional)</label>
++                <textarea
++                  value={formNotes}
++                  onChange={(e) => setFormNotes(e.target.value)}
++                  placeholder="Materials list, delivery instructions, reference #…"
++                  rows={3}
++                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-primary placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-accent resize-none"
++                />
++              </div>
++            </div>
++
++            {/* Save button */}
++            <div
++              className="shrink-0 border-t border-slate-100 bg-white px-6 py-4"
++              style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
++            >
++              <button
++                onClick={handleSave}
++                disabled={saving || savedOk}
++                className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${
++                  savedOk
++                    ? 'bg-green-500 text-white'
++                    : 'bg-accent text-white disabled:opacity-50'
++                }`}
++              >
++                {savedOk ? (
++                  <><Check size={16} /> Order Saved</>
++                ) : saving ? (
++                  <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
++                ) : (
++                  'Save Material Order'
++                )}
++              </button>
++            </div>
++          </div>
++        </div>
++      )}
+     </div>
+   );
+ }
+diff --git a/src/pages/More.tsx b/src/pages/More.tsx
+index 5f20cc5..f361de9 100644
+--- a/src/pages/More.tsx
++++ b/src/pages/More.tsx
+@@ -154,38 +154,76 @@ export default function More() {
+       };
+       const badge = STATUS_BADGE[status] ?? { label: status, cls: 'bg-slate-400' };
+ 
++      const PLAN_ORDER = ['trial', 'starter', 'pro', 'business', 'scale'] as const;
++
+       return (
+         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowPlanModal(false)}>
+-          <div className="w-full max-w-lg rounded-t-3xl bg-white p-8 space-y-6" onClick={e => e.stopPropagation()}>
+-            <div className="flex items-center justify-between">
+-              <h2 className="text-xl font-bold text-primary">Your Plan</h2>
++          <div
++            className="w-full max-w-lg rounded-t-3xl bg-white flex flex-col"
++            style={{ maxHeight: 'min(88vh, calc(100dvh - env(safe-area-inset-top) - 1rem))' }}
++            onClick={e => e.stopPropagation()}
++          >
++            {/* Fixed header */}
++            <div className="px-6 pt-6 pb-4 flex items-center justify-between shrink-0">
++              <div>
++                <h2 className="text-xl font-bold text-primary">Subscription Plans</h2>
++                <p className="text-xs text-slate-400 mt-0.5">Your current plan is highlighted</p>
++              </div>
+               <button onClick={() => setShowPlanModal(false)} className="p-2 text-slate-400 active:scale-90 transition-transform">
+                 <X size={22} />
+               </button>
+             </div>
+-            <div className="rounded-2xl border-2 border-primary bg-primary/5 p-6 space-y-4">
+-              <div className="flex items-center justify-between">
+-                <div>
+-                  <span className="text-lg font-bold text-primary">TrussCTR {meta.label}</span>
+-                  <p className="text-xs text-slate-400 mt-0.5">{meta.userLimit}</p>
+-                </div>
+-                <span className={`rounded-full ${badge.cls} px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white`}>{badge.label}</span>
+-              </div>
+-              <div className="space-y-2">
+-                {meta.features.map(feature => (
+-                  <div key={feature} className="flex items-center gap-3">
+-                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+-                    <span className="text-sm text-slate-600">{feature}</span>
++
++            {/* Scrollable plan list */}
++            <div className="flex-1 overflow-y-auto px-6 space-y-4 pb-4">
++              {PLAN_ORDER.map((planKey) => {
++                const planMeta = PLAN_META[planKey];
++                if (!planMeta) return null;
++                const isCurrent = planKey === rawPlan;
++                return (
++                  <div
++                    key={planKey}
++                    className={`rounded-2xl border-2 p-5 space-y-3 transition-all ${
++                      isCurrent
++                        ? 'border-primary bg-primary/5'
++                        : 'border-slate-100 bg-slate-50 opacity-80'
++                    }`}
++                  >
++                    <div className="flex items-center justify-between gap-2">
++                      <div>
++                        <span className={`text-base font-bold ${isCurrent ? 'text-primary' : 'text-slate-600'}`}>
++                          TrussCTR {planMeta.label}
++                        </span>
++                        <p className="text-xs text-slate-400 mt-0.5">{planMeta.userLimit}</p>
++                      </div>
++                      {isCurrent && (
++                        <span className={`rounded-full ${badge.cls} px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-white shrink-0`}>
++                          {badge.label}
++                        </span>
++                      )}
++                    </div>
++                    <div className="space-y-1.5">
++                      {planMeta.features.map(feature => (
++                        <div key={feature} className="flex items-center gap-2.5">
++                          <CheckCircle2 size={14} className={`shrink-0 ${isCurrent ? 'text-emerald-500' : 'text-slate-300'}`} />
++                          <span className={`text-sm ${isCurrent ? 'text-slate-600' : 'text-slate-400'}`}>{feature}</span>
++                        </div>
++                      ))}
++                    </div>
+                   </div>
+-                ))}
+-              </div>
++                );
++              })}
++            </div>
++
++            {/* Fixed footer */}
++            <div className="shrink-0 px-6 py-4 border-t border-slate-100" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
++              <p className="text-xs text-slate-400 text-center">
++                To upgrade or manage billing, visit{' '}
++                <span className="text-accent font-bold">trussctr.com</span>
++                {' '}or contact{' '}
++                <span className="text-accent font-bold">support@trussctr.com</span>
++              </p>
+             </div>
+-            <p className="text-xs text-slate-400 text-center">
+-              To upgrade or manage billing, visit{' '}
+-              <span className="text-accent font-bold">trussctr.com</span>
+-              {' '}or contact{' '}
+-              <span className="text-accent font-bold">support@trussctr.com</span>
+-            </p>
+           </div>
+         </div>
+       );
+diff --git a/src/pages/Pipeline.tsx b/src/pages/Pipeline.tsx
+index 3fc5262..f870dc7 100644
+--- a/src/pages/Pipeline.tsx
++++ b/src/pages/Pipeline.tsx
+@@ -8,7 +8,7 @@ import { formatCurrency, getStatusColor } from '../lib/utils';
+ import { useAuth } from '../context/AuthContext';
+ import NewContactModal from '../components/NewContactModal';
+ import NoProfileState from '../components/NoProfileState';
+-import { getPipelineStageLabel } from '../lib/pipelineStages';
++import { getPipelineStageLabel, normalizePipelineStatus } from '../lib/pipelineStages';
+ 
+ const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
+   { id: 'lead', label: 'Leads', color: 'bg-blue-500' },
+@@ -22,15 +22,6 @@ const STAGES: { id: CustomerStatus; label: string; color: string }[] = [
+   { id: 'completed', label: 'Completed', color: 'bg-slate-800' },
+ ];
+ 
+-function normalizePipelineStatus(status?: string | null): CustomerStatus {
+-  if (status === 'new_lead') return 'lead';
+-  if (status === 'inspection_scheduled') return 'appointment_set';
+-  if (status === 'inspection_complete') return 'inspected';
+-  if (status === 'signed_won') return 'approved';
+-  if (status === 'paid') return 'completed';
+-  return (status as CustomerStatus) || 'lead';
+-}
+-
+ export default function Pipeline() {
+   const navigate = useNavigate();
+   const { profile, loading: loadingAuth } = useAuth();
+diff --git a/src/pages/PitchGauge.tsx b/src/pages/PitchGauge.tsx
+index aee6fb7..52d3695 100644
+--- a/src/pages/PitchGauge.tsx
++++ b/src/pages/PitchGauge.tsx
+@@ -201,110 +201,116 @@ export default function PitchGauge() {
+       {/* Pitch-line overlay */}
+       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
+ 
+-      {/* Header */}
+-      <div className="relative z-10 flex items-center gap-3 p-4 bg-gradient-to-b from-black/70 to-transparent">
++      {/* Header — padded below Dynamic Island / status bar */}
++      <div
++        className="relative z-10 flex items-center gap-3 px-4 pb-3 bg-gradient-to-b from-black/80 to-transparent"
++        style={{ paddingTop: 'calc(env(safe-area-inset-top, 44px) + 10px)' }}
++      >
+         <button
+           onClick={() => navigate(-1)}
+-          className="w-10 h-10 flex items-center justify-center rounded-full bg-black/50 text-white active:scale-90 transition-transform"
++          className="w-10 h-10 flex-shrink-0 flex items-center justify-center rounded-full bg-black/60 text-white active:scale-90 transition-transform"
+         >
+           <ChevronLeft size={22} />
+         </button>
+-        <div>
+-          <p className="text-white font-black text-lg leading-none">Pitch Gauge</p>
+-          <p className="text-slate-300 text-[10px]">
+-            {motionActive ? 'Place phone flat on roof slope' : 'Tap a pitch below or enable motion sensor'}
++        <div className="min-w-0 flex-1">
++          <p className="text-white font-black text-base leading-tight">Pitch Gauge</p>
++          <p className="text-slate-300 text-[10px] truncate">
++            {motionActive ? 'Place phone flat on roof slope' : 'Tap a pitch below or enable motion'}
+           </p>
+         </div>
+         {locked && (
+-          <div className="ml-auto bg-accent/20 border border-accent/50 px-2 py-1 rounded text-accent text-[10px] font-bold">
++          <div className="flex-shrink-0 bg-accent/20 border border-accent/50 px-2 py-1 rounded text-accent text-[10px] font-bold">
+             LOCKED
+           </div>
+         )}
+         {manualPitch && !locked && (
+-          <div className="ml-auto bg-blue-500/20 border border-blue-400/50 px-2 py-1 rounded text-blue-300 text-[10px] font-bold">
++          <div className="flex-shrink-0 bg-blue-500/20 border border-blue-400/50 px-2 py-1 rounded text-blue-300 text-[10px] font-bold">
+             MANUAL
+           </div>
+         )}
+       </div>
+ 
+-      {/* Bottom panel */}
+-      <div className="relative z-10 mt-auto bg-black/85 backdrop-blur-md rounded-t-3xl p-5 space-y-4">
++      {/* Bottom panel — scrollable, clears home indicator */}
++      <div
++        className="relative z-10 mt-auto bg-black/85 backdrop-blur-md rounded-t-3xl overflow-y-auto"
++        style={{
++          paddingTop: '20px',
++          paddingLeft: '20px',
++          paddingRight: '20px',
++          paddingBottom: 'calc(env(safe-area-inset-bottom, 34px) + 10px)',
++        }}
++      >
++        <div className="space-y-3">
++          {/* iOS motion permission button */}
++          {needsPermission && !motionActive && (
++            <button
++              onClick={requestMotionPermission}
++              className="w-full py-3 bg-accent text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
++            >
++              Enable Motion Sensor
++            </button>
++          )}
++          {permissionError && (
++            <p className="text-amber-400 text-xs text-center">{permissionError}</p>
++          )}
+ 
+-        {/* iOS motion permission button */}
+-        {needsPermission && !motionActive && (
+-          <button
+-            onClick={requestMotionPermission}
+-            className="w-full py-3 bg-accent text-white rounded-xl text-sm font-bold active:scale-95 transition-transform"
+-          >
+-            Enable Motion Sensor
+-          </button>
+-        )}
+-        {permissionError && (
+-          <p className="text-amber-400 text-xs text-center">{permissionError}</p>
+-        )}
+-
+-        {/* Main readout */}
+-        <div className="flex items-stretch justify-around">
+-          <div className="text-center">
+-            <p className="text-slate-400 text-[10px] uppercase font-bold mb-1">Pitch</p>
+-            <p className="text-white font-black" style={{ fontSize: 44, lineHeight: 1 }}>
+-              {currentPitch}/12
+-            </p>
++          {/* Main readout — tighter font */}
++          <div className="flex items-stretch justify-around py-1">
++            <div className="text-center">
++              <p className="text-slate-400 text-[9px] uppercase font-bold mb-0.5">Pitch</p>
++              <p className="text-white font-black text-3xl leading-none">{currentPitch}/12</p>
++            </div>
++            <div className="w-px bg-white/10" />
++            <div className="text-center">
++              <p className="text-slate-400 text-[9px] uppercase font-bold mb-0.5">Multiplier</p>
++              <p className="text-accent font-black text-3xl leading-none">{multiplier.toFixed(3)}</p>
++            </div>
++            <div className="w-px bg-white/10" />
++            <div className="text-center">
++              <p className="text-slate-400 text-[9px] uppercase font-bold mb-0.5">Angle</p>
++              <p className="text-white font-black text-3xl leading-none">{angleForRise(currentPitch).toFixed(1)}°</p>
++            </div>
+           </div>
+-          <div className="w-px bg-white/10" />
+-          <div className="text-center">
+-            <p className="text-slate-400 text-[10px] uppercase font-bold mb-1">Multiplier</p>
+-            <p className="text-accent font-black" style={{ fontSize: 44, lineHeight: 1 }}>
+-              {multiplier.toFixed(3)}
+-            </p>
+-          </div>
+-          <div className="w-px bg-white/10" />
+-          <div className="text-center">
+-            <p className="text-slate-400 text-[10px] uppercase font-bold mb-1">Angle</p>
+-            <p className="text-white font-black" style={{ fontSize: 44, lineHeight: 1 }}>
+-              {angleForRise(currentPitch).toFixed(1)}°
++
++          {/* Tappable pitch grid */}
++          <div>
++            <p className="text-slate-500 text-[9px] uppercase font-bold mb-1.5 text-center">
++              {manualPitch ? 'Tap again to return to auto' : 'Tap any pitch to select manually'}
+             </p>
++            <div className="grid grid-cols-5 gap-1">
++              {PITCHES.map((r) => {
++                const isSelected = r === currentPitch;
++                const isManual = r === manualPitch;
++                return (
++                  <button
++                    key={r}
++                    onClick={() => handlePitchTap(r)}
++                    className={`rounded-lg py-1.5 px-1 text-center transition-colors active:scale-95 ${
++                      isSelected
++                        ? isManual
++                          ? 'bg-blue-500 text-white'
++                          : 'bg-accent text-white'
++                        : 'bg-white/5 text-slate-400'
++                    }`}
++                  >
++                    <p className="text-[10px] font-bold">{r}/12</p>
++                    <p className="text-[8px] opacity-70">{multiplierForRise(r).toFixed(3)}</p>
++                  </button>
++                );
++              })}
++            </div>
+           </div>
+-        </div>
+ 
+-        {/* Tappable pitch grid — tap to manually select; tap again to clear */}
+-        <div>
+-          <p className="text-slate-500 text-[9px] uppercase font-bold mb-2 text-center">
+-            {manualPitch ? 'Tap again to return to auto' : 'Tap any pitch to select manually'}
+-          </p>
+-          <div className="grid grid-cols-5 gap-1.5">
+-            {PITCHES.map((r) => {
+-              const isSelected = r === currentPitch;
+-              const isManual = r === manualPitch;
+-              return (
+-                <button
+-                  key={r}
+-                  onClick={() => handlePitchTap(r)}
+-                  className={`rounded-lg p-2 text-center transition-colors active:scale-95 ${
+-                    isSelected
+-                      ? isManual
+-                        ? 'bg-blue-500 text-white'
+-                        : 'bg-accent text-white'
+-                      : 'bg-white/5 text-slate-400'
+-                  }`}
+-                >
+-                  <p className="text-[10px] font-bold">{r}/12</p>
+-                  <p className="text-[9px] opacity-70">{multiplierForRise(r).toFixed(3)}</p>
+-                </button>
+-              );
+-            })}
+-          </div>
++          {/* Lock button */}
++          <button
++            onClick={handleLock}
++            className={`w-full py-3 rounded-2xl font-black text-sm transition-colors active:scale-95 ${
++              locked ? 'bg-accent text-white' : 'bg-white/10 text-white'
++            }`}
++          >
++            {locked ? '🔒 Locked — Tap to Unlock' : 'Lock Reading'}
++          </button>
+         </div>
+-
+-        {/* Lock button */}
+-        <button
+-          onClick={handleLock}
+-          className={`w-full py-4 rounded-2xl font-black text-sm transition-colors active:scale-95 ${
+-            locked ? 'bg-accent text-white' : 'bg-white/10 text-white'
+-          }`}
+-        >
+-          {locked ? '🔒 Locked — Tap to Unlock' : 'Lock Reading'}
+-        </button>
+       </div>
+     </div>
+   );
+diff --git a/src/pages/Settings.tsx b/src/pages/Settings.tsx
+index 6e8a72c..a8f842e 100644
+--- a/src/pages/Settings.tsx
++++ b/src/pages/Settings.tsx
+@@ -1,23 +1,45 @@
+-import React, { useState } from 'react';
++import React, { useState, useEffect } from 'react';
+ import { ChevronLeft, Bell, Shield, Smartphone, Globe, Moon, HelpCircle, Images, ChevronRight, KeyRound, CheckCircle } from 'lucide-react';
+ import { useNavigate } from 'react-router-dom';
+ import { supabase } from '../lib/supabase';
+ import { useAuth } from '../context/AuthContext';
+ import { getInspectionPhotoStorageMode, setInspectionPhotoStorageMode, type InspectionPhotoStorageMode } from '../lib/photoPreferences';
++import { registerPushToken, checkPushPermission } from '../lib/pushNotifications';
++import { Capacitor } from '@capacitor/core';
+ 
+ export default function Settings() {
+   const navigate = useNavigate();
+   const { user } = useAuth();
+   const [inspectionPhotoStorageMode, setMode] = useState<InspectionPhotoStorageMode>(() => getInspectionPhotoStorageMode());
+-  const [notificationsEnabled, setNotificationsEnabled] = useState(() => localStorage.getItem('notif_enabled') !== 'false');
+   const [darkMode, setDarkMode] = useState(() => localStorage.getItem('dark_mode') === 'true');
+   const [pwResetSent, setPwResetSent] = useState(false);
+   const [pwResetLoading, setPwResetLoading] = useState(false);
+ 
+-  const handleToggleNotifications = () => {
+-    const next = !notificationsEnabled;
+-    setNotificationsEnabled(next);
+-    localStorage.setItem('notif_enabled', String(next));
++  // Push notification state
++  const isNative = Capacitor.isNativePlatform();
++  const [pushStatus, setPushStatus] = useState<'granted' | 'denied' | 'web' | 'loading'>('loading');
++  const [pushRegistering, setPushRegistering] = useState(false);
++
++  useEffect(() => {
++    checkPushPermission().then(setPushStatus);
++  }, []);
++
++  const handleTogglePush = async () => {
++    if (pushRegistering) return;
++    if (pushStatus === 'granted') {
++      // iOS does not allow revoking push permission programmatically.
++      // Direct the user to iOS Settings.
++      alert('To turn off notifications, go to iPhone Settings → TrussCTR → Notifications and disable Allow Notifications.');
++      return;
++    }
++    // Status is denied or we haven't asked yet — request permission
++    setPushRegistering(true);
++    const result = await registerPushToken();
++    setPushStatus(result);
++    setPushRegistering(false);
++    if (result === 'denied') {
++      alert('Notifications were not allowed. To enable them, go to iPhone Settings → TrussCTR → Notifications and turn on Allow Notifications.');
++    }
+   };
+ 
+   const handleToggleDarkMode = () => {
+@@ -105,18 +127,37 @@ export default function Settings() {
+         <div className="space-y-3">
+           <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">App Settings</h2>
+           <div className="card divide-y divide-slate-50">
+-            {/* Notifications toggle */}
++            {/* Push Notifications */}
+             <div className="flex items-center justify-between gap-3 p-4">
+               <div className="flex items-center gap-4">
+                 <Bell size={20} className="text-blue-500" />
+-                <span className="text-sm font-bold text-primary">Notifications</span>
++                <div>
++                  <span className="text-sm font-bold text-primary">Push Notifications</span>
++                  {isNative && (
++                    <p className="text-[11px] mt-0.5 text-slate-400">
++                      {pushStatus === 'loading'    ? 'Checking…'
++                       : pushStatus === 'granted'  ? 'Enabled — tap to manage in Settings'
++                       : pushStatus === 'denied'   ? 'Tap to enable'
++                       : 'Not available on this device'}
++                    </p>
++                  )}
++                </div>
+               </div>
+-              <button
+-                onClick={handleToggleNotifications}
+-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${notificationsEnabled ? 'bg-primary' : 'bg-slate-200'}`}
+-              >
+-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${notificationsEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+-              </button>
++              {isNative ? (
++                <button
++                  onClick={handleTogglePush}
++                  disabled={pushRegistering || pushStatus === 'loading' || pushStatus === 'web'}
++                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors disabled:opacity-50 ${
++                    pushStatus === 'granted' ? 'bg-primary' : 'bg-slate-200'
++                  }`}
++                >
++                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
++                    pushStatus === 'granted' ? 'translate-x-6' : 'translate-x-1'
++                  }`} />
++                </button>
++              ) : (
++                <span className="text-xs text-slate-300 font-medium">iOS only</span>
++              )}
+             </div>
+             {/* Dark Mode toggle */}
+             <div className="flex items-center justify-between gap-3 p-4">
+diff --git a/tsconfig.json b/tsconfig.json
+index 0bca917..5e9fbe7 100644
+--- a/tsconfig.json
++++ b/tsconfig.json
+@@ -23,5 +23,7 @@
+     "allowImportingTsExtensions": true,
+     "noEmit": true,
+     "types": ["vite/client"]
+-  }
++  },
++  "include": ["src", "vite.config.ts"],
++  "exclude": ["dist", "ios/App/App/public", "node_modules"]
+ }
+diff --git a/vite.config.ts b/vite.config.ts
+index 5163a68..56cd85a 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -21,5 +21,21 @@ export default defineConfig(({mode}) => {
+       // Do not modify — file watching is disabled to prevent flickering during agent edits.
+       hmr: process.env.DISABLE_HMR !== 'true',
+     },
++    build: {
++      rollupOptions: {
++        output: {
++          manualChunks: {
++            // Core React — cached separately, rarely changes
++            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
++            // Supabase is large (~120 kB) — split so it caches independently
++            'vendor-supabase': ['@supabase/supabase-js'],
++            // Capacitor core — small but split for clarity
++            'vendor-capacitor': ['@capacitor/core', '@capacitor/splash-screen'],
++          },
++        },
++      },
++      // Raise the warning threshold — html2pdf/html2canvas are intentionally large lazy chunks
++      chunkSizeWarningLimit: 1000,
++    },
+   };
+ });

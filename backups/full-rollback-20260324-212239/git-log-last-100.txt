@@ -1,0 +1,73 @@
+d4a04a8 Fix pipeline visibility for inspection_complete contacts
+66d8ce3 fix: pitch gauge — motion permission via user tap + tappable pitch grid
+b3225b9 feat: pitch multiplier redesign + pitch gauge camera tool
+8055064 fix: replace broken MultiShotCamera plugin with @capacitor/camera for iOS
+0f2ed8a feat: replace splash screen with TrussCTR branded design
+e70aeb2 feat: auto-log stage changes to job timeline
+28a7cd5 fix: register MultiShotCameraPlugin in capacitorDidLoad() not viewDidLoad()
+8e4d6bf fix: multi-shot camera — use Capacitor.convertFileSrc() for local file URLs
+e6f1bd6 fix: add @capacitor/splash-screen to vite external list
+c03f351 feat: implement full audit fixes — error boundary, forgot password, pipeline stages, package cleanup
+9e486d0 feat: update pricing to new structure (Starter $59, Pro $119, Business $229, Scale $399)
+69ee114 feat: seat limits, HEIC guard, dynamic plan modal, push notification registration
+1e03035 Update artifact action for Node 24
+1d5a81d Fix Capacitor sync command in CI
+f359f72 Fix CI type inference for Supabase query rows
+ebb8254 Update GitHub Actions to current Node runtime
+caeaadd fix: add @types/react and @types/react-dom devDependencies
+786213f fix: definitive fix for ReportBuilder photo typing
+6036b9b fix: correct remaining TS errors — cast Object.values/entries and Supabase queries
+48772b0 fix: resolve all 10 TypeScript CI errors in mobile app
+4bc2efa Apply remaining mobile UI updates
+e276532 Refine mobile customer flows and document access
+b19fabf Harden mobile sheet layering and scroll lock
+4c67d9d Fix calendar scheduling and mobile horizontal drift
+c515fe5 feat: full app update - all pages, components, and lib files
+81b3e40 feat: Calendar smart scheduling with contactSchedule lib
+7eae12c Fix horizontal scroll and pipeline status mapping
+a4a94dd Add TrussCTR logo and app icon
+52420f3 Add contact edit, docs filter, inspections table support, and fix camera plugin
+8fb6144 Conform MultiShotCamera to CAPBridgedPlugin
+5316c52 Align MultiShotCamera plugin name
+a2791cb Debug register MultiShotCamera plugin
+3f0a174 Register MultiShotCamera via BridgeViewController
+37845f1 Fix plugin file path in Xcode project
+dfbcd30 Add MultiShotCamera plugin to Xcode project
+7f9b7e8 Revert AppDelegate and bridge controller
+750d326 Register MultiShotCamera plugin with CAPBridge
+e9b86fd Fix Swift string literals in AppDelegate
+8bf1cd6 Embed bridge and camera plugin in AppDelegate
+6ddef0a Make BridgeViewController public for storyboard
+311c3af Register MultiShotCamera plugin in bridge
+1b12f6d Register MultiShotCamera plugin name
+ad7d8f1 Add native multi-shot camera plugin
+2e2ba2d Add Capacitor camera dependency
+32bea79 Add Capacitor camera capture for inspection photos
+a74b6fe Fix duplicate signed URL block
+91b8a3a Use blob URL fallback for photo previews
+5e803c1 Use signed URLs for inspection photo display
+9df9fe1 Improve inspection photo uploads and feedback
+00ac690 Add camera and photo library permissions
+c85fa61 Allow scrolling by relaxing container overflow
+19fd215 Store image uploads in projectceo-photos and link in documents
+c32b575 Store inspection photos in projectceo-photos bucket
+9a082db Fix main scroll area on iOS
+006461d Lock bottom nav and prevent document scroll
+1a208c8 Build full inspection flow in contact page
+d645d40 Fix iOS scrolling by removing fixed body lock
+946fbcc Avoid duplicate auth initialization in WebView
+afde741 Stabilize auth profile fetch in dev
+e08fbf3 Update inspection flow and damage selection
+96e8f39 Ignore local tool folders
+9e27147 Add iOS project and update app config
+096b1ba fix: pass real user ID to communications and documents insert instead of hardcoded string
+5d68cea fix: add iOS safe area inset to top of main content and bottom nav
+0b1f8cc fix: resolve Supabase auth lock conflict on iOS Capacitor - fix storage and duplicate fetchProfile calls
+c72aadc fix: correct index.css with proper @layer base, safe-bottom, and iOS viewport fixes
+e3b9a0d fix: wire dead buttons, real data for dashboard pipeline + field tools recent orders
+a550928 Remove .env from tracking
+6335641 Add .env with Supabase credentials
+63662e9 feat: add routes for DocumentManager, DocumentSigner, ReportBuilder, RetailEstimator, SmartInspection
+ecc7237 feat: add PageTransition, DocumentManager, DocumentSigner (Supabase), ReportBuilder, RetailEstimator, SmartInspection, store automation
+9ea3acb feat: Initialize TrussCTR Mobile project
+0257e65 Initial commit

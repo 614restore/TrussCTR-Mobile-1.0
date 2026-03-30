@@ -429,6 +429,16 @@ export interface BackfillProgress {
   total: number;
   done: number;
   saved: number;
+  /** Diagnostic info for the current day being processed */
+  status?: string;
+  /** Set once at start — confirms geocode worked */
+  geocodeLabel?: string;
+  /** Running total of raw events seen across all days (before distance/threshold filter) */
+  rawTotal?: number;
+  /** Running total of events that passed distance filter but failed threshold */
+  thresholdFiltered?: number;
+  /** Running total of events filtered out by distance */
+  distanceFiltered?: number;
 }
 
 export interface BackfillOptions {
@@ -482,8 +492,12 @@ export async function backfillNoaaHistory(
   const geo = await geocodeAddress(searchCity, searchState, searchZip);
   if (!geo) {
     console.warn('[NOAA Backfill] Cannot geocode search location — aborting.');
+    onProgress?.({ total: 1, done: 1, saved: 0, status: 'Geocode failed — check city/state/ZIP in Company Profile', geocodeLabel: 'Not found' });
     return { saved: 0 };
   }
+
+  const geocodeLabel = `${geo.lat.toFixed(3)}, ${geo.lng.toFixed(3)} (${searchZip ?? searchCity ?? 'location'})`;
+  console.log('[NOAA Backfill] Geocoded to:', geocodeLabel);
 
   // 2. Load existing notification fingerprints to avoid duplicates
   const since = new Date(fromDate + 'T00:00:00').toISOString();
@@ -506,23 +520,36 @@ export async function backfillNoaaHistory(
   }
 
   let saved = 0;
+  let rawTotal = 0;
+  let distanceFiltered = 0;
+  let thresholdFiltered = 0;
   const total = dates.length;
 
   // 5. Fetch each day and insert qualifying events (sequentially to avoid rate limiting)
   for (let i = 0; i < dates.length; i++) {
     const dateStr = dates[i];
-    onProgress?.({ total, done: i, saved });
+    onProgress?.({ total, done: i, saved, status: `Checking ${dateStr}…`, geocodeLabel, rawTotal, distanceFiltered, thresholdFiltered });
 
     const events = await fetchEventsForDate(dateStr);
+    rawTotal += events.length;
 
     const toInsert: any[] = [];
     for (const event of events) {
       if (existingFingerprints.has(event.fingerprint)) continue;
 
       const dist = distanceMiles(geo.lat, geo.lng, event.lat, event.lng);
-      if (dist > radiusMiles)                                           continue;
-      if (event.type === 'HAIL' && event.magnitude < minHailInches)    continue;
-      if (event.type === 'WIND' && event.magnitude < minWindMph)       continue;
+      if (dist > radiusMiles) {
+        distanceFiltered++;
+        continue;
+      }
+      if (event.type === 'HAIL' && event.magnitude < minHailInches) {
+        thresholdFiltered++;
+        continue;
+      }
+      if (event.type === 'WIND' && event.magnitude < minWindMph) {
+        thresholdFiltered++;
+        continue;
+      }
 
       const distStr = dist < 1 ? 'within 1 mile' : `${Math.round(dist)} miles away`;
       const dateLabel = new Date(event.eventDate + 'T12:00:00').toLocaleDateString('en-US', {
@@ -566,6 +593,15 @@ export async function backfillNoaaHistory(
     }
   }
 
-  onProgress?.({ total, done: total, saved });
-  return { saved };
+  const summary = saved > 0
+    ? `Saved ${saved} storm report${saved !== 1 ? 's' : ''}`
+    : rawTotal === 0
+      ? `No SPC reports found in NOAA database for this date range`
+      : distanceFiltered > 0 && saved === 0
+        ? `${rawTotal} national reports found — none within ${radiusMiles} mi of your location`
+        : `${rawTotal} reports found — none met wind/hail thresholds`;
+
+  onProgress?.({ total, done: total, saved, status: summary, geocodeLabel, rawTotal, distanceFiltered, thresholdFiltered });
+  console.log(`[NOAA Backfill] Done. ${summary}. Raw: ${rawTotal}, distance-filtered: ${distanceFiltered}, threshold-filtered: ${thresholdFiltered}`);
+  return { saved, rawTotal, distanceFiltered, thresholdFiltered } as any;
 }

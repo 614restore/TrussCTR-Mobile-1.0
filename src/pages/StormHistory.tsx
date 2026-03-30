@@ -663,9 +663,16 @@ function HistoryTab({ companyId, location }: {
         {/* Progress bar */}
         {backfilling && backfillProgress && (
           <div className="space-y-1.5">
+            {/* Geocode confirmation */}
+            {backfillProgress.geocodeLabel && (
+              <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                Searching near {backfillProgress.geocodeLabel}
+              </p>
+            )}
             <div className="flex items-center justify-between">
               <p className="text-[11px] text-slate-500">
-                Day {backfillProgress.done}/{backfillProgress.total}
+                {backfillProgress.status ?? `Day ${backfillProgress.done}/${backfillProgress.total}`}
               </p>
               <p className="text-[11px] font-bold text-primary">{backfillProgress.saved} saved</p>
             </div>
@@ -675,18 +682,37 @@ function HistoryTab({ companyId, location }: {
                 style={{ width: `${backfillProgress.total > 0 ? Math.round((backfillProgress.done / backfillProgress.total) * 100) : 0}%` }}
               />
             </div>
+            {/* Running diagnostics */}
+            {(backfillProgress.rawTotal ?? 0) > 0 && (
+              <p className="text-[10px] text-slate-400">
+                {backfillProgress.rawTotal} national reports found · {backfillProgress.distanceFiltered ?? 0} outside radius · {backfillProgress.thresholdFiltered ?? 0} below threshold
+              </p>
+            )}
           </div>
         )}
 
         {/* Result banner */}
-        {backfillResult && !backfilling && (
-          <div className={`rounded-xl p-3 flex items-center gap-2 ${backfillResult.saved > 0 ? 'bg-emerald-50' : 'bg-slate-100'}`}>
-            <History size={14} className={backfillResult.saved > 0 ? 'text-emerald-600' : 'text-slate-400'} />
-            <p className={`text-[11px] font-bold ${backfillResult.saved > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
-              {backfillResult.saved > 0
-                ? `${backfillResult.saved} new storm report${backfillResult.saved !== 1 ? 's' : ''} imported`
-                : 'No new reports found for these search criteria'}
-            </p>
+        {backfillResult && !backfilling && backfillProgress && (
+          <div className={`rounded-xl p-3 space-y-1 ${backfillResult.saved > 0 ? 'bg-emerald-50' : 'bg-amber-50'}`}>
+            <div className="flex items-center gap-2">
+              <History size={14} className={backfillResult.saved > 0 ? 'text-emerald-600' : 'text-amber-500'} />
+              <p className={`text-[11px] font-bold ${backfillResult.saved > 0 ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {backfillProgress.status ?? (backfillResult.saved > 0
+                  ? `${backfillResult.saved} new storm report${backfillResult.saved !== 1 ? 's' : ''} imported`
+                  : 'No new reports found for these search criteria')}
+              </p>
+            </div>
+            {backfillResult.saved === 0 && (backfillProgress.rawTotal ?? 0) > 0 && (
+              <p className="text-[10px] text-amber-600 ml-5">
+                {backfillProgress.rawTotal} national SPC reports checked — {backfillProgress.distanceFiltered ?? 0} outside your {searchRadius}mi radius, {backfillProgress.thresholdFiltered ?? 0} below wind/hail thresholds.
+                Try increasing radius or setting thresholds to Any.
+              </p>
+            )}
+            {backfillResult.saved === 0 && (backfillProgress.rawTotal ?? 0) === 0 && (
+              <p className="text-[10px] text-amber-600 ml-5">
+                NOAA SPC had no verified storm damage reports for this date range. SPC only records events with confirmed ground reports — not all high-wind days are in the database.
+              </p>
+            )}
           </div>
         )}
       </div>
