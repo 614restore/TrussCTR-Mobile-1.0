@@ -102,16 +102,10 @@ async function fetchEventsFromEdgeFunction(): Promise<ParsedEvent[]> {
 
 // ─── Geocoding (same approach as hailAlertService) ────────────────────────────
 
-async function geocodeAddress(
-  city?: string | null,
-  state?: string | null,
-  zip?: string | null,
-): Promise<{ lat: number; lng: number } | null> {
-  const query = [city, state, zip].filter(Boolean).join(' ');
-  if (!query) return null;
+async function geocodeQuery(query: string): Promise<{ lat: number; lng: number } | null> {
   try {
     const res = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json`,
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=en&format=json&countryCode=US`,
     );
     if (!res.ok) return null;
     const json = await res.json();
@@ -121,6 +115,30 @@ async function geocodeAddress(
   } catch {
     return null;
   }
+}
+
+async function geocodeAddress(
+  city?: string | null,
+  state?: string | null,
+  zip?: string | null,
+): Promise<{ lat: number; lng: number } | null> {
+  // Try multiple strategies in order of reliability
+  // 1. ZIP code alone — most precise for US locations
+  if (zip?.trim()) {
+    const result = await geocodeQuery(zip.trim());
+    if (result) return result;
+  }
+  // 2. City + State — very reliable for open-meteo
+  if (city?.trim() && state?.trim()) {
+    const result = await geocodeQuery(`${city.trim()}, ${state.trim()}, US`);
+    if (result) return result;
+  }
+  // 3. City alone
+  if (city?.trim()) {
+    const result = await geocodeQuery(city.trim());
+    if (result) return result;
+  }
+  return null;
 }
 
 // ─── Hail size label ──────────────────────────────────────────────────────────
@@ -175,11 +193,11 @@ export async function checkForNoaaStorms(companyId: string): Promise<void> {
     if (!cfg.noaa_enabled) return;
 
     // ── 2. Geocode company location ──────────────────────────────────────────
-    const { data: company } = await supabase
+    const { data: company } = await (supabase
       .from('companies')
-      .select('city, state, zip')
+      .select('*')
       .eq('id', companyId)
-      .single();
+      .single() as unknown as Promise<{ data: Record<string, any> | null }>);
 
     const geo = company
       ? await geocodeAddress(
@@ -315,12 +333,15 @@ export async function fetchLiveNoaaFeed(companyId: string): Promise<{
 }> {
   const [allEvents, companyRes] = await Promise.all([
     fetchEventsFromEdgeFunction(),
-    (supabase.from('companies').select('city, state, zip').eq('id', companyId).single() as unknown as Promise<{ data: { city: string; state: string; zip: string } | null }>),
+    (supabase.from('companies').select('*').eq('id', companyId).single() as unknown as Promise<{ data: Record<string, any> | null }>),
   ]);
 
-  const geo = companyRes.data
-    ? await geocodeAddress(companyRes.data.city, companyRes.data.state, companyRes.data.zip)
+  const companyData = companyRes.data as any;
+  console.log('[NOAA] Company location data:', companyData);
+  const geo = companyData
+    ? await geocodeAddress(companyData.city, companyData.state, companyData.zip)
     : null;
+  console.log('[NOAA] Geocode result:', geo);
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
