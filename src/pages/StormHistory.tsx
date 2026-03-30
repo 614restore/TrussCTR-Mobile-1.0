@@ -23,6 +23,27 @@ import {
 
 type MainTab   = 'live' | 'history';
 type FilterTab = 'all' | 'hail' | 'wind';
+type DateRange = '7d' | '30d' | '90d' | '6m' | '12m' | 'custom';
+
+const DATE_RANGE_LABELS: Record<DateRange, string> = {
+  '7d':  '7 Days',
+  '30d': '30 Days',
+  '90d': '90 Days',
+  '6m':  '6 Months',
+  '12m': '12 Months',
+  custom: 'Custom',
+};
+
+function rangeStart(range: DateRange, customFrom: string): Date {
+  const now = Date.now();
+  if (range === '7d')    return new Date(now - 7   * 86_400_000);
+  if (range === '30d')   return new Date(now - 30  * 86_400_000);
+  if (range === '90d')   return new Date(now - 90  * 86_400_000);
+  if (range === '6m')    return new Date(now - 180 * 86_400_000);
+  if (range === '12m')   return new Date(now - 365 * 86_400_000);
+  if (range === 'custom' && customFrom) return new Date(customFrom + 'T00:00:00');
+  return new Date(0);
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -312,9 +333,12 @@ function LiveFeedTab({ companyId }: { companyId: string }) {
 // ─── History tab ──────────────────────────────────────────────────────────────
 
 function HistoryTab({ companyId }: { companyId: string }) {
-  const [events,  setEvents]  = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter,  setFilter]  = useState<FilterTab>('all');
+  const [events,     setEvents]     = useState<any[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [filter,     setFilter]     = useState<FilterTab>('all');
+  const [dateRange,  setDateRange]  = useState<DateRange>('12m');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo,   setCustomTo]   = useState('');
 
   useEffect(() => {
     fetchStormHistory(companyId).then((data) => {
@@ -323,16 +347,45 @@ function HistoryTab({ companyId }: { companyId: string }) {
     });
   }, [companyId]);
 
+  // Default custom range to last 30 days when user switches to Custom
+  const handleRangeSelect = (r: DateRange) => {
+    if (r === 'custom' && !customFrom) {
+      const today = new Date();
+      const prior = new Date(today.getTime() - 30 * 86_400_000);
+      setCustomFrom(prior.toISOString().slice(0, 10));
+      setCustomTo(today.toISOString().slice(0, 10));
+    }
+    setDateRange(r);
+  };
+
+  // Apply both date-range and type filter
   const filtered = events.filter((n) => {
-    if (filter === 'all')  return true;
-    const t = getEventType(n);
-    if (filter === 'hail') return t === 'HAIL';
-    if (filter === 'wind') return t === 'WIND';
+    // ── type filter ──
+    if (filter !== 'all') {
+      const t = getEventType(n);
+      if (filter === 'hail' && t !== 'HAIL') return false;
+      if (filter === 'wind' && t !== 'WIND') return false;
+    }
+    // ── date range filter ──
+    const eventDate: Date = n.metadata?.event_date
+      ? new Date(n.metadata.event_date + 'T12:00:00')
+      : new Date(n.created_at);
+    const start = rangeStart(dateRange, customFrom);
+    if (eventDate < start) return false;
+    if (dateRange === 'custom' && customTo) {
+      const end = new Date(customTo + 'T23:59:59');
+      if (eventDate > end) return false;
+    }
     return true;
   });
 
-  const hailCount = events.filter((n) => getEventType(n) === 'HAIL').length;
-  const windCount = events.filter((n) => getEventType(n) === 'WIND').length;
+  // Stats reflect the current date range (not the full 12-month set)
+  const hailCount = filtered.filter((n) => getEventType(n) === 'HAIL').length;
+  const windCount = filtered.filter((n) => getEventType(n) === 'WIND').length;
+
+  const rangeLabel = dateRange === 'custom'
+    ? [customFrom, customTo].filter(Boolean).join(' → ') || 'Custom range'
+    : DATE_RANGE_LABELS[dateRange];
 
   if (loading) {
     return (
@@ -346,7 +399,55 @@ function HistoryTab({ companyId }: { companyId: string }) {
 
   return (
     <div className="p-4 space-y-4">
-      {/* Stats */}
+
+      {/* ── Date range selector ── */}
+      <div className="space-y-2">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-0.5">Date Range</p>
+        <div className="flex gap-1.5 flex-wrap">
+          {(Object.keys(DATE_RANGE_LABELS) as DateRange[]).map((r) => (
+            <button
+              key={r}
+              onClick={() => handleRangeSelect(r)}
+              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                dateRange === r
+                  ? 'bg-primary text-white'
+                  : 'bg-slate-100 text-slate-500 active:bg-slate-200'
+              }`}
+            >
+              {DATE_RANGE_LABELS[r]}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom date inputs — shown only when Custom is selected */}
+        {dateRange === 'custom' && (
+          <div className="flex gap-3 pt-1">
+            <div className="flex-1 space-y-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">From</p>
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo || new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm font-medium text-primary border-none focus:ring-2 focus:ring-accent/20"
+              />
+            </div>
+            <div className="flex-1 space-y-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">To</p>
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm font-medium text-primary border-none focus:ring-2 focus:ring-accent/20"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Stats — reflect the current filtered range */}
       <div className="flex gap-3">
         <div className="flex-1 bg-red-50 rounded-xl p-3 text-center">
           <p className="text-lg font-bold text-red-600">{hailCount}</p>
@@ -357,12 +458,12 @@ function HistoryTab({ companyId }: { companyId: string }) {
           <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Wind</p>
         </div>
         <div className="flex-1 bg-slate-100 rounded-xl p-3 text-center">
-          <p className="text-lg font-bold text-slate-700">{events.length}</p>
+          <p className="text-lg font-bold text-slate-700">{filtered.length}</p>
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total</p>
         </div>
       </div>
 
-      {/* Filter tabs */}
+      {/* Type filter tabs */}
       <div className="flex gap-2">
         {(['all','hail','wind'] as FilterTab[]).map((f) => (
           <button
@@ -385,7 +486,7 @@ function HistoryTab({ companyId }: { companyId: string }) {
           <p className="text-xs text-slate-300 mt-1 px-6">
             {events.length === 0
               ? 'Storm reports will appear here once detected near your area'
-              : 'No events match the selected filter'}
+              : `No events match "${rangeLabel}"${filter !== 'all' ? ` · ${filter}` : ''}`}
           </p>
         </div>
       ) : (
@@ -417,7 +518,7 @@ function HistoryTab({ companyId }: { companyId: string }) {
             );
           })}
           <p className="text-center text-[10px] text-slate-300 pb-4 uppercase tracking-widest font-bold">
-            {filtered.length} report{filtered.length !== 1 ? 's' : ''} · Last 12 months
+            {filtered.length} report{filtered.length !== 1 ? 's' : ''} · {rangeLabel}
           </p>
         </div>
       )}
