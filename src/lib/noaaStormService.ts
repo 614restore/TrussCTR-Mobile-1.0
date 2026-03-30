@@ -427,41 +427,62 @@ export interface BackfillProgress {
   saved: number;
 }
 
+export interface BackfillOptions {
+  /** Start date YYYY-MM-DD (inclusive). Defaults to 30 days ago. */
+  fromDate?: string;
+  /** End date YYYY-MM-DD (inclusive). Defaults to yesterday. */
+  toDate?: string;
+  /** Override ZIP / city / state for geocoding (e.g. searching a different city). */
+  searchZip?: string;
+  searchCity?: string;
+  searchState?: string;
+  /** Radius in miles. Defaults to 50 (more permissive than the alert default of 25). */
+  radiusMiles?: number;
+  /** Minimum hail size in inches. Defaults to 0.25 — capture all hail. */
+  minHailInches?: number;
+  /** Minimum wind speed in mph. Defaults to 35 — capture all wind reports. */
+  minWindMph?: number;
+}
+
 /**
- * Backfill NOAA storm history for the past `days` days.
- * Fetches each day's SPC archive, filters by the company's location and
- * configured thresholds, and inserts missing notifications.
+ * Backfill NOAA storm history for a given date range and location.
+ * Fetches each day's SPC archive, filters by location + thresholds,
+ * and inserts missing notifications.
+ *
+ * Defaults to very permissive thresholds so users can see all events
+ * and filter in the UI rather than missing data during import.
  *
  * Calls onProgress(progress) after each day so the UI can show a progress bar.
  */
 export async function backfillNoaaHistory(
   companyId: string,
   location: { city?: string | null; state?: string | null; zip?: string | null },
-  days = 30,
+  options: BackfillOptions = {},
   onProgress?: (p: BackfillProgress) => void,
 ): Promise<{ saved: number }> {
-  // 1. Geocode company location
-  const geo = await geocodeAddress(location.city, location.state, location.zip);
+  const {
+    searchZip   = location.zip   ?? undefined,
+    searchCity  = location.city  ?? undefined,
+    searchState = location.state ?? undefined,
+    radiusMiles   = 50,   // wider default for search vs alert default of 25
+    minHailInches = 0.25, // capture all NOAA-reported hail (quarter-inch+)
+    minWindMph    = 35,   // capture all NOAA-reported wind events
+  } = options;
+
+  // Determine date range
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().split('T')[0];
+  const toDate   = options.toDate   ?? yesterday;
+  const fromDate = options.fromDate ?? new Date(Date.now() - 30 * 86_400_000).toISOString().split('T')[0];
+
+  // 1. Geocode search location (may differ from company address)
+  const geo = await geocodeAddress(searchCity, searchState, searchZip);
   if (!geo) {
-    console.warn('[NOAA Backfill] Cannot geocode company location — aborting.');
+    console.warn('[NOAA Backfill] Cannot geocode search location — aborting.');
     return { saved: 0 };
   }
 
-  // 2. Load NOAA config
-  const { data: row } = await (supabase.from('company_integrations') as any)
-    .select('noaa_enabled, noaa_min_hail_inches, noaa_min_wind_mph, noaa_radius_miles')
-    .eq('company_id', companyId)
-    .maybeSingle() as { data: NoaaConfig | null };
-
-  const cfg: NoaaConfig = {
-    noaa_enabled:         row?.noaa_enabled         ?? true,
-    noaa_min_hail_inches: row?.noaa_min_hail_inches ?? 1.0,
-    noaa_min_wind_mph:    row?.noaa_min_wind_mph    ?? 58,
-    noaa_radius_miles:    row?.noaa_radius_miles    ?? 25,
-  };
-
-  // 3. Load existing notification fingerprints to avoid duplicates
-  const since = new Date(Date.now() - (days + 1) * 86_400_000).toISOString();
+  // 2. Load existing notification fingerprints to avoid duplicates
+  const since = new Date(fromDate + 'T00:00:00').toISOString();
   const { data: existing } = await (supabase.from('notifications') as any)
     .select('metadata')
     .eq('company_id', companyId)
@@ -472,11 +493,12 @@ export async function backfillNoaaHistory(
     (existing ?? []).map((n) => n.metadata?.fingerprint).filter(Boolean),
   );
 
-  // 4. Build list of dates (skip today and yesterday — already handled by live check)
+  // 3. Build list of dates in range (inclusive both ends)
   const dates: string[] = [];
-  for (let i = 2; i <= days; i++) {
-    const d = new Date(Date.now() - i * 86_400_000);
-    dates.push(d.toISOString().split('T')[0]); // YYYY-MM-DD
+  const startMs = new Date(fromDate + 'T12:00:00Z').getTime();
+  const endMs   = new Date(toDate   + 'T12:00:00Z').getTime();
+  for (let ms = startMs; ms <= endMs; ms += 86_400_000) {
+    dates.push(new Date(ms).toISOString().split('T')[0]);
   }
 
   let saved = 0;
@@ -494,9 +516,9 @@ export async function backfillNoaaHistory(
       if (existingFingerprints.has(event.fingerprint)) continue;
 
       const dist = distanceMiles(geo.lat, geo.lng, event.lat, event.lng);
-      if (dist > cfg.noaa_radius_miles) continue;
-      if (event.type === 'HAIL' && event.magnitude < cfg.noaa_min_hail_inches) continue;
-      if (event.type === 'WIND' && event.magnitude < cfg.noaa_min_wind_mph)     continue;
+      if (dist > radiusMiles)                                           continue;
+      if (event.type === 'HAIL' && event.magnitude < minHailInches)    continue;
+      if (event.type === 'WIND' && event.magnitude < minWindMph)       continue;
 
       const distStr = dist < 1 ? 'within 1 mile' : `${Math.round(dist)} miles away`;
       const dateLabel = new Date(event.eventDate + 'T12:00:00').toLocaleDateString('en-US', {

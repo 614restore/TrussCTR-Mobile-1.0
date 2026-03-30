@@ -18,6 +18,7 @@ import {
   forceCheckForNoaaStorms,
   backfillNoaaHistory,
   type BackfillProgress,
+  type BackfillOptions,
   type LiveNoaaEvent,
 } from '../lib/noaaStormService';
 
@@ -457,19 +458,38 @@ function LiveFeedTab({ companyId, location }: {
 
 // ─── History tab ──────────────────────────────────────────────────────────────
 
+const SEARCH_RADIUS_OPTIONS = [25, 50, 75, 100] as const;
+type SearchRadius = typeof SEARCH_RADIUS_OPTIONS[number];
+
 function HistoryTab({ companyId, location }: {
   companyId: string;
   location?: { city?: string | null; state?: string | null; zip?: string | null };
 }) {
-  const [events,          setEvents]          = useState<any[]>([]);
-  const [loading,         setLoading]         = useState(true);
-  const [filter,          setFilter]          = useState<FilterTab>('all');
-  const [dateRange,       setDateRange]       = useState<DateRange>('12m');
-  const [customFrom,      setCustomFrom]      = useState('');
-  const [customTo,        setCustomTo]        = useState('');
-  const [backfilling,     setBackfilling]     = useState(false);
-  const [backfillProgress,setBackfillProgress]= useState<BackfillProgress | null>(null);
-  const [backfillDone,    setBackfillDone]    = useState(false);
+  const today     = new Date().toISOString().slice(0, 10);
+  const thirtyAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+
+  // ── Events from DB ──────────────────────────────────────────────────────────
+  const [events,  setEvents]  = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter,  setFilter]  = useState<FilterTab>('all');
+
+  // ── Search / import panel ───────────────────────────────────────────────────
+  const [searchZip,    setSearchZip]    = useState(location?.zip    ?? '');
+  const [searchRadius, setSearchRadius] = useState<SearchRadius>(50);
+  const [searchFrom,   setSearchFrom]   = useState(thirtyAgo);
+  const [searchTo,     setSearchTo]     = useState(today);
+  const [searchMinHail,setSearchMinHail]= useState<HailOption>(0);
+  const [searchMinWind,setSearchMinWind]= useState<WindOption>(0);
+
+  // ── Backfill state ──────────────────────────────────────────────────────────
+  const [backfilling,      setBackfilling]      = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState<BackfillProgress | null>(null);
+  const [backfillResult,   setBackfillResult]   = useState<{ saved: number } | null>(null);
+
+  // Sync ZIP when profile location loads in
+  useEffect(() => {
+    if (location?.zip && !searchZip) setSearchZip(location.zip);
+  }, [location?.zip]);
 
   const reload = () => {
     setLoading(true);
@@ -478,66 +498,53 @@ function HistoryTab({ companyId, location }: {
       setLoading(false);
     });
   };
-
   useEffect(() => { reload(); }, [companyId]);
 
-  const handleBackfill = async (days: number) => {
-    if (!location?.city && !location?.state && !location?.zip) return;
+  const handleImport = async () => {
     setBackfilling(true);
-    setBackfillProgress({ total: days - 2, done: 0, saved: 0 });
+    setBackfillResult(null);
+    setBackfillProgress({ total: 1, done: 0, saved: 0 });
     try {
-      await backfillNoaaHistory(
+      const opts: BackfillOptions = {
+        fromDate:      searchFrom,
+        toDate:        searchTo,
+        searchZip:     searchZip  || undefined,
+        searchCity:    !searchZip ? (location?.city  ?? undefined) : undefined,
+        searchState:   !searchZip ? (location?.state ?? undefined) : undefined,
+        radiusMiles:   searchRadius,
+        minHailInches: searchMinHail === 0 ? 0.25 : searchMinHail,
+        minWindMph:    searchMinWind === 0 ? 35   : searchMinWind,
+      };
+      const result = await backfillNoaaHistory(
         companyId,
-        location,
-        days,
+        location ?? {},
+        opts,
         (p) => setBackfillProgress(p),
       );
-      setBackfillDone(true);
+      setBackfillResult(result);
       reload();
     } finally {
       setBackfilling(false);
     }
   };
 
-  // Default custom range to last 30 days when user switches to Custom
-  const handleRangeSelect = (r: DateRange) => {
-    if (r === 'custom' && !customFrom) {
-      const today = new Date();
-      const prior = new Date(today.getTime() - 30 * 86_400_000);
-      setCustomFrom(prior.toISOString().slice(0, 10));
-      setCustomTo(today.toISOString().slice(0, 10));
-    }
-    setDateRange(r);
-  };
-
-  // Apply both date-range and type filter
+  // Filter displayed events by current search date range + type
   const filtered = events.filter((n) => {
-    // ── type filter ──
     if (filter !== 'all') {
       const t = getEventType(n);
       if (filter === 'hail' && t !== 'HAIL') return false;
       if (filter === 'wind' && t !== 'WIND') return false;
     }
-    // ── date range filter ──
-    const eventDate: Date = n.metadata?.event_date
+    const eventDate = n.metadata?.event_date
       ? new Date(n.metadata.event_date + 'T12:00:00')
       : new Date(n.created_at);
-    const start = rangeStart(dateRange, customFrom);
-    if (eventDate < start) return false;
-    if (dateRange === 'custom' && customTo) {
-      const end = new Date(customTo + 'T23:59:59');
-      if (eventDate > end) return false;
-    }
+    if (searchFrom && eventDate < new Date(searchFrom + 'T00:00:00')) return false;
+    if (searchTo   && eventDate > new Date(searchTo   + 'T23:59:59')) return false;
     return true;
   });
 
-  // Stats reflect the current date range (not the full 12-month set)
   const hailCount = filtered.filter((n) => getEventType(n) === 'HAIL').length;
   const windCount = filtered.filter((n) => getEventType(n) === 'WIND').length;
-
-  const rangeLabel = dateRange === 'custom'
-    ? [customFrom, customTo].filter(Boolean).join(' → ') || 'Custom range'
-    : DATE_RANGE_LABELS[dateRange];
 
   if (loading) {
     return (
@@ -552,54 +559,141 @@ function HistoryTab({ companyId, location }: {
   return (
     <div className="p-4 space-y-4">
 
-      {/* ── Date range selector ── */}
-      <div className="space-y-2">
-        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-0.5">Date Range</p>
-        <div className="flex gap-1.5 flex-wrap">
-          {(Object.keys(DATE_RANGE_LABELS) as DateRange[]).map((r) => (
-            <button
-              key={r}
-              onClick={() => handleRangeSelect(r)}
-              className={`px-3 py-1.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-colors ${
-                dateRange === r
-                  ? 'bg-primary text-white'
-                  : 'bg-slate-100 text-slate-500 active:bg-slate-200'
-              }`}
-            >
-              {DATE_RANGE_LABELS[r]}
-            </button>
-          ))}
+      {/* ── Search & Import panel ────────────────────────────────────────────── */}
+      <div className="bg-slate-50 rounded-2xl p-4 space-y-4 border border-slate-100">
+        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Search & Import</p>
+
+        {/* ZIP code + radius */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-0.5">Location (ZIP)</p>
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder={location?.zip ?? 'Enter ZIP code'}
+              maxLength={10}
+              value={searchZip}
+              onChange={(e) => setSearchZip(e.target.value)}
+              className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-primary focus:ring-2 focus:ring-accent/20"
+            />
+            <div className="flex gap-1">
+              {SEARCH_RADIUS_OPTIONS.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setSearchRadius(r)}
+                  className={`px-2 py-2 rounded-xl text-[11px] font-bold transition-colors ${
+                    searchRadius === r ? 'bg-accent text-white' : 'bg-white text-slate-500 border border-slate-200'
+                  }`}
+                >
+                  {r}mi
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
-        {/* Custom date inputs — shown only when Custom is selected */}
-        {dateRange === 'custom' && (
-          <div className="flex gap-3 pt-1">
+        {/* Date range */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-0.5">Date Range</p>
+          <div className="flex gap-2">
             <div className="flex-1 space-y-1">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">From</p>
+              <p className="text-[10px] text-slate-400 ml-0.5">From</p>
               <input
                 type="date"
-                value={customFrom}
-                max={customTo || new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm font-medium text-primary border-none focus:ring-2 focus:ring-accent/20"
+                value={searchFrom}
+                max={searchTo}
+                onChange={(e) => setSearchFrom(e.target.value)}
+                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-primary focus:ring-2 focus:ring-accent/20"
               />
             </div>
             <div className="flex-1 space-y-1">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">To</p>
+              <p className="text-[10px] text-slate-400 ml-0.5">To</p>
               <input
                 type="date"
-                value={customTo}
-                min={customFrom}
-                max={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="w-full bg-slate-100 rounded-xl px-3 py-2 text-sm font-medium text-primary border-none focus:ring-2 focus:ring-accent/20"
+                value={searchTo}
+                min={searchFrom}
+                max={today}
+                onChange={(e) => setSearchTo(e.target.value)}
+                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-medium text-primary focus:ring-2 focus:ring-accent/20"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Min thresholds */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest ml-0.5">Min Hail</p>
+            <div className="flex gap-1 flex-wrap">
+              {MIN_HAIL_OPTIONS.map((h) => (
+                <button key={h} onClick={() => setSearchMinHail(h)}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors min-w-0 ${
+                    searchMinHail === h ? 'bg-red-500 text-white' : 'bg-white text-slate-500 border border-slate-200'
+                  }`}
+                >{hailLabel(h)}</button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest ml-0.5">Min Wind</p>
+            <div className="flex gap-1 flex-wrap">
+              {MIN_WIND_OPTIONS.map((w) => (
+                <button key={w} onClick={() => setSearchMinWind(w)}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors min-w-0 ${
+                    searchMinWind === w ? 'bg-blue-500 text-white' : 'bg-white text-slate-500 border border-slate-200'
+                  }`}
+                >{windLabel(w)}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Import button */}
+        <button
+          onClick={handleImport}
+          disabled={backfilling || (!searchZip && !location?.city)}
+          className="w-full bg-primary text-white py-3 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-50"
+        >
+          {backfilling
+            ? <><div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Importing…</>
+            : <><BookOpen size={15} /> Import Data for This Range</>
+          }
+        </button>
+
+        {/* Progress bar */}
+        {backfilling && backfillProgress && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-slate-500">
+                Day {backfillProgress.done}/{backfillProgress.total}
+              </p>
+              <p className="text-[11px] font-bold text-primary">{backfillProgress.saved} saved</p>
+            </div>
+            <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-300"
+                style={{ width: `${backfillProgress.total > 0 ? Math.round((backfillProgress.done / backfillProgress.total) * 100) : 0}%` }}
               />
             </div>
           </div>
         )}
+
+        {/* Result banner */}
+        {backfillResult && !backfilling && (
+          <div className={`rounded-xl p-3 flex items-center gap-2 ${backfillResult.saved > 0 ? 'bg-emerald-50' : 'bg-slate-100'}`}>
+            <History size={14} className={backfillResult.saved > 0 ? 'text-emerald-600' : 'text-slate-400'} />
+            <p className={`text-[11px] font-bold ${backfillResult.saved > 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
+              {backfillResult.saved > 0
+                ? `${backfillResult.saved} new storm report${backfillResult.saved !== 1 ? 's' : ''} imported`
+                : 'No new reports found for these search criteria'}
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Stats — reflect the current filtered range */}
+      {/* ── Results ─────────────────────────────────────────────────────────── */}
+
+      {/* Stats */}
       <div className="flex gap-3">
         <div className="flex-1 bg-red-50 rounded-xl p-3 text-center">
           <p className="text-lg font-bold text-red-600">{hailCount}</p>
@@ -615,12 +709,10 @@ function HistoryTab({ companyId, location }: {
         </div>
       </div>
 
-      {/* Type filter tabs */}
+      {/* Type filter */}
       <div className="flex gap-2">
         {(['all','hail','wind'] as FilterTab[]).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
+          <button key={f} onClick={() => setFilter(f)}
             className={`flex-1 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${
               filter === f ? 'bg-primary text-white' : 'bg-slate-100 text-slate-500'
             }`}
@@ -630,81 +722,29 @@ function HistoryTab({ companyId, location }: {
         ))}
       </div>
 
-      {/* Backfill progress bar */}
-      {backfilling && backfillProgress && (
-        <div className="bg-primary/5 border border-primary/10 rounded-2xl p-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-bold text-primary">Importing storm history…</p>
-            <p className="text-xs text-slate-400">
-              Day {backfillProgress.done}/{backfillProgress.total} · {backfillProgress.saved} saved
-            </p>
-          </div>
-          <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-300"
-              style={{ width: `${backfillProgress.total > 0 ? Math.round((backfillProgress.done / backfillProgress.total) * 100) : 0}%` }}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Backfill done banner */}
-      {backfillDone && !backfilling && (
-        <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex items-center gap-3">
-          <div className="h-8 w-8 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
-            <History size={16} className="text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-bold text-emerald-700">History imported</p>
-            <p className="text-[11px] text-emerald-600">Past storm reports loaded into your history.</p>
-          </div>
-        </div>
-      )}
-
       {/* Event list */}
       {filtered.length === 0 ? (
-        <div className="py-10 text-center space-y-4">
-          <History size={36} className="mx-auto text-slate-200" />
-          <div>
-            <p className="text-sm font-bold text-slate-400">No storms recorded</p>
-            <p className="text-xs text-slate-300 mt-1 px-6">
-              {events.length === 0
-                ? 'Import past data to see storms that happened near you'
-                : `No events match "${rangeLabel}"${filter !== 'all' ? ` · ${filter}` : ''}`}
-            </p>
-          </div>
-          {events.length === 0 && !backfilling && location?.city && (
-            <div className="flex flex-col gap-2 items-center px-6">
-              <button
-                onClick={() => handleBackfill(30)}
-                className="w-full bg-primary text-white py-3 rounded-2xl text-sm font-bold active:scale-95 transition-all"
-              >
-                Import Past 30 Days
-              </button>
-              <button
-                onClick={() => handleBackfill(90)}
-                className="w-full bg-slate-100 text-slate-600 py-3 rounded-2xl text-sm font-bold active:scale-95 transition-all"
-              >
-                Import Past 90 Days
-              </button>
-            </div>
-          )}
+        <div className="py-12 text-center">
+          <History size={36} className="mx-auto text-slate-200 mb-3" />
+          <p className="text-sm font-bold text-slate-400">No storms in this range</p>
+          <p className="text-xs text-slate-300 mt-1 px-8">
+            Try adjusting the date range, ZIP, or radius above and tap Import
+          </p>
         </div>
       ) : (
         <div className="space-y-3">
           {filtered.map((n) => {
-            const evType = getEventType(n);
-            const isHail = evType === 'HAIL';
-            const mag    = getMagnitude(n);
-            const loc    = getLocation(n);
-            const src    = getSource(n);
-            const dist   = n.metadata?.distance_miles;
+            const evType    = getEventType(n);
+            const isHail    = evType === 'HAIL';
+            const mag       = getMagnitude(n);
+            const loc       = getLocation(n);
+            const src       = getSource(n);
+            const dist      = n.metadata?.distance_miles;
             const dateLabel = n.metadata?.event_date
               ? formatDate(n.metadata.event_date)
               : new Date(n.created_at).toLocaleDateString('en-US', {
                   month: 'short', day: 'numeric', year: 'numeric',
                 });
-
             return (
               <StormCard
                 key={n.id}
@@ -719,7 +759,7 @@ function HistoryTab({ companyId, location }: {
             );
           })}
           <p className="text-center text-[10px] text-slate-300 pb-4 uppercase tracking-widest font-bold">
-            {filtered.length} report{filtered.length !== 1 ? 's' : ''} · {rangeLabel}
+            {filtered.length} report{filtered.length !== 1 ? 's' : ''} · {searchFrom} → {searchTo}
           </p>
         </div>
       )}
