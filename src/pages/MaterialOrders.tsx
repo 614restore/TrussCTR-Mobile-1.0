@@ -2,12 +2,14 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Package, Plus, Search, ChevronLeft, ChevronRight, Truck,
   ShoppingCart, X, Check, DollarSign, Calendar, Building2,
-  User, FileText, Clock, CheckCircle, XCircle,
+  User, FileText, Clock, CheckCircle, XCircle, Send, RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency } from '../lib/utils';
+import { submitRoofHubOrder, getRoofHubOrderStatus } from '../lib/integrations/roofhub';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type OrderStatus = 'pending' | 'ordered' | 'delivered' | 'cancelled';
@@ -31,6 +33,11 @@ interface MaterialOrder {
   created_by: string;
   created_at: string;
   updated_at: string;
+  // Roof Hub / SRS Distribution tracking
+  roofhub_order_id: string | null;
+  roofhub_status: string | null;
+  roofhub_branch_id: string | null;
+  roofhub_submitted_at: string | null;
   // joined
   contact_name?: string;
   contact_address?: string;
@@ -86,6 +93,11 @@ export default function MaterialOrders() {
   const [saving, setSaving]       = useState(false);
   const [savedOk, setSavedOk]     = useState(false);
 
+  // Roof Hub / SRS Distribution
+  const [rhKey,        setRhKey]        = useState<string | null>(null);
+  const [rhSubmitting, setRhSubmitting] = useState<string | null>(null); // orderId in flight
+  const [rhRefreshing, setRhRefreshing] = useState<string | null>(null); // orderId in flight
+
   // Form state
   const [formContact,  setFormContact]  = useState('');
   const [formSupplier, setFormSupplier] = useState('');
@@ -137,6 +149,21 @@ export default function MaterialOrders() {
 
   useEffect(() => { fetchAll(); }, [profile?.company_id, contactId]);
 
+  // Load Roof Hub integration key for this company
+  useEffect(() => {
+    if (!profile?.company_id) return;
+    (db as any)
+      .from('company_integrations')
+      .select('roofhub_integration_key, roofhub_enabled')
+      .eq('company_id', profile.company_id)
+      .maybeSingle()
+      .then(({ data }: any) => {
+        if (data?.roofhub_enabled && data?.roofhub_integration_key) {
+          setRhKey(data.roofhub_integration_key);
+        }
+      });
+  }, [profile?.company_id]);
+
   // ── Derived ───────────────────────────────────────────────────────────────
   const filteredOrders = useMemo(() => {
     return orders.filter((o) => {
@@ -161,6 +188,65 @@ export default function MaterialOrders() {
     const ship = parseFloat(formShipping || '0') || 0;
     return sub + tax + ship;
   }, [formSubtotal, formTax, formShipping]);
+
+  // ── Roof Hub: Submit order to SRS Distribution ───────────────────────────
+  const handleSubmitToRoofHub = async (order: MaterialOrder) => {
+    if (!rhKey || rhSubmitting) return;
+    setRhSubmitting(order.id);
+    try {
+      const result = await submitRoofHubOrder(rhKey, {
+        branchId:       order.roofhub_branch_id ?? '',
+        deliveryDate:   order.expected_delivery_date ?? undefined,
+        contactAddress: order.contact_address ?? undefined,
+        notes:          [order.order_number, order.notes].filter(Boolean).join(' — ') || undefined,
+        lineItems: [{
+          productId:    'manual',
+          productName:  order.supplier_name ?? 'Materials',
+          quantity:     1,
+          unitPrice:    order.total,
+          unitOfMeasure: 'lot',
+        }],
+      });
+      await db.from('material_orders').update({
+        roofhub_order_id:    result.roofhubOrderId,
+        roofhub_status:      result.status,
+        roofhub_submitted_at: new Date().toISOString(),
+        status:              'ordered',
+        updated_at:          new Date().toISOString(),
+      }).eq('id', order.id);
+      await fetchAll();
+    } catch (err: any) {
+      alert(`Roof Hub submission failed: ${err.message}`);
+    } finally {
+      setRhSubmitting(null);
+    }
+  };
+
+  // ── Roof Hub: Refresh order status ───────────────────────────────────────
+  const handleRefreshRoofHubStatus = async (order: MaterialOrder) => {
+    if (!rhKey || !order.roofhub_order_id || rhRefreshing) return;
+    setRhRefreshing(order.id);
+    try {
+      const result = await getRoofHubOrderStatus(rhKey, order.roofhub_order_id);
+      const newAppStatus: Record<string, string> = {
+        delivered: 'delivered', shipped: 'delivered', complete: 'delivered',
+        cancelled: 'cancelled', voided: 'cancelled',
+      };
+      const patch: any = {
+        roofhub_status: result.status,
+        updated_at:     new Date().toISOString(),
+      };
+      if (result.status && newAppStatus[result.status.toLowerCase()]) {
+        patch.status = newAppStatus[result.status.toLowerCase()];
+      }
+      await db.from('material_orders').update(patch).eq('id', order.id);
+      await fetchAll();
+    } catch (err: any) {
+      alert(`Failed to refresh status: ${err.message}`);
+    } finally {
+      setRhRefreshing(null);
+    }
+  };
 
   // ── Create ────────────────────────────────────────────────────────────────
   const resetForm = () => {
@@ -385,6 +471,50 @@ export default function MaterialOrders() {
                   View Contact <ChevronRight size={14} />
                 </button>
               </div>
+
+              {/* Roof Hub row */}
+              {rhKey && (
+                <div className="pt-2 border-t border-slate-50">
+                  {order.roofhub_order_id ? (
+                    /* Already submitted — show SRS order ID + refresh */
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <div className="h-5 w-5 rounded-md bg-red-50 flex items-center justify-center shrink-0">
+                          <Package size={11} className="text-red-500" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">SRS #{order.roofhub_order_id}</p>
+                          {order.roofhub_status && (
+                            <p className="text-[10px] text-slate-400 capitalize">{order.roofhub_status}</p>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleRefreshRoofHubStatus(order)}
+                        disabled={rhRefreshing === order.id}
+                        className="flex items-center gap-1 text-[11px] font-bold text-slate-500 active:scale-95 transition-transform disabled:opacity-40 shrink-0"
+                      >
+                        <RefreshCw size={11} className={rhRefreshing === order.id ? 'animate-spin' : ''} />
+                        Refresh
+                      </button>
+                    </div>
+                  ) : order.status !== 'cancelled' && order.status !== 'delivered' ? (
+                    /* Not yet submitted — show Submit button */
+                    <button
+                      onClick={() => handleSubmitToRoofHub(order)}
+                      disabled={rhSubmitting === order.id}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-red-50 border border-red-100 text-red-600 text-xs font-bold active:scale-95 transition-all disabled:opacity-50"
+                    >
+                      {rhSubmitting === order.id ? (
+                        <RefreshCw size={12} className="animate-spin" />
+                      ) : (
+                        <Send size={12} />
+                      )}
+                      {rhSubmitting === order.id ? 'Submitting to SRS…' : 'Submit to Roof Hub'}
+                    </button>
+                  ) : null}
+                </div>
+              )}
             </div>
           ))
         ) : (
