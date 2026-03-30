@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { TrendingUp, Users, Briefcase, DollarSign, Plus, Calendar, ChevronRight } from 'lucide-react';
+import { TrendingUp, Users, Briefcase, DollarSign, Plus, Calendar, ChevronRight, CloudLightning, ShieldCheck, AlertTriangle, Wind, CloudRain } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -9,6 +9,7 @@ import NewContactModal from '../components/NewContactModal';
 import NoProfileState from '../components/NoProfileState';
 import { buildContactPipelineEvents, getUpcomingPipelineEvents } from '../lib/scheduleEvents';
 import { getPipelineStageLabel, normalizePipelineStatus, toPipelineBoardStage } from '../lib/pipelineStages';
+import { fetchLiveNoaaFeed } from '../lib/noaaStormService';
 import type { Database } from '../types/supabase';
 
 const STAGE_COLORS: Record<string, string> = {
@@ -51,6 +52,41 @@ export default function Dashboard() {
   const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
   const [allPipelineEvents, setAllPipelineEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [stormStatus, setStormStatus] = useState<{
+    loading: boolean;
+    nearbyCount: number;
+    hailCount: number;
+    windCount: number;
+    nearestMiles: number | null;
+    nearestLabel: string;
+    noLocation: boolean;
+  }>({ loading: true, nearbyCount: 0, hailCount: 0, windCount: 0, nearestMiles: null, nearestLabel: '', noLocation: false });
+
+  // ── Storm Intelligence fetch ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!profile?.company_id) return;
+    fetchLiveNoaaFeed(profile.company_id)
+      .then(({ events }) => {
+        const noLocation = events.length > 0 && events[0].distanceMiles === null;
+        const nearby = events.filter(e => e.distanceMiles !== null && e.distanceMiles <= 50);
+        const nearest = nearby[0] ?? null;
+        const nearestLabel = nearest
+          ? nearest.type === 'HAIL'
+            ? `${nearest.magnitude}" hail`
+            : `${Math.round(nearest.magnitude)} mph wind`
+          : '';
+        setStormStatus({
+          loading: false,
+          nearbyCount: nearby.length,
+          hailCount: nearby.filter(e => e.type === 'HAIL').length,
+          windCount: nearby.filter(e => e.type === 'WIND').length,
+          nearestMiles: nearest?.distanceMiles ?? null,
+          nearestLabel,
+          noLocation,
+        });
+      })
+      .catch(() => setStormStatus(s => ({ ...s, loading: false })));
+  }, [profile?.company_id]);
 
   useEffect(() => {
     if (!profile?.company_id) {
@@ -227,6 +263,81 @@ export default function Dashboard() {
             </div>
           </motion.div>
         ))}
+      </div>
+
+      {/* Storm Intelligence — always visible */}
+      <div className="space-y-3">
+        <div className="flex justify-between items-center px-1">
+          <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Storm Intelligence</h2>
+          <button onClick={() => navigate('/storm-history')} className="text-accent text-xs font-bold">View All</button>
+        </div>
+
+        {stormStatus.loading ? (
+          <div className="card p-5 h-[72px] animate-pulse bg-slate-100 rounded-2xl" />
+        ) : stormStatus.noLocation ? (
+          <div className="card p-4 flex items-center gap-4 border-l-4 border-amber-400">
+            <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+              <AlertTriangle size={20} className="text-amber-500" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-primary text-sm">Location not set</p>
+              <p className="text-xs text-slate-500">Add city & state in Company Profile to see nearby storms</p>
+            </div>
+            <button
+              onClick={() => navigate('/company')}
+              className="text-[10px] font-bold text-accent shrink-0 active:opacity-70"
+            >
+              Set Now
+            </button>
+          </div>
+        ) : stormStatus.nearbyCount === 0 ? (
+          <button
+            onClick={() => navigate('/storm-history')}
+            className="card w-full p-4 flex items-center gap-4 text-left active:bg-slate-50 transition-colors"
+          >
+            <div className="h-10 w-10 rounded-xl bg-emerald-500 flex items-center justify-center shrink-0">
+              <ShieldCheck size={20} className="text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-primary text-sm">All Clear</p>
+              <p className="text-xs text-slate-400">No storm reports within 50 miles today</p>
+            </div>
+            <ChevronRight size={16} className="text-slate-300 shrink-0" />
+          </button>
+        ) : (
+          <button
+            onClick={() => navigate('/storm-history')}
+            className="card w-full p-4 flex items-center gap-4 border-l-4 border-red-500 text-left active:bg-red-50 transition-colors"
+          >
+            <div className="h-10 w-10 rounded-xl bg-red-500 flex items-center justify-center shrink-0">
+              <CloudLightning size={20} className="text-white" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-primary text-sm">
+                {stormStatus.nearbyCount} Report{stormStatus.nearbyCount !== 1 ? 's' : ''} Nearby
+              </p>
+              <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                {stormStatus.hailCount > 0 && (
+                  <span className="text-[10px] font-bold text-red-500 flex items-center gap-1">
+                    <CloudRain size={10} /> {stormStatus.hailCount} Hail
+                  </span>
+                )}
+                {stormStatus.windCount > 0 && (
+                  <span className="text-[10px] font-bold text-blue-500 flex items-center gap-1">
+                    <Wind size={10} /> {stormStatus.windCount} Wind
+                  </span>
+                )}
+                {stormStatus.nearestMiles !== null && (
+                  <span className="text-[10px] text-slate-400">
+                    · Nearest {stormStatus.nearestLabel}{' '}
+                    {stormStatus.nearestMiles < 1 ? '<1 mi' : `${stormStatus.nearestMiles} mi`} away
+                  </span>
+                )}
+              </div>
+            </div>
+            <ChevronRight size={16} className="text-red-300 shrink-0" />
+          </button>
+        )}
       </div>
 
       {/* Quick Actions */}

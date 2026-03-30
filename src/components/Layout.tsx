@@ -1,10 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Users, Calendar, Wrench, MoreHorizontal } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { registerPushToken } from '../lib/pushNotifications';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '../lib/supabase';
 import { checkForHailAlerts } from '../lib/hailAlertService';
 import { checkForNoaaStorms } from '../lib/noaaStormService';
 
@@ -18,10 +19,60 @@ export default function Layout() {
   const companyId = profile?.company_id;
   // Track last foreground check to avoid duplicate calls on rapid tab switches
   const lastForegroundCheck = useRef(0);
+  // Storm alert badge — red dot on Dashboard tab
+  const [stormBadge, setStormBadge] = useState(false);
 
   useEffect(() => {
     registerPushToken();
   }, []);
+
+  // ── Storm badge — show red dot on Dashboard tab when new storm alerts exist ──
+  useEffect(() => {
+    if (!companyId) return;
+
+    // Initial check: any unread storm notifications in the last 24 h?
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    (supabase.from('notifications') as any)
+      .select('id', { count: 'exact', head: true })
+      .eq('company_id', companyId)
+      .in('type', ['storm_alert', 'hail_alert'])
+      .eq('read', false)
+      .gte('created_at', since)
+      .then(({ count }: { count: number | null }) => {
+        if ((count ?? 0) > 0) setStormBadge(true);
+      });
+
+    // Realtime: light up the badge the moment a new storm alert is inserted
+    const channel = supabase
+      .channel(`storm-badge-${companyId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `company_id=eq.${companyId}` },
+        (payload: any) => {
+          if (['storm_alert', 'hail_alert'].includes(payload.new?.type)) {
+            setStormBadge(true);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [companyId]);
+
+  // Clear badge when the user opens Storm History or Dashboard
+  useEffect(() => {
+    if (!companyId) return;
+    if (location.pathname === '/storm-history' || location.pathname === '/') {
+      setStormBadge(false);
+      // Mark storm notifications as read in the background
+      (supabase.from('notifications') as any)
+        .update({ read: true })
+        .eq('company_id', companyId)
+        .in('type', ['storm_alert', 'hail_alert'])
+        .eq('read', false)
+        .then(() => {});
+    }
+  }, [location.pathname, companyId]);
 
   // Run storm checks on app foreground (visibility change)
   useEffect(() => {
@@ -78,6 +129,7 @@ export default function Layout() {
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
+          const showBadge = item.path === '/' && stormBadge;
 
           return (
             <NavLink
@@ -88,7 +140,12 @@ export default function Layout() {
                 isActive && 'active'
               )}
             >
-              <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+              <div className="relative">
+                <Icon size={24} strokeWidth={isActive ? 2.5 : 2} />
+                {showBadge && (
+                  <span className="absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-red-500 border-2 border-white" />
+                )}
+              </div>
               <span className="text-[10px] font-medium uppercase tracking-wider">{item.label}</span>
             </NavLink>
           );

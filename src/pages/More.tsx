@@ -1,8 +1,8 @@
 import React from 'react';
-import { 
-  BarChart3, Users, Settings, CreditCard, 
-  LogOut, ChevronRight, Building2, Bell, 
-  HelpCircle, RefreshCw, X, CheckCircle2
+import {
+  BarChart3, Users, Settings, CreditCard,
+  LogOut, ChevronRight, Building2, Bell,
+  HelpCircle, RefreshCw, X, CheckCircle2, Zap
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -43,6 +43,7 @@ export default function More() {
         { label: 'Reports & Analytics', icon: BarChart3, color: 'text-blue-500', path: '/reports', action: null },
         { label: 'Team Members', icon: Users, color: 'text-emerald-500', path: '/team', action: null },
         { label: 'Company Profile', icon: Building2, color: 'text-amber-500', path: '/company', action: null },
+        { label: 'Storm Data', icon: Zap, color: 'text-rose-500', path: '/storm-history', action: null },
       ]
     },
     {
