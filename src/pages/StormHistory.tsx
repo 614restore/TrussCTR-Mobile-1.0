@@ -175,6 +175,30 @@ function StormCard({
 
 // ─── Live Feed tab ────────────────────────────────────────────────────────────
 
+const RADIUS_OPTIONS  = [25, 50, 75, 100, 0]   as const; // 0 = All
+const MIN_WIND_OPTIONS= [35, 58, 75, 100, 0]   as const; // 0 = Any mph
+const MIN_HAIL_OPTIONS= [0.25, 0.75, 1.0, 1.75, 2.75, 0] as const; // 0 = Any inches
+
+type RadiusOption  = typeof RADIUS_OPTIONS[number];
+type WindOption    = typeof MIN_WIND_OPTIONS[number];
+type HailOption    = typeof MIN_HAIL_OPTIONS[number];
+
+function radiusLabel(r: RadiusOption): string {
+  return r === 0 ? 'All' : `${r} mi`;
+}
+function windLabel(w: WindOption): string {
+  return w === 0 ? 'Any' : `${w}+`;
+}
+function hailLabel(h: HailOption): string {
+  if (h === 0)    return 'Any';
+  if (h === 0.25) return '¼"';
+  if (h === 0.75) return '¾"';
+  if (h === 1.0)  return '1"';
+  if (h === 1.75) return '1¾"';
+  if (h === 2.75) return '2¾"';
+  return `${h}"`;
+}
+
 function LiveFeedTab({ companyId }: { companyId: string }) {
   const [events,    setEvents]    = useState<LiveNoaaEvent[]>([]);
   const [loading,   setLoading]   = useState(true);
@@ -182,6 +206,31 @@ function LiveFeedTab({ companyId }: { companyId: string }) {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null);
   const [filter,    setFilter]    = useState<FilterTab>('all');
   const [noLocation,setNoLocation]= useState(false);
+  const [radiusMiles, setRadiusMiles] = useState<RadiusOption>(() => {
+    const saved = parseInt(localStorage.getItem('stormRadiusMiles') ?? '50', 10);
+    return (RADIUS_OPTIONS as readonly number[]).includes(saved) ? saved as RadiusOption : 50;
+  });
+  const [minWind, setMinWind] = useState<WindOption>(() => {
+    const saved = parseFloat(localStorage.getItem('stormMinWind') ?? '0');
+    return (MIN_WIND_OPTIONS as readonly number[]).includes(saved) ? saved as WindOption : 0;
+  });
+  const [minHail, setMinHail] = useState<HailOption>(() => {
+    const saved = parseFloat(localStorage.getItem('stormMinHail') ?? '0');
+    return (MIN_HAIL_OPTIONS as readonly number[]).includes(saved) ? saved as HailOption : 0;
+  });
+
+  const handleRadiusChange = (r: RadiusOption) => {
+    setRadiusMiles(r);
+    localStorage.setItem('stormRadiusMiles', String(r));
+  };
+  const handleWindChange = (w: WindOption) => {
+    setMinWind(w);
+    localStorage.setItem('stormMinWind', String(w));
+  };
+  const handleHailChange = (h: HailOption) => {
+    setMinHail(h);
+    localStorage.setItem('stormMinHail', String(h));
+  };
 
   const load = useCallback(async (force = false) => {
     if (force) setRefreshing(true); else setLoading(true);
@@ -205,14 +254,26 @@ function LiveFeedTab({ companyId }: { companyId: string }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = events.filter((e) => {
+  // Apply all filters: radius → magnitude thresholds → type
+  const withinRadius = events.filter((e) => {
+    if (radiusMiles === 0 || e.distanceMiles === null) return true;
+    return e.distanceMiles <= radiusMiles;
+  });
+
+  const aboveThreshold = withinRadius.filter((e) => {
+    if (e.type === 'HAIL' && minHail > 0) return e.magnitude >= minHail;
+    if (e.type === 'WIND' && minWind > 0) return e.magnitude >= minWind;
+    return true;
+  });
+
+  const filtered = aboveThreshold.filter((e) => {
     if (filter === 'hail') return e.type === 'HAIL';
     if (filter === 'wind') return e.type === 'WIND';
     return true;
   });
 
-  const hailCount = events.filter((e) => e.type === 'HAIL').length;
-  const windCount = events.filter((e) => e.type === 'WIND').length;
+  const hailCount = aboveThreshold.filter((e) => e.type === 'HAIL').length;
+  const windCount = aboveThreshold.filter((e) => e.type === 'WIND').length;
 
   if (loading) {
     return (
@@ -272,7 +333,66 @@ function LiveFeedTab({ companyId }: { companyId: string }) {
         </div>
       )}
 
-      {/* Filter tabs */}
+      {/* Filters */}
+      <div className="space-y-3 bg-slate-50 rounded-2xl p-3">
+        {/* Radius */}
+        {!noLocation && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Radius</p>
+            <div className="flex gap-1.5">
+              {RADIUS_OPTIONS.map((r) => (
+                <button
+                  key={r}
+                  onClick={() => handleRadiusChange(r)}
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors ${
+                    radiusMiles === r ? 'bg-accent text-white' : 'bg-white text-slate-500 border border-slate-200'
+                  }`}
+                >
+                  {radiusLabel(r)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Min hail size */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-bold text-red-400 uppercase tracking-widest ml-1">Min Hail Size</p>
+          <div className="flex gap-1.5">
+            {MIN_HAIL_OPTIONS.map((h) => (
+              <button
+                key={h}
+                onClick={() => handleHailChange(h)}
+                className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors ${
+                  minHail === h ? 'bg-red-500 text-white' : 'bg-white text-slate-500 border border-slate-200'
+                }`}
+              >
+                {hailLabel(h)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Min wind speed */}
+        <div className="space-y-1.5">
+          <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest ml-1">Min Wind Speed</p>
+          <div className="flex gap-1.5">
+            {MIN_WIND_OPTIONS.map((w) => (
+              <button
+                key={w}
+                onClick={() => handleWindChange(w)}
+                className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold transition-colors ${
+                  minWind === w ? 'bg-blue-500 text-white' : 'bg-white text-slate-500 border border-slate-200'
+                }`}
+              >
+                {windLabel(w)}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Type filter tabs */}
       <div className="flex gap-2">
         {(['all','hail','wind'] as FilterTab[]).map((f) => (
           <button
@@ -322,7 +442,7 @@ function LiveFeedTab({ companyId }: { companyId: string }) {
             />
           ))}
           <p className="text-center text-[10px] text-slate-300 pb-4 uppercase tracking-widest font-bold">
-            {filtered.length} report{filtered.length !== 1 ? 's' : ''} · NOAA SPC live data
+            {filtered.length} report{filtered.length !== 1 ? 's' : ''} · {radiusMiles === 0 ? 'All distances' : `Within ${radiusMiles} mi`} · NOAA SPC
           </p>
         </div>
       )}

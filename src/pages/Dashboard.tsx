@@ -68,7 +68,9 @@ export default function Dashboard() {
     fetchLiveNoaaFeed(profile.company_id)
       .then(({ events }) => {
         const noLocation = events.length > 0 && events[0].distanceMiles === null;
-        const nearby = events.filter(e => e.distanceMiles !== null && e.distanceMiles <= 50);
+        const savedRadius = parseInt(localStorage.getItem('stormRadiusMiles') ?? '50', 10);
+        const radiusFilter = savedRadius === 0 ? Infinity : savedRadius;
+        const nearby = events.filter(e => e.distanceMiles !== null && e.distanceMiles <= radiusFilter);
         const nearest = nearby[0] ?? null;
         const nearestLabel = nearest
           ? nearest.type === 'HAIL'
@@ -300,7 +302,7 @@ export default function Dashboard() {
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-bold text-primary text-sm">All Clear</p>
-              <p className="text-xs text-slate-400">No storm reports within 50 miles today</p>
+              <p className="text-xs text-slate-400">No storm reports within {(() => { const r = parseInt(localStorage.getItem('stormRadiusMiles') ?? '50', 10); return r === 0 ? 'any distance' : `${r} miles`; })()} today</p>
             </div>
             <ChevronRight size={16} className="text-slate-300 shrink-0" />
           </button>
