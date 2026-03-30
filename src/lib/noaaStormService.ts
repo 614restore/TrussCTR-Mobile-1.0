@@ -16,7 +16,7 @@
  * Dedup is handled via localStorage (48-hour TTL on seen fingerprints).
  */
 
-import { supabase } from './supabase';
+import { supabase, supabaseUrl, supabaseAnonKey } from './supabase';
 
 const MIN_CHECK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const DEDUP_TTL_MS          = 48 * 60 * 60 * 1000; // 48 hours
@@ -104,23 +104,27 @@ async function fetchEventsFromEdgeFunction(date?: string): Promise<ParsedEvent[]
 
 async function fetchEventsForDate(date: string): Promise<ParsedEvent[]> {
   try {
-    // Supabase JS SDK invoke doesn't support query params natively, so we call fetch directly
     const { data: { session } } = await supabase.auth.getSession();
-    const supabaseUrl = (supabase as any).supabaseUrl as string;
-    const supabaseKey = (supabase as any).supabaseKey as string;
+    const token = session?.access_token ?? supabaseAnonKey;
     const res = await fetch(
       `${supabaseUrl}/functions/v1/noaa-storms?date=${encodeURIComponent(date)}`,
       {
         headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${session?.access_token ?? supabaseKey}`,
+          'apikey':        supabaseAnonKey,
+          'Authorization': `Bearer ${token}`,
         },
       },
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[NOAA] Archive fetch failed for ${date}: HTTP ${res.status}`);
+      return [];
+    }
     const json = await res.json();
-    return (json?.events as ParsedEvent[]) ?? [];
-  } catch {
+    const events = (json?.events as ParsedEvent[]) ?? [];
+    console.log(`[NOAA] ${date}: ${events.length} events`);
+    return events;
+  } catch (err) {
+    console.warn(`[NOAA] Archive fetch error for ${date}:`, err);
     return [];
   }
 }
