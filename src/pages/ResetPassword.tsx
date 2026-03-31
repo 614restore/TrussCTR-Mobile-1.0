@@ -113,7 +113,16 @@ export default function ResetPassword() {
       // Always use the service-role edge function — it bypasses both the
       // "Secure password change" restriction (blocks updateUser() on normal
       // SIGNED_IN sessions) and any implicit-flow token limitations.
-      const { data: { session } } = await supabase.auth.getSession();
+      //
+      // Retry getSession up to 3 times with a short delay — detectSessionInUrl
+      // auto-processes the hash tokens concurrently with the manual setSession()
+      // call in establishRecoverySession, which can cause "Lock was stolen" races.
+      let session = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 350));
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) { session = data.session; break; }
+      }
       if (!session?.access_token) throw new Error('No active session. Please use the reset link from your email.');
 
       const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
