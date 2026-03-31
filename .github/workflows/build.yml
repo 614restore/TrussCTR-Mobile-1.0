@@ -1,10 +1,10 @@
 name: TrussCTR Mobile — Build & Lint
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+    # Trigger manually from GitHub Actions tab when needed.
+    # Automatic push/PR triggers disabled — Vercel handles web deployment
+    # and iOS builds are run locally via `npm run build && npx cap sync ios`.
 
 jobs:
   build:
