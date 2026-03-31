@@ -52,26 +52,24 @@ Deno.serve(async (req: Request) => {
 
     const supabaseUrl        = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabaseAnonKey    = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-    // Verify the caller's JWT is valid
-    const callerClient = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-      auth:   { persistSession: false },
+    // ── 3. Validate JWT and look up user ─────────────────────────────────────
+    // Use adminClient.auth.getUser(token) — passing the token explicitly is
+    // required in Deno edge functions because there is no session storage.
+    // Passing global.headers to a separate client and calling getUser() without
+    // arguments does NOT work — it checks storage (empty) instead of the header.
+    const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: { persistSession: false },
     });
 
-    const { data: { user }, error: authError } = await callerClient.auth.getUser();
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const { data: { user }, error: authError } = await adminClient.auth.getUser(token);
     if (authError || !user) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized.' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
     }
-
-    // ── 3. Update password via service role ───────────────────────────────────
-    const adminClient = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { persistSession: false },
-    });
 
     const { error: updateError } = await adminClient.auth.admin.updateUserById(
       user.id,
