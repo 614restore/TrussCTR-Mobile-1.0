@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
@@ -10,7 +10,7 @@ import trussLogo from '../assets/trussctr-logo.png';
 // in Settings. In all cases the user is already authenticated.
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { profile, clearRecoverySession, isRecoverySession } = useAuth();
+  const { profile, clearRecoverySession } = useAuth();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -110,29 +110,22 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      if (isRecoverySession) {
-        // PASSWORD_RECOVERY session (email reset link) — Supabase allows updateUser() directly.
-        const { error: updateError } = await supabase.auth.updateUser({ password });
-        if (updateError) throw updateError;
-      } else {
-        // Temp-password login (must_change_password = true) — normal SIGNED_IN session.
-        // Direct updateUser() is blocked by "Secure password change", so we bypass
-        // via the service role admin API in the edge function.
-        const { data: { session } } = await supabase.auth.getSession();
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-        const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session?.access_token}`,
-          },
-          body: JSON.stringify({ password }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data?.error || 'Failed to update password.');
-        }
-      }
+      // Always use the service-role edge function — it bypasses both the
+      // "Secure password change" restriction (blocks updateUser() on normal
+      // SIGNED_IN sessions) and any implicit-flow token limitations.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('No active session. Please use the reset link from your email.');
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Server error (${res.status}). Please try again.`);
 
       clearRecoverySession();
       setSuccess(true);
