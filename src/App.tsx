@@ -44,6 +44,7 @@ const Landing = lazy(() => import('./pages/Landing'));
 const StormHistory = lazy(() => import('./pages/StormHistory'));
 const Integrations = lazy(() => import('./pages/Integrations'));
 const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
+const TimeClock = lazy(() => import('./pages/TimeClock'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -140,6 +141,7 @@ function AppRoutes() {
             <Route path="/notifications" element={<Notifications />} />
             <Route path="/storm-history" element={<StormHistory />} />
             <Route path="/pitch-gauge" element={<PitchGauge />} />
+            <Route path="/time-clock" element={<TimeClock />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         )}
