@@ -143,7 +143,7 @@ export default function Landing() {
     // Opens native mail client as a simple no-backend solution
     const subject = encodeURIComponent(`TrussCTR inquiry from ${contactName}`);
     const body = encodeURIComponent(`Name: ${contactName}\nEmail: ${contactEmail}\n\n${contactMessage}`);
-    window.location.href = `mailto:hello@trussctr.com?subject=${subject}&body=${body}`;
+    window.location.href = `mailto:scopemgr@614restore.com?subject=${subject}&body=${body}`;
     setContactSent(true);
   };
 
@@ -441,7 +441,7 @@ export default function Landing() {
               <div className="space-y-3 pt-2">
                 <div className="flex items-center gap-3 text-sm text-slate-600">
                   <Mail size={16} className="text-accent flex-shrink-0" />
-                  <span>hello@trussctr.com</span>
+                  <span>scopemgr@614restore.com</span>
                 </div>
                 <div className="flex items-center gap-3 text-sm text-slate-600">
                   <Phone size={16} className="text-accent flex-shrink-0" />
