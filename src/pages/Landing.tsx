@@ -22,7 +22,7 @@ const PLANS = [
   {
     key: 'starter',
     label: 'Starter',
-    price: '$49',
+    price: '$59',
     period: '/mo',
     userLimit: '1–2 users',
     cta: 'Get Started',
@@ -32,7 +32,7 @@ const PLANS = [
   {
     key: 'pro',
     label: 'Pro',
-    price: '$99',
+    price: '$119',
     period: '/mo',
     userLimit: 'Up to 5 users',
     cta: 'Get Started',
@@ -43,7 +43,7 @@ const PLANS = [
   {
     key: 'business',
     label: 'Business',
-    price: '$199',
+    price: '$229',
     period: '/mo',
     userLimit: 'Up to 15 users',
     cta: 'Get Started',
@@ -53,7 +53,7 @@ const PLANS = [
   {
     key: 'scale',
     label: 'Scale',
-    price: '$349',
+    price: '$399',
     period: '/mo',
     userLimit: 'Unlimited users',
     cta: 'Contact Sales',
@@ -77,7 +77,7 @@ const COMPARE_ROWS = [
   { feature: 'Hail Alert Notifications',      trussctr: true,  spreadsheet: false, jobnimbus: false, acculynx: false },
   { feature: 'Mobile App (iOS)',              trussctr: true,  spreadsheet: false, jobnimbus: true,  acculynx: true  },
   { feature: 'Built for Roofing/Restoration', trussctr: true,  spreadsheet: false, jobnimbus: false, acculynx: true  },
-  { feature: 'Starting Price',               trussctr: '$49/mo', spreadsheet: 'Free', jobnimbus: '$99/mo', acculynx: '$150/mo' },
+  { feature: 'Starting Price',               trussctr: '$59/mo', spreadsheet: 'Free', jobnimbus: '$99/mo', acculynx: '$150/mo' },
 ];
 
 // ─── Feature highlights ───────────────────────────────────────────────────────
