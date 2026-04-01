@@ -5,8 +5,8 @@ import {
   Info, History, FileText, DollarSign, Shield,
   MapPin, User, CheckCircle2, MoreVertical, Plus, ChevronRight, Calendar,
   ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
-  Trash2, Camera, RefreshCw, X, Star, CreditCard,
-  Wind, CloudRain, Zap,
+  Trash2, Camera, RefreshCw, X, Star, CreditCard, Minus,
+  Wind, CloudRain, Zap, Archive, Briefcase, RotateCcw, ChevronDown as ChevronDownIcon,
 } from 'lucide-react';
 import { fetchContactStormHistory, type ContactStormEvent } from '../lib/noaaStormService';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -26,14 +26,15 @@ import EagleViewPanel from '../components/EagleViewPanel';
 import RoofrPanel from '../components/RoofrPanel';
 
 const TABS = [
-  { id: 'overview', label: 'Overview', icon: Info },
-  { id: 'inspection', label: 'Inspection', icon: Shield },
-  { id: 'status', label: 'Job Status', icon: CheckCircle2 },
-  { id: 'timeline', label: 'Timeline', icon: History },
-  { id: 'documents', label: 'Docs', icon: FileText },
-  { id: 'financial', label: 'Financial', icon: DollarSign },
-  { id: 'insurance', label: 'Insurance', icon: Shield },
-  { id: 'financing', label: 'Financing', icon: CreditCard },
+  { id: 'overview',    label: 'Overview',    icon: Info },
+  { id: 'jobs',        label: 'Job History', icon: Briefcase },
+  { id: 'inspection',  label: 'Inspection',  icon: Shield },
+  { id: 'status',      label: 'Job Status',  icon: CheckCircle2 },
+  { id: 'timeline',    label: 'Timeline',    icon: History },
+  { id: 'documents',   label: 'Docs',        icon: FileText },
+  { id: 'financial',   label: 'Financial',   icon: DollarSign },
+  { id: 'insurance',   label: 'Insurance',   icon: Shield },
+  { id: 'financing',   label: 'Financing',   icon: CreditCard },
 ];
 
 const TAB_IDS = new Set(TABS.map((tab) => tab.id));
@@ -158,11 +159,14 @@ export default function ContactDetail() {
   const [timeline, setTimeline] = useState<any[]>([]);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isPhotoSaving, setIsPhotoSaving] = useState(false);
+  const [isLifecycleSaving, setIsLifecycleSaving] = useState(false);
   const [editForm, setEditForm] = useState<any>(null);
   const [showActions, setShowActions] = useState(false);
   const tabScrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollTabsLeft, setCanScrollTabsLeft] = useState(false);
   const [canScrollTabsRight, setCanScrollTabsRight] = useState(false);
+  const canManageContacts = ['owner', 'admin', 'manager'].includes(String(profile?.role || '').toLowerCase());
   useEffect(() => {
     fetchContact();
     fetchDocuments();
@@ -270,6 +274,18 @@ export default function ContactDetail() {
     } catch (err) {
       console.error('Error fetching timeline:', err);
     }
+  };
+
+  const logContactTimeline = async (content: string, type: 'note' | 'stage_change' = 'note') => {
+    if (!contact?.id || !user?.id) return;
+    await (supabase.from('communications') as any).insert({
+      contact_id: contact.id,
+      company_id: contact.company_id,
+      type,
+      content,
+      user_id: user.id,
+      direction: 'outbound',
+    });
   };
 
   // Advance contact to a new pipeline status and log the change in the timeline
@@ -447,35 +463,65 @@ export default function ContactDetail() {
 
   const uploadContactPhoto = async (file: File) => {
     if (!id || !contact?.company_id) return;
+    setIsPhotoSaving(true);
 
-    const uploadFile = new File(
-      [await compressImageWithLightCompressor(file, {
-        maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
-        maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
-        quality: PHOTO_POLICY_PRESETS.high8mp.quality,
-      })],
-      file.name.replace(/\.[^.]+$/, '') + '.jpg',
-      { type: 'image/jpeg' }
-    );
+    try {
+      const uploadFile = new File(
+        [await compressImageWithLightCompressor(file, {
+          maxWidth: PHOTO_POLICY_PRESETS.high8mp.width,
+          maxHeight: PHOTO_POLICY_PRESETS.high8mp.height,
+          quality: PHOTO_POLICY_PRESETS.high8mp.quality,
+        })],
+        file.name.replace(/\.[^.]+$/, '') + '.jpg',
+        { type: 'image/jpeg' }
+      );
 
-    const fileName = `${Math.random()}.jpg`;
-    const filePath = `${id}/${fileName}`;
-    const bucket = 'projectceo-photos';
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile);
-    if (uploadError) throw uploadError;
+      const fileName = `${Math.random()}.jpg`;
+      const filePath = `${id}/${fileName}`;
+      const bucket = 'projectceo-photos';
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile);
+      if (uploadError) throw uploadError;
 
-    const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
-    const { error: dbError } = await supabase.from('documents').insert({
-      contact_id: id,
-      company_id: contact.company_id,
-      name: `Contact photo ${new Date().toLocaleDateString()}`,
-      type: 'photo',
-      url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
-      size: uploadFile.size,
-      uploaded_by: user?.id ?? 'unknown',
-      starred: true,
-    } as any);
-    if (dbError) throw dbError;
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+
+      try {
+        await (supabase.from('documents') as any)
+          .update({ starred: false })
+          .eq('contact_id', id)
+          .eq('type', 'photo');
+      } catch {
+        // Older installs may not have the starred column yet.
+      }
+
+      let { error: dbError } = await (supabase.from('documents') as any).insert({
+        contact_id: id,
+        company_id: contact.company_id,
+        name: `Contact photo ${new Date().toLocaleDateString()}`,
+        type: 'photo',
+        url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
+        size: uploadFile.size,
+        uploaded_by: user?.id ?? 'unknown',
+        starred: true,
+      });
+
+      if (dbError && /starred/i.test(String(dbError.message || ''))) {
+        ({ error: dbError } = await (supabase.from('documents') as any).insert({
+          contact_id: id,
+          company_id: contact.company_id,
+          name: `Contact photo ${new Date().toLocaleDateString()}`,
+          type: 'photo',
+          url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
+          size: uploadFile.size,
+          uploaded_by: user?.id ?? 'unknown',
+        }));
+      }
+
+      if (dbError) throw dbError;
+      await fetchDocuments();
+      await fetchContact();
+    } finally {
+      setIsPhotoSaving(false);
+    }
   };
 
   const handleEditPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -489,6 +535,114 @@ export default function ContactDetail() {
       alert('Failed to upload contact photo.');
     } finally {
       e.target.value = '';
+    }
+  };
+
+  const archiveContact = async () => {
+    if (!contact?.id || isLifecycleSaving) return;
+    if (!window.confirm(`Archive ${contact.first_name} ${contact.last_name}? You can reactivate this customer later for a new project.`)) return;
+
+    setIsLifecycleSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await (supabase.from('contacts') as any)
+        .update({ status: 'archived', status_changed_at: now })
+        .eq('id', contact.id);
+      if (error) throw error;
+      await logContactTimeline('Customer archived. Previous project history remains on file.', 'stage_change');
+      navigate('/contacts', { replace: true });
+    } catch (err) {
+      console.error('Error archiving contact:', err);
+      alert(err instanceof Error ? err.message : 'Unable to archive contact right now.');
+    } finally {
+      setIsLifecycleSaving(false);
+    }
+  };
+
+  const reactivateContact = async () => {
+    if (!contact?.id || isLifecycleSaving) return;
+    if (!window.confirm(`Reactivate ${contact.first_name} ${contact.last_name} and start a fresh project? Existing history will stay visible, but active project values will be reset.`)) return;
+
+    setIsLifecycleSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await (supabase.from('contacts') as any)
+        .update({
+          status: 'lead',
+          status_changed_at: now,
+          lead_source: 'return_customer',
+          project_value: null,
+          deposit_amount: null,
+          deposit_paid: false,
+          deposit_date: null,
+          final_payment_amount: null,
+          final_payment_paid: false,
+          final_payment_date: null,
+          insurance_company: null,
+          policy_number: null,
+          claim_number: null,
+          adjuster_name: null,
+          adjuster_phone: null,
+          adjuster_email: null,
+          deductible: null,
+          retail_notes: null,
+        })
+        .eq('id', contact.id);
+      if (error) throw error;
+      await logContactTimeline('Customer reactivated for a new project cycle. Prior project history remains on file.', 'stage_change');
+      await fetchContact();
+      await fetchTimeline();
+      setShowActions(false);
+      changeTab('overview');
+    } catch (err) {
+      console.error('Error reactivating contact:', err);
+      alert(err instanceof Error ? err.message : 'Unable to reactivate contact right now.');
+    } finally {
+      setIsLifecycleSaving(false);
+    }
+  };
+
+  const deleteContact = async () => {
+    if (!contact?.id || !canManageContacts || isLifecycleSaving) return;
+    const confirmed = window.confirm(`Permanently delete ${contact.first_name} ${contact.last_name}? This removes the contact and related project records. This cannot be undone.`);
+    if (!confirmed) return;
+
+    setIsLifecycleSaving(true);
+    try {
+      const docsToDelete = [...(documents || [])];
+      for (const doc of docsToDelete) {
+        const storedUrl = String(doc?.url || '');
+        try {
+          const parsed = new URL(storedUrl);
+          const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''));
+          const bucket = hashParams.get('bucket');
+          const path = hashParams.get('path');
+          if (bucket && path) {
+            await supabase.storage.from(bucket).remove([decodeURIComponent(path.replace(/^\/+/, '').trim())]);
+          }
+        } catch {
+          // ignore malformed storage urls during delete cleanup
+        }
+      }
+
+      await Promise.all([
+        supabase.from('communications').delete().eq('contact_id', contact.id),
+        supabase.from('documents').delete().eq('contact_id', contact.id),
+        supabase.from('inspections').delete().eq('contact_id', contact.id),
+        supabase.from('estimates').delete().eq('contact_id', contact.id),
+        supabase.from('work_orders').delete().eq('contact_id', contact.id),
+        (supabase.from('projects') as any).delete().eq('contact_id', contact.id),
+        (supabase.from('appointments') as any).delete().eq('contact_id', contact.id),
+      ]);
+
+      const { error } = await (supabase.from('contacts') as any).delete().eq('id', contact.id);
+      if (error) throw error;
+      navigate('/contacts', { replace: true });
+    } catch (err) {
+      console.error('Error deleting contact:', err);
+      alert(err instanceof Error ? err.message : 'Unable to delete contact right now. Archive the customer instead if you need to keep history.');
+    } finally {
+      setIsLifecycleSaving(false);
     }
   };
 
@@ -687,7 +841,7 @@ export default function ContactDetail() {
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
             {activeTab === 'overview' && <OverviewTab contact={contact} onRefresh={fetchContact} />}
-            {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} />}
+            {activeTab === 'inspection' && <InspectionTab contact={contact} userId={user?.id} onDocumentsChanged={fetchDocuments} onContactUpdated={fetchContact} />}
             {activeTab === 'status' && <StatusTab contact={contact} onAdvance={advanceStatus} canUndo={profile?.role === 'owner' || profile?.role === 'admin' || profile?.role === 'manager'} />}
             {activeTab === 'timeline' && <TimelineTab timeline={timeline} onRefresh={fetchTimeline} contact={contact} userId={user?.id} companyId={profile?.company_id} />}
             {activeTab === 'documents' && <DocumentsTab contactId={contact.id} companyId={contact.company_id ?? profile?.company_id ?? ''} address={contact.address ?? ''} city={contact.city ?? ''} state={contact.state ?? ''} zip={contact.zip ?? ''} contactName={[contact.first_name, contact.last_name].filter(Boolean).join(' ')} userId={user?.id} documents={documentsWithUrls.length ? documentsWithUrls : documents} onUpload={handleUpload} onLegalUpload={handleLegalUpload} onDocumentSaved={fetchDocuments} onDeleteDocument={handleDeleteDocument} />}
@@ -710,7 +864,13 @@ export default function ContactDetail() {
                   Cancel
                 </button>
                 <h3 className="text-lg font-bold text-primary">Edit Customer</h3>
-                <div className="w-[76px]" />
+                <button
+                  onClick={saveEdit}
+                  disabled={isSavingEdit || isPhotoSaving}
+                  className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+                >
+                  {isPhotoSaving ? 'Photo...' : isSavingEdit ? 'Saving...' : 'Save'}
+                </button>
               </div>
 
               <div className="flex items-center gap-4">
@@ -725,10 +885,10 @@ export default function ContactDetail() {
                   <div className="absolute bottom-1 right-1 flex h-7 w-7 items-center justify-center rounded-full bg-accent text-white shadow-lg">
                     <Camera size={14} />
                   </div>
-                  <input type="file" className="hidden" accept="image/*" onChange={handleEditPhotoUpload} />
+                  <input type="file" className="hidden" accept="image/*" onChange={handleEditPhotoUpload} disabled={isPhotoSaving} />
                 </label>
                 <div className="min-w-0">
-                  <p className="text-sm font-bold text-primary">Tap to update contact photo</p>
+                  <p className="text-sm font-bold text-primary">{isPhotoSaving ? 'Saving contact photo...' : 'Tap to update contact photo'}</p>
                   <p className="mt-1 text-xs text-slate-500">
                     Upload a customer photo or a photo of the home. Favorited photos become the cover photo in the contact list.
                   </p>
@@ -811,9 +971,9 @@ export default function ContactDetail() {
               className="border-t border-slate-100 bg-white px-5 pb-4 pt-4"
               style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
             >
-              <button onClick={saveEdit} disabled={isSavingEdit} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2">
+              <button onClick={saveEdit} disabled={isSavingEdit || isPhotoSaving} className="w-full bg-primary text-white py-4 rounded-2xl text-sm font-bold disabled:opacity-60 flex items-center justify-center gap-2">
                 {isSavingEdit && <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />}
-                {isSavingEdit ? 'Saving...' : 'Save Changes'}
+                {isPhotoSaving ? 'Saving Photo...' : isSavingEdit ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
@@ -833,6 +993,20 @@ export default function ContactDetail() {
               <div className="space-y-3">
                 <button onClick={() => { setShowActions(false); openEdit(); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Edit Contact</button>
                 <button onClick={() => { setShowActions(false); changeTab('documents'); }} className="w-full bg-slate-50 py-3 rounded-xl text-sm font-bold">Legal Documents</button>
+                {contact?.status === 'archived' ? (
+                  <button onClick={reactivateContact} disabled={isLifecycleSaving} className="w-full bg-emerald-50 py-3 rounded-xl text-sm font-bold text-emerald-700 disabled:opacity-60">
+                    {isLifecycleSaving ? 'Reactivating...' : 'Reactivate Customer'}
+                  </button>
+                ) : (
+                  <button onClick={archiveContact} disabled={isLifecycleSaving} className="w-full bg-amber-50 py-3 rounded-xl text-sm font-bold text-amber-700 disabled:opacity-60">
+                    {isLifecycleSaving ? 'Archiving...' : 'Archive Customer'}
+                  </button>
+                )}
+                {canManageContacts && (
+                  <button onClick={deleteContact} disabled={isLifecycleSaving} className="w-full bg-red-50 py-3 rounded-xl text-sm font-bold text-red-700 disabled:opacity-60">
+                    {isLifecycleSaving ? 'Deleting...' : 'Delete Contact Permanently'}
+                  </button>
+                )}
               </div>
             </div>
             <div
@@ -1577,7 +1751,7 @@ function WeatherCard({ contact }: { contact: any }) {
   );
 }
 
-function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; userId?: string; onDocumentsChanged?: () => void }) {
+function InspectionTab({ contact, userId, onDocumentsChanged, onContactUpdated }: { contact: any; userId?: string; onDocumentsChanged?: () => void; onContactUpdated?: () => void | Promise<void> }) {
   const navigate = useNavigate();
   const usesNativeInspectionCamera = Capacitor.isNativePlatform();
   const isIosInspectionCapture = Capacitor.getPlatform() === 'ios';
@@ -2175,14 +2349,19 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         .eq('id', contact.id);
       if (statusError) {
         console.error('completeInspection: inspected status failed, trying legacy fallback:', statusError);
-        const fallbackCandidates = ['inspection_complete', 'inspection_completed', 'inspection_scheduled'];
+        const fallbackCandidates = ['inspection_complete', 'inspection_completed'];
+        let recovered = false;
         for (const fallbackStatus of fallbackCandidates) {
           const { error: fallbackError } = await (supabase.from('contacts') as any)
             .update({ status: fallbackStatus, status_changed_at: now })
             .eq('id', contact.id);
-          if (!fallbackError) break;
+          if (!fallbackError) {
+            recovered = true;
+            break;
+          }
           console.error(`completeInspection: ${fallbackStatus} fallback failed:`, fallbackError);
         }
+        if (!recovered) throw statusError;
       }
       try {
         const { data } = await (supabase.from('inspections') as any).upsert({
@@ -2205,6 +2384,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
         // ignore if inspections table missing
       }
       onDocumentsChanged?.();
+      await onContactUpdated?.();
       clearDraft();
       alert('Inspection completed and saved to timeline!');
       setStep('report');
@@ -2244,6 +2424,7 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
       if (statusError) throw statusError;
 
       onDocumentsChanged?.();
+      await onContactUpdated?.();
       clearDraft();
       alert('Inspection marked complete!');
     } catch (err) {
@@ -2255,8 +2436,11 @@ function InspectionTab({ contact, userId, onDocumentsChanged }: { contact: any; 
   };
 
   // Statuses that mean the inspection was already completed (regardless of which flow was used)
-  const INSPECTION_DONE_STATUSES = ['inspected', 'inspection_complete', 'estimate_sent', 'approved', 'signed_won', 'scheduled', 'in_progress', 'completed', 'paid'];
-  const isInspectionDone = INSPECTION_DONE_STATUSES.includes(contact.status);
+  const INSPECTION_DONE_STATUSES = ['inspected', 'estimate_sent', 'approved', 'signed_won', 'scheduled', 'in_progress', 'completed', 'paid'];
+  const isInspectionDone =
+    INSPECTION_DONE_STATUSES.includes(normalizePipelineStatus(contact.status)) ||
+    contact.status === 'inspection_complete' ||
+    contact.status === 'inspection_completed';
 
   return (
     <div className="space-y-6">
@@ -3187,9 +3371,15 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
   const [noteDraft, setNoteDraft] = React.useState('');
   const [savingNote, setSavingNote] = React.useState(false);
   const [togglingStar, setTogglingStar] = React.useState(false);
+  const [zoom, setZoom] = React.useState(1);
+  const [markupOpen, setMarkupOpen] = React.useState(false);
+  const [markupSaving, setMarkupSaving] = React.useState(false);
+  const [isDrawingMarkup, setIsDrawingMarkup] = React.useState(false);
+  const [markupLastPoint, setMarkupLastPoint] = React.useState<{ x: number; y: number } | null>(null);
   const touchStartX = React.useRef(0);
   const touchStartY = React.useRef(0);
   const thumbsRef = React.useRef<HTMLDivElement>(null);
+  const markupCanvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
   const current = photos[index];
 
@@ -3204,6 +3394,10 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
     setNoteDraft(String(current?.photo_notes || ''));
   }, [current?.id]);
 
+  React.useEffect(() => {
+    setZoom(1);
+  }, [current?.id]);
+
   // Prevent body scroll while album is open
   React.useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -3212,6 +3406,7 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
 
   const go = (i: number) => {
     setConfirmDelete(false);
+    setMarkupOpen(false);
     setIndex(Math.max(0, Math.min(i, photos.length - 1)));
   };
 
@@ -3249,6 +3444,90 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
   const persistPhotoUpdate = async (docId: string, updates: Record<string, unknown>) => {
     const { error } = await (supabase.from('documents') as any).update(updates).eq('id', docId);
     if (error) throw error;
+  };
+
+  const openMarkupEditor = React.useCallback(() => {
+    if (!current) return;
+    setMarkupOpen(true);
+    window.setTimeout(() => {
+      const canvas = markupCanvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+      };
+      img.src = current.displayUrl || current.url;
+    }, 0);
+  }, [current]);
+
+  const handleMarkupPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawingMarkup || !markupCanvasRef.current) return;
+    const canvas = markupCanvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !markupLastPoint) return;
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(markupLastPoint.x, markupLastPoint.y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    setMarkupLastPoint({ x, y });
+  };
+
+  const saveMarkupCopy = async () => {
+    if (!current?.contact_id || !current?.company_id || !current?.uploaded_by || !markupCanvasRef.current) return;
+    const canvas = markupCanvasRef.current;
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) return;
+
+    setMarkupSaving(true);
+    try {
+      const fileName = `annotated_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const filePath = `${current.contact_id}/${fileName}`;
+      const bucket = 'projectceo-photos';
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, blob);
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      const storedUrl = buildStoredDocumentUrl(publicUrl, bucket, filePath);
+      const { data: inserted, error: insertError } = await (supabase.from('documents') as any).insert({
+        contact_id: current.contact_id,
+        company_id: current.company_id,
+        name: `${current.name || 'Inspection Photo'} (Annotated)`,
+        type: 'photo',
+        url: storedUrl,
+        size: blob.size,
+        uploaded_by: current.uploaded_by,
+        photo_notes: current.photo_notes || null,
+        starred: false,
+      }).select('*').single();
+      if (insertError) throw insertError;
+
+      const displayUrl = URL.createObjectURL(blob);
+      const nextPhotos = sortPhotosForDisplay([
+        { ...inserted, displayUrl },
+        ...photos,
+      ]);
+      setPhotos(nextPhotos);
+      setIndex(Math.max(0, nextPhotos.findIndex((photo: any) => photo.id === inserted.id)));
+      setMarkupOpen(false);
+      await onMetadataUpdated?.();
+    } catch (err) {
+      console.error('Markup copy save failed:', err);
+      alert('Unable to save annotated copy right now.');
+    } finally {
+      setMarkupSaving(false);
+    }
   };
 
   const handleToggleFavorite = async () => {
@@ -3320,6 +3599,29 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
         </div>
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setZoom((currentZoom) => Math.max(1, Number((currentZoom - 0.5).toFixed(1))))}
+            disabled={zoom <= 1}
+            className="flex h-9 w-9 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-40"
+            aria-label="Zoom out"
+          >
+            <Minus size={18} className="text-white" />
+          </button>
+          <button
+            onClick={() => setZoom((currentZoom) => Math.min(4, Number((currentZoom + 0.5).toFixed(1))))}
+            disabled={zoom >= 4}
+            className="flex h-9 w-9 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-40"
+            aria-label="Zoom in"
+          >
+            <Plus size={18} className="text-white" />
+          </button>
+          <button
+            onClick={openMarkupEditor}
+            className="flex h-9 w-9 items-center justify-center rounded-full active:bg-white/20"
+            aria-label="Annotate photo"
+          >
+            <PenLine size={18} className="text-white" />
+          </button>
+          <button
             onClick={handleToggleFavorite}
             disabled={togglingStar}
             className="flex h-9 w-9 items-center justify-center rounded-full active:bg-white/20 disabled:opacity-60"
@@ -3342,7 +3644,7 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
 
       {/* ── Main photo with swipe ── */}
       <div
-        className="flex-1 flex items-center justify-center overflow-hidden relative"
+        className="flex-1 flex items-center justify-center overflow-auto relative"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
@@ -3350,7 +3652,11 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
           key={current.id || index}
           src={current.displayUrl || current.url}
           alt={current.name || 'Photo'}
-          className="max-h-full max-w-full object-contain"
+          className="object-contain"
+          style={{
+            maxWidth: zoom === 1 ? '100%' : `${zoom * 100}%`,
+            maxHeight: zoom === 1 ? '100%' : 'none',
+          }}
           draggable={false}
           referrerPolicy="no-referrer"
         />
@@ -3413,11 +3719,16 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
       <div className="shrink-0 border-t border-white/10 bg-black/85 px-4 py-3 backdrop-blur-sm">
         <div className="mb-2 flex items-center justify-between">
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/55">Photo Notes</p>
-          {current.starred ? (
-            <span className="rounded-full bg-amber-400/20 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300">
-              Cover Photo
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">
+              {zoom.toFixed(1)}x
             </span>
-          ) : null}
+            {current.starred ? (
+              <span className="rounded-full bg-amber-400/20 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-300">
+                Cover Photo
+              </span>
+            ) : null}
+          </div>
         </div>
         <textarea
           value={noteDraft}
@@ -3465,6 +3776,41 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {markupOpen && (
+        <div className="absolute inset-0 z-20 flex flex-col bg-black">
+          <div className="flex items-center justify-between px-4 py-3 bg-black/90 backdrop-blur-sm">
+            <button onClick={() => setMarkupOpen(false)} className="rounded-full bg-white/10 px-4 py-2 text-sm font-bold text-white">
+              Cancel
+            </button>
+            <p className="text-sm font-bold text-white">Annotate Copy</p>
+            <button onClick={saveMarkupCopy} disabled={markupSaving} className="rounded-full bg-accent px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
+              {markupSaving ? 'Saving...' : 'Save Copy'}
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto bg-slate-950 p-4">
+            <canvas
+              ref={markupCanvasRef}
+              className="mx-auto max-w-full rounded-2xl bg-black touch-none"
+              onPointerDown={(e) => {
+                const canvas = markupCanvasRef.current;
+                if (!canvas) return;
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+                const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+                setIsDrawingMarkup(true);
+                setMarkupLastPoint({ x, y });
+              }}
+              onPointerMove={handleMarkupPointerMove}
+              onPointerUp={() => { setIsDrawingMarkup(false); setMarkupLastPoint(null); }}
+              onPointerLeave={() => { setIsDrawingMarkup(false); setMarkupLastPoint(null); }}
+            />
+          </div>
+          <div className="border-t border-white/10 bg-black/90 px-4 py-3 text-[11px] text-white/65">
+            Saving creates a new annotated photo and keeps the original untouched.
           </div>
         </div>
       )}

@@ -151,7 +151,10 @@ export default function Landing() {
     <div className="min-h-screen bg-white text-slate-800 font-sans">
 
       {/* ── Nav ─────────────────────────────────────────────────────────────── */}
-      <header className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-100">
+      <header
+        className="fixed top-0 inset-x-0 z-50 bg-white/90 backdrop-blur border-b border-slate-100"
+        style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      >
         <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
           <img src={trussLogo} alt="TrussCTR" className="h-8 w-auto" />
 

@@ -42,14 +42,22 @@ const DOCUMENT_UPLOAD_BUCKETS = ['documents', 'projectceo-photos'] as const;
 export async function uploadToAvailableBucket(
   storagePath: string,
   file: Blob,
-  contentType: string
+  contentType: string,
+  companyId?: string
 ) {
   let lastError: Error | null = null;
+
+  // SECURITY FIX: Ensure company isolation in storage paths
+  let securePath = storagePath;
+  if (companyId && !storagePath.startsWith(companyId)) {
+    // Prefix with company ID for multi-tenant isolation
+    securePath = `${companyId}/${storagePath}`;
+  }
 
   for (const bucket of DOCUMENT_UPLOAD_BUCKETS) {
     const { data, error } = await supabase.storage
       .from(bucket)
-      .upload(storagePath, file, { contentType, upsert: false });
+      .upload(securePath, file, { contentType, upsert: false });
 
     if (!error && data) {
       const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(data.path);

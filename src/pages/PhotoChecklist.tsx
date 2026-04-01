@@ -16,6 +16,7 @@ export default function PhotoChecklist() {
       .from('contacts')
       .select('first_name, last_name')
       .eq('id', contactId)
+      .neq('status', 'archived')
       .single()
       .then(({ data }: { data: any }) => {
         if (data) setContactName(`${data.first_name || ''} ${data.last_name || ''}`.trim());

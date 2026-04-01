@@ -96,8 +96,9 @@ function AppRoutes() {
         <Route path="/sign/:token" element={<PublicDocumentSigner />} />
         {!session ? (
           <>
-            <Route path="/" element={<Landing />} />
+            <Route path="/" element={<Login />} />
             <Route path="/login" element={<Login />} />
+            <Route path="/landing" element={<Landing />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </>
         ) : (

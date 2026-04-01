@@ -13,18 +13,24 @@ import { buildDocumentDisplayUrl } from '../lib/documentAccess';
 
 type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
 
+// Updated to match web app pipeline exactly
 const STAGES: StageConfig[] = [
-  { statuses: ['new_lead', 'lead'], label: 'Leads', color: 'bg-blue-500' },
+  { statuses: ['prospect', 'lead'], label: 'Leads', color: 'bg-blue-500' },
   { statuses: ['contacted'], label: 'Contacted', color: 'bg-sky-500' },
-  { statuses: ['appointment_set', 'inspection_scheduled'], label: 'Appointment Set', color: 'bg-indigo-500' },
-  { statuses: ['inspected', 'inspection_complete'], label: 'Inspection', color: 'bg-amber-500' },
-  { statuses: ['estimate_sent'], label: 'Follow Up / Negotiating', color: 'bg-orange-500' },
-  { statuses: ['approved', 'signed_won'], label: 'Sold', color: 'bg-emerald-500' },
-  { statuses: ['scheduled'], label: 'Scheduled', color: 'bg-teal-500' },
+  { statuses: ['appt_set'], label: 'Appointment Set', color: 'bg-indigo-500' },
+  { statuses: ['inspection_completed'], label: 'Inspection', color: 'bg-cyan-500' },
+  { statuses: ['estimating'], label: 'Estimating', color: 'bg-purple-500' },
+  { statuses: ['estimate_sent'], label: 'Estimate Sent', color: 'bg-amber-500' },
+  { statuses: ['contingency'], label: 'Follow Up', color: 'bg-orange-500' },
+  { statuses: ['approved'], label: 'Approved', color: 'bg-teal-500' },
+  { statuses: ['signed'], label: 'Signed', color: 'bg-emerald-500' },
+  { statuses: ['ordering_material'], label: 'Ordering Material', color: 'bg-yellow-500' },
   { statuses: ['in_progress'], label: 'In Progress', color: 'bg-primary' },
-  { statuses: ['completed'], label: 'Completed', color: 'bg-slate-800' },
-  { statuses: ['paid'], label: 'Paid', color: 'bg-green-600' },
-  { statuses: ['retail'], label: 'Retail', color: 'bg-purple-500' },
+  { statuses: ['build_phase'], label: 'Build Phase', color: 'bg-red-500' },
+  { statuses: ['cleanup'], label: 'Cleanup', color: 'bg-pink-500' },
+  { statuses: ['invoicing'], label: 'Invoicing', color: 'bg-rose-500' },
+  { statuses: ['pending_payment'], label: 'Pending Payment', color: 'bg-amber-600' },
+  { statuses: ['completed'], label: 'Completed', color: 'bg-green-600' },
   { statuses: ['lost'], label: 'Lost', color: 'bg-red-400' },
 ];
 
@@ -105,7 +111,7 @@ export default function Pipeline() {
   const fetchContacts = async () => {
     try {
       const [{ data, error }, { data: apptData }, { data: photoDocs }] = await Promise.all([
-        supabase.from('contacts').select('*').eq('company_id', profile.company_id).order('updated_at', { ascending: false }),
+        supabase.from('contacts').select('*').eq('company_id', profile.company_id).neq('status', 'archived').order('updated_at', { ascending: false }),
         supabase.from('appointments').select('id,contact_id,date,time,title,status').eq('company_id', profile.company_id).eq('status', 'scheduled'),
         supabase.from('documents').select('*').eq('company_id', profile.company_id).eq('type', 'photo'),
       ]);

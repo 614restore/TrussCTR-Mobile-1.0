@@ -9,16 +9,16 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase credentials missing. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.');
 }
 
-// Custom fetch with a 20-second hard timeout on every Supabase request.
-// In Capacitor iOS WebViews the autoRefreshToken mechanism can occasionally
-// hang indefinitely (no network error is thrown), which causes inserts and
-// other operations to spin forever. AbortController gives us a guaranteed
-// escape hatch so the Promise.race timeout in callers actually fires.
+const SUPABASE_FETCH_TIMEOUT_MS = Capacitor.isNativePlatform() ? 45000 : 20000;
+
+// Custom fetch with a hard timeout on every Supabase request.
+// Native Capacitor WebViews can take substantially longer to complete auth or
+// PostgREST requests on cold start, so mobile gets a wider timeout window.
 const fetchWithTimeout = (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
   const controller = new AbortController();
   const timer = setTimeout(() => {
     controller.abort();
-  }, 20000); // 20 s — generous enough for slow connections, tight enough to unblock UI
+  }, SUPABASE_FETCH_TIMEOUT_MS);
   return fetch(url as RequestInfo, { ...options, signal: controller.signal })
     .finally(() => clearTimeout(timer));
 };

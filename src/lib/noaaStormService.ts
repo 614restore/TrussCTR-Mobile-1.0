@@ -230,6 +230,7 @@ async function checkContactsNearStorms(
   const { data: contacts } = await (supabase.from('contacts') as any)
     .select('id, first_name, last_name, address, city, state, zip')
     .eq('company_id', companyId)
+    .neq('status', 'archived')
     .or('city.neq.,zip.neq.')
     .limit(200) as { data: any[] | null };
 

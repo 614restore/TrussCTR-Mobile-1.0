@@ -23,6 +23,7 @@ export type CustomerStatus =
   | 'paid'
   | 'lost'
   | 'retail'
+  | 'archived'
 
 export interface Database {
   public: {
@@ -91,6 +92,8 @@ export interface Database {
           url: string
           size: number
           uploaded_by: string
+          starred?: boolean | null
+          photo_notes?: string | null
           created_at: string
         }
         Insert: Omit<Database['public']['Tables']['documents']['Row'], 'id' | 'created_at'>

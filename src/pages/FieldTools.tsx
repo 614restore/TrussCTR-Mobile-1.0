@@ -52,6 +52,7 @@ export default function FieldTools() {
         .from('contacts')
         .select('id, first_name, last_name, address, city, state')
         .eq('company_id', profile.company_id)
+        .neq('status', 'archived')
         .order('last_name', { ascending: true })
         .limit(100);
       setContacts(data || []);

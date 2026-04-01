@@ -130,7 +130,8 @@ export default function Dashboard() {
         supabase
           .from('contacts')
           .select('*')
-          .eq('company_id', profile.company_id),
+          .eq('company_id', profile.company_id)
+          .neq('status', 'archived'),
         supabase
           .from('work_orders')
           .select('*')

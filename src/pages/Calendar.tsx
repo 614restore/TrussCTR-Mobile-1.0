@@ -79,7 +79,7 @@ export default function CalendarPage() {
         { data: workOrders, error: workOrderError },
         { data: appointments, error: appointmentError },
       ] = await Promise.all([
-        supabase.from('contacts').select('*').eq('company_id', profile.company_id),
+        (supabase.from('contacts') as any).select('*').eq('company_id', profile.company_id).neq('status', 'archived'),
         supabase.from('work_orders').select('*').eq('company_id', profile.company_id).order('scheduled_date', { ascending: true }),
         db.from('appointments').select('*').eq('company_id', profile.company_id),
       ]);
