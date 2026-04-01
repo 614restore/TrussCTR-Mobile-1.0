@@ -43,6 +43,7 @@ const InspectionReportBuilder = lazy(() => import('./pages/InspectionReportBuild
 const Landing = lazy(() => import('./pages/Landing'));
 const StormHistory = lazy(() => import('./pages/StormHistory'));
 const Integrations = lazy(() => import('./pages/Integrations'));
+const AcceptInvite = lazy(() => import('./pages/AcceptInvite'));
 
 function AppLoadingScreen({ message }: { message: string }) {
   return (
@@ -92,6 +93,7 @@ function AppRoutes() {
       <Routes>
         {/* Always-accessible routes — work with or without a session */}
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/accept-invite" element={<AcceptInvite />} />
         {/* Public e-signature page — homeowners open this in their browser, no auth needed */}
         <Route path="/sign/:token" element={<PublicDocumentSigner />} />
         {!session ? (

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
@@ -110,24 +110,31 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      // Use the admin-API edge function to change the password.
-      // Direct supabase.auth.updateUser() is blocked by "Secure password change"
-      // unless the session is a PASSWORD_RECOVERY session — temp-password logins
-      // are normal SIGNED_IN sessions, so we bypass via the service role instead.
-      const { data: { session } } = await supabase.auth.getSession();
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      // Always use the service-role edge function — it bypasses both the
+      // "Secure password change" restriction (blocks updateUser() on normal
+      // SIGNED_IN sessions) and any implicit-flow token limitations.
+      //
+      // Retry getSession up to 3 times with a short delay — detectSessionInUrl
+      // auto-processes the hash tokens concurrently with the manual setSession()
+      // call in establishRecoverySession, which can cause "Lock was stolen" races.
+      let session = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 350));
+        const { data } = await supabase.auth.getSession();
+        if (data.session?.access_token) { session = data.session; break; }
+      }
+      if (!session?.access_token) throw new Error('No active session. Please use the reset link from your email.');
+
       const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`,
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({ password }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Failed to update password.');
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `Server error (${res.status}). Please try again.`);
 
       clearRecoverySession();
       setSuccess(true);
