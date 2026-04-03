@@ -98,6 +98,11 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
       const { data: sessionData } = await supabase.auth.getSession();
       const currentUserId = sessionData?.session?.user?.id || user?.id || profile?.id || null;
 
+      const shouldAdvanceToAppointmentSet =
+        Boolean(formData.appt_date) &&
+        formData.appt_type === 'inspection' &&
+        ['lead', 'new_lead', 'contacted'].includes(formData.status);
+
       const payload = {
         first_name: firstName,
         last_name:  lastName,
@@ -109,7 +114,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
         state:   formData.state.trim()   || null,
         zip:     formData.zip.trim()     || null,
         project_type: formData.project_type.trim() || null,
-        status: formData.status,
+        status: shouldAdvanceToAppointmentSet ? 'appointment_set' : formData.status,
         company_id:  companyId,
         assigned_to: currentUserId,
         lead_source: 'mobile_app',
@@ -142,8 +147,8 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
       if (error) throw error;
       if (!data?.id) throw new Error('Contact save did not return a record. Please try again.');
 
-      // If an appointment was filled in, create it now
-      if (formData.appt_date) {
+      const saveAppointment = async () => {
+        if (!formData.appt_date) return;
         const aptTitle =
           formData.appt_type === 'inspection' ? 'Inspection'
           : formData.appt_type === 'build'    ? 'Build / Installation'
@@ -162,22 +167,19 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
         });
 
         if (aptErr) {
-          // Don't block contact creation — just log the appointment error
           console.error('[NewContact] Appointment insert error:', aptErr);
-        } else if (formData.appt_type === 'inspection') {
-          // Advance status to appointment_set if currently lead/new_lead/contacted
-          const advanceFrom = ['lead', 'new_lead', 'contacted'];
-          if (advanceFrom.includes(formData.status)) {
-            await (supabase as any)
-              .from('contacts')
-              .update({ status: 'appointment_set', status_changed_at: new Date().toISOString() })
-              .eq('id', data.id);
-          }
         }
-      }
+      };
 
-      await onSuccess();
+      setLoading(false);
       onClose();
+      void saveAppointment().catch((appointmentErr) => {
+        console.error('[NewContact] Post-save appointment error:', appointmentErr);
+      });
+      Promise.resolve(onSuccess()).catch((refreshErr) => {
+        console.error('[NewContact] Post-save refresh error:', refreshErr);
+      });
+      return;
     } catch (err: any) {
       console.error('[NewContact] Save error:', {
         name: err?.name, message: err?.message,
