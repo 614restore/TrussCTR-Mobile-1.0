@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Plus, Minus, Save, Eye, EyeOff, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Save, Eye, EyeOff, Trash2, FileUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
+import RoofrImportModal from '../components/RoofrImportModal';
+import type { EstimatorPatch, StructureMeasurements } from '../lib/roofrParser';
 import {
   buildDefaultQuoteMeta,
   ESTIMATE_PRESETS,
@@ -64,6 +66,26 @@ export default function RetailEstimator() {
   const [showLineItems, setShowLineItems] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showRoofrImport, setShowRoofrImport] = useState(false);
+  const [roofrBanner, setRoofrBanner] = useState<string | null>(null);
+
+  const isOwnerOrAdmin = profile?.role === 'owner' || profile?.role === 'admin';
+
+  const applyRoofrPatch = (patch: EstimatorPatch, _measurements: StructureMeasurements) => {
+    if (patch.squares !== undefined) setSquares(patch.squares);
+    if (patch.waste !== undefined) setWaste(patch.waste);
+    if (patch.lineItemPatches.length > 0) {
+      setItems((prev) => prev.map((item) => {
+        const match = patch.lineItemPatches.find((p) =>
+          item.name.toLowerCase().includes(p.nameFragment.toLowerCase())
+        );
+        return match ? { ...item, qty: match.qty } : item;
+      }));
+    }
+    setShowRoofrImport(false);
+    setRoofrBanner(`Roofr measurements applied — ${patch.squares ?? '?'} SQ at ${patch.waste ?? 15}% waste. Review and adjust as needed.`);
+    setTimeout(() => setRoofrBanner(null), 8000);
+  };
 
   useEffect(() => {
     const loadContact = async () => {
@@ -273,6 +295,23 @@ export default function RetailEstimator() {
           <div className="rounded-2xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 font-medium">
             ⚠️ {saveError}
           </div>
+        )}
+
+        {roofrBanner && (
+          <div className="rounded-2xl bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-700 font-medium flex items-start gap-2">
+            <span>✓</span><span>{roofrBanner}</span>
+          </div>
+        )}
+
+        {/* Roofr Import button — owner/admin only */}
+        {isOwnerOrAdmin && (
+          <button
+            onClick={() => setShowRoofrImport(true)}
+            className="w-full flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-blue-200 bg-blue-50 py-3 text-sm font-bold text-blue-600 active:scale-95 transition-transform"
+          >
+            <FileUp size={16} />
+            Import Roofr PDF Report
+          </button>
         )}
 
         <section className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
@@ -490,6 +529,13 @@ export default function RetailEstimator() {
       >
         <SaveButton />
       </div>
+
+      {showRoofrImport && (
+        <RoofrImportModal
+          onClose={() => setShowRoofrImport(false)}
+          onApply={applyRoofrPatch}
+        />
+      )}
     </div>
   );
 }

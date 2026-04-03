@@ -123,9 +123,9 @@ export default function Settings() {
   };
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-slate-50 pb-20">
+    <div className="min-h-screen w-full max-w-full bg-slate-50 pb-20">
       {/* Header */}
-      <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10">
+      <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10" style={{ transform: 'translateZ(0)', WebkitBackfaceVisibility: 'hidden' }}>
         <div className="flex items-center gap-4">
           <button onClick={() => navigate(-1)} className="p-2 -ml-2 text-slate-400 active:scale-90 transition-transform">
             <ChevronLeft size={24} />
@@ -134,7 +134,7 @@ export default function Settings() {
         </div>
       </div>
 
-      <div className="w-full max-w-full p-6 space-y-8 overflow-x-hidden">
+      <div className="w-full max-w-full p-6 space-y-8">
         {/* Inspection Photo Storage */}
         <div className="space-y-3">
           <h2 className="ml-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Inspection Photos</h2>

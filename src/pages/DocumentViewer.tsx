@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, ExternalLink, FileText, RefreshCw, Trash2 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
 import { fetchDocumentObjectUrl, resolveDocumentSignedUrl } from '../lib/documentAccess';
 
@@ -42,7 +43,7 @@ export default function DocumentViewer() {
 
   useEffect(() => {
     return () => {
-      if (viewerState.objectUrl) {
+      if (!Capacitor.isNativePlatform() && viewerState.objectUrl) {
         URL.revokeObjectURL(viewerState.objectUrl);
       }
     };
@@ -67,19 +68,30 @@ export default function DocumentViewer() {
         const record: any = data;
         setDocumentRecord(record);
 
-        const loaded = await fetchDocumentObjectUrl(record.url);
-        setViewerState((current) => {
-          if (current.objectUrl) {
-            URL.revokeObjectURL(current.objectUrl);
-          }
-
-          return {
-            objectUrl: loaded.objectUrl,
-            sourceUrl: loaded.sourceUrl,
-            contentType: loaded.blob.type || '',
+        // On native iOS, fetch() to Supabase storage is blocked from capacitor://localhost
+        // and blob: URLs don't work in iframes. Use the signed URL directly instead.
+        if (Capacitor.isNativePlatform()) {
+          const resolved = await resolveDocumentSignedUrl(record.url);
+          setViewerState({
+            objectUrl: resolved.signedUrl,
+            sourceUrl: resolved.signedUrl,
+            contentType: record.name?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : '',
             name: record.name || 'Document',
-          };
-        });
+          });
+        } else {
+          const loaded = await fetchDocumentObjectUrl(record.url);
+          setViewerState((current) => {
+            if (current.objectUrl) {
+              URL.revokeObjectURL(current.objectUrl);
+            }
+            return {
+              objectUrl: loaded.objectUrl,
+              sourceUrl: loaded.sourceUrl,
+              contentType: loaded.blob.type || '',
+              name: record.name || 'Document',
+            };
+          });
+        }
       } catch (err) {
         console.error('Error loading document viewer:', err);
         setErrorMessage((err as Error)?.message || 'Unable to load this document.');
@@ -204,7 +216,20 @@ export default function DocumentViewer() {
         ) : viewerState.objectUrl ? (
           <div className="mx-auto flex h-full max-w-5xl flex-col gap-4">
             <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm">
-              {isPdf ? (
+              {isPdf && Capacitor.isNativePlatform() ? (
+                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 rounded-2xl bg-slate-50 p-8 text-center">
+                  <FileText size={40} className="text-slate-400" />
+                  <p className="text-sm font-semibold text-slate-600">{viewerState.name}</p>
+                  <p className="text-xs text-slate-400">PDF preview opens in Safari on iOS</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenExternal}
+                    className="mt-2 rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white"
+                  >
+                    Open PDF
+                  </button>
+                </div>
+              ) : isPdf ? (
                 <iframe
                   title={viewerState.name}
                   src={viewerState.objectUrl}

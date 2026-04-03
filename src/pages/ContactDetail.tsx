@@ -7,6 +7,7 @@ import {
   ClipboardList, PenLine, Wrench, TrendingUp, Image as ImageIcon, CloudSun,
   Trash2, Camera, RefreshCw, X, Star, CreditCard, Minus,
   Wind, CloudRain, Zap, Archive, Briefcase, RotateCcw, ChevronDown as ChevronDownIcon,
+  Eye, Share2,
 } from 'lucide-react';
 import { fetchContactStormHistory, type ContactStormEvent } from '../lib/noaaStormService';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -167,6 +168,26 @@ export default function ContactDetail() {
   const [canScrollTabsLeft, setCanScrollTabsLeft] = useState(false);
   const [canScrollTabsRight, setCanScrollTabsRight] = useState(false);
   const canManageContacts = ['owner', 'admin', 'manager'].includes(String(profile?.role || '').toLowerCase());
+  
+  // New state for estimate preview and sharing
+  const [showEstimatePreview, setShowEstimatePreview] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+  const [revertTarget, setRevertTarget] = useState<string | null>(null);
+  
+  // Check if inspection is completed
+  const isInspectionCompleted = 
+    contact?.status === 'inspection_complete' ||
+    contact?.status === 'inspection_completed' ||
+    contact?.status === 'estimating' ||
+    contact?.status === 'estimate_sent';
+
+  // Get estimate data from documents or database
+  const estimateData = documents.find(doc => 
+    doc.filename?.toLowerCase().includes('estimate') || 
+    doc.filename?.toLowerCase().includes('quote')
+  ) || null;
+  
   useEffect(() => {
     fetchContact();
     fetchDocuments();
@@ -293,8 +314,46 @@ export default function ContactDetail() {
     if (!contact || !user?.id) return;
     const from = contact.status as string;
     if (from === newStatus) return;
-    const now = new Date().toISOString();
+    
     try {
+      // Use centralized status manager instead of direct Supabase calls
+      const { updateContactStatus } = await import('../lib/statusManager');
+      
+      const result = await updateContactStatus({
+        contactId: contact.id,
+        newStatus,
+        oldStatus: contact.status,
+        contactName: `${contact.first_name || ''} ${contact.last_name || ''}`.trim(),
+        contactEmail: contact.email || '',
+        userId: user.id,
+        userEmail: user.email || '',
+        companyId: contact.company_id,
+        source: 'manual_mobile',
+        reason: logContent || `Stage updated: ${from.replace(/_/g, ' ')} → ${newStatus.replace(/_/g, ' ')}`,
+      });
+
+      if (result.success) {
+        // Optimistic update — reflect the new status instantly so the stage
+        // buttons re-render correctly without waiting for the async fetchContact.
+        const now = new Date().toISOString();
+        setContact((c: any) => c ? { ...c, status: newStatus, status_changed_at: now } : c);
+        
+        // Refresh data to get any auto-progression updates
+        await fetchContact();
+        await fetchTimeline();
+        
+        console.log('[MobileApp] Status update successful via statusManager:', result);
+      } else {
+        console.error('[MobileApp] Status update failed:', result.error);
+        // Show error to user
+        if (typeof window !== 'undefined' && window.alert) {
+          alert(`Failed to update status: ${result.error}`);
+        }
+      }
+    } catch (err) {
+      console.error('[MobileApp] Status update exception:', err);
+      // Fallback to old method if statusManager fails
+      const now = new Date().toISOString();
       await (supabase.from('contacts') as any)
         .update({ status: newStatus, status_changed_at: now })
         .eq('id', contact.id);
@@ -306,13 +365,51 @@ export default function ContactDetail() {
         user_id: user.id,
         direction: 'outbound',
       });
-      // Optimistic update — reflect the new status instantly so the stage
-      // buttons re-render correctly without waiting for the async fetchContact.
       setContact((c: any) => c ? { ...c, status: newStatus, status_changed_at: now } : c);
       fetchContact();
       fetchTimeline();
-    } catch (err) {
-      console.error('Error advancing status:', err);
+    }
+  };
+  
+  // Handle marking inspection as complete
+  const handleMarkInspectionComplete = async () => {
+    if (!contact) return;
+    setAdvancing(true);
+    try {
+      await advanceStatus('inspection_complete', 'Inspection marked as completed');
+    } catch (error) {
+      console.error('Failed to mark inspection complete:', error);
+    } finally {
+      setAdvancing(false);
+    }
+  };
+  
+  // Handle estimate sharing
+  const handleShareEstimate = async () => {
+    if (!estimateData || !contact) return;
+    
+    setShareLoading(true);
+    try {
+      // Create shareable link or send email
+      const shareUrl = buildDocumentDisplayUrl(estimateData.filepath);
+      
+      // If on mobile, use native sharing
+      if (navigator.share) {
+        await navigator.share({
+          title: `Estimate for ${contact.name}`,
+          text: `Please review your estimate from TrussCTR`,
+          url: shareUrl
+        });
+      } else {
+        // Fallback - copy to clipboard
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Estimate link copied to clipboard');
+      }
+    } catch (error) {
+      console.error('Failed to share estimate:', error);
+      alert('Failed to share estimate');
+    } finally {
+      setShareLoading(false);
     }
   };
 
@@ -544,6 +641,28 @@ export default function ContactDetail() {
 
     setIsLifecycleSaving(true);
     try {
+      // Use statusManager for consistent status updates
+      try {
+        const { updateContactStatus } = await import('../lib/statusManager');
+        const result = await updateContactStatus(
+          contact.id,
+          contact.company_id,
+          'archived' as CustomerStatus,
+          user?.id,
+          'Customer archived. Previous project history remains on file.'
+        );
+        
+        if (result.success) {
+          navigate('/contacts', { replace: true });
+          return;
+        } else {
+          console.error('[MobileApp] Archive via statusManager failed:', result.error);
+        }
+      } catch (importError) {
+        console.error('[MobileApp] Could not import statusManager for archive:', importError);
+      }
+      
+      // Fallback to direct update
       const now = new Date().toISOString();
       const { error } = await (supabase.from('contacts') as any)
         .update({ status: 'archived', status_changed_at: now })
@@ -825,11 +944,17 @@ export default function ContactDetail() {
             const normalizedContactStatus = normalizePipelineStatus(contact.status);
             const inspectionDone =
               tab.id === 'inspection' &&
-              ['inspected', 'estimate_sent', 'approved', 'scheduled', 'in_progress', 'completed'].includes(normalizedContactStatus);
+              (getPipelineStageOrder().indexOf(normalizedContactStatus) >= getPipelineStageOrder().indexOf('inspection_completed') ||
+                contact.status === 'inspection_complete' ||
+                contact.status === 'inspection_completed' ||
+                contact.status === 'paid');
+            const inspectionColor = tab.id === 'inspection' && !isActive
+              ? (inspectionDone ? 'text-emerald-600' : 'text-rose-500')
+              : '';
             return (
-              <button key={tab.id} onClick={() => changeTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : 'border-transparent text-slate-400'}`}>
+              <button key={tab.id} onClick={() => changeTab(tab.id)} className={`py-4 flex items-center gap-2 border-b-2 transition-all ${isActive ? 'border-accent text-accent' : `border-transparent ${inspectionColor || 'text-slate-400'}`}`}>
                 <Icon size={18} />
-                <span className={`text-sm font-bold whitespace-nowrap ${tab.id === 'inspection' ? (inspectionDone ? 'text-emerald-600' : 'text-rose-500') : ''}`}>{tab.label}</span>
+                <span className="text-sm font-bold whitespace-nowrap">{tab.label}</span>
               </button>
             );
           })}
@@ -1014,6 +1139,67 @@ export default function ContactDetail() {
               style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}
             >
               <button onClick={() => setShowActions(false)} className="w-full bg-white border border-slate-200 py-3 rounded-xl text-sm font-bold">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Estimate Preview Modal */}
+      {showEstimatePreview && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-lg max-h-[80vh] bg-white rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h3 className="text-lg font-bold">Customer Estimate Preview</h3>
+              <button
+                onClick={() => setShowEstimatePreview(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[60vh]">
+              {estimateData ? (
+                <div className="space-y-4">
+                  <div className="text-center">
+                    <h4 className="text-xl font-bold text-primary">
+                      {contact?.first_name} {contact?.last_name}
+                    </h4>
+                    <p className="text-sm text-gray-600">
+                      {contact?.address}, {contact?.city}, {contact?.state} {contact?.zip}
+                    </p>
+                  </div>
+                  
+                  <div className="border rounded-lg p-4">
+                    <h5 className="font-bold mb-2">Project Estimate</h5>
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span>Project Value:</span>
+                        <span className="font-bold">{formatCurrency(contact?.project_value || 0)}</span>
+                      </div>
+                      {contact?.deductible && (
+                        <div className="flex justify-between">
+                          <span>Insurance Deductible:</span>
+                          <span className="font-bold">{formatCurrency(contact.deductible)}</span>
+                        </div>
+                      )}
+                      <div className="border-t pt-2 flex justify-between text-lg font-bold">
+                        <span>Total:</span>
+                        <span>{formatCurrency((contact?.project_value || 0) - (contact?.deductible || 0))}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">
+                      This estimate is valid for 30 days from the inspection date.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-gray-500">No estimate data available</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -2342,26 +2528,51 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onContactUpdated }
         direction: 'outbound',
       } as any);
       if (error) throw error;
-      // Move to canonical inspected status. If DB enum is older, fall back to legacy aliases.
-      const now = new Date().toISOString();
-      const { error: statusError } = await (supabase.from('contacts') as any)
-        .update({ status: 'inspected', status_changed_at: now })
-        .eq('id', contact.id);
-      if (statusError) {
-        console.error('completeInspection: inspected status failed, trying legacy fallback:', statusError);
-        const fallbackCandidates = ['inspection_complete', 'inspection_completed'];
-        let recovered = false;
-        for (const fallbackStatus of fallbackCandidates) {
-          const { error: fallbackError } = await (supabase.from('contacts') as any)
-            .update({ status: fallbackStatus, status_changed_at: now })
-            .eq('id', contact.id);
-          if (!fallbackError) {
-            recovered = true;
-            break;
-          }
-          console.error(`completeInspection: ${fallbackStatus} fallback failed:`, fallbackError);
+      
+      // Use statusManager for consistent status updates and auto-progression
+      try {
+        const { updateContactStatus } = await import('../lib/statusManager');
+        const result = await updateContactStatus(
+          contact.id,
+          contact.company_id,
+          'inspected' as CustomerStatus,
+          user?.id,
+          'Inspection completed in mobile app'
+        );
+        
+        if (result.success) {
+          setContact((c: any) => c ? { ...c, status: 'inspected' } : c);
+          fetchContact();
+          fetchTimeline();
+        } else {
+          console.error('[MobileApp] Inspection completion via statusManager failed:', result.error);
+          throw new Error(result.error);
         }
-        if (!recovered) throw statusError;
+      } catch (statusError) {
+        console.error('[MobileApp] Status manager failed, using fallback:', statusError);
+        
+        // Fallback to direct update with multiple status attempts
+        const now = new Date().toISOString();
+        const { error: directError } = await (supabase.from('contacts') as any)
+          .update({ status: 'inspected', status_changed_at: now })
+          .eq('id', contact.id);
+        
+        if (directError) {
+          console.error('completeInspection: inspected status failed, trying legacy fallback:', directError);
+          const fallbackCandidates = ['inspection_complete', 'inspection_completed'];
+          let recovered = false;
+          for (const fallbackStatus of fallbackCandidates) {
+            const { error: fallbackError } = await (supabase.from('contacts') as any)
+              .update({ status: fallbackStatus, status_changed_at: now })
+              .eq('id', contact.id);
+            if (!fallbackError) {
+              recovered = true;
+              break;
+            }
+            console.error(`completeInspection: ${fallbackStatus} fallback failed:`, fallbackError);
+          }
+          if (!recovered) throw directError;
+        }
       }
       try {
         const { data } = await (supabase.from('inspections') as any).upsert({
@@ -2415,13 +2626,31 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onContactUpdated }
       );
       if (commError) throw commError;
 
-      const now = new Date().toISOString();
-      const { error: statusError } = await timeout<any>(
-        (supabase.from('contacts') as any)
-          .update({ status: 'inspected', status_changed_at: now })
-          .eq('id', contact.id)
-      );
-      if (statusError) throw statusError;
+      // Use statusManager for consistent status updates
+      try {
+        const { updateContactStatus } = await import('../lib/statusManager');
+        const result = await updateContactStatus(
+          contact.id,
+          contact.company_id,
+          'inspected' as CustomerStatus,
+          user?.id,
+          'Inspection marked complete'
+        );
+        
+        if (!result.success) {
+          throw new Error(result.error);
+        }
+      } catch (statusError) {
+        console.error('[MobileApp] Status manager failed for inspection complete:', statusError);
+        // Fallback to direct update
+        const now = new Date().toISOString();
+        const { error: directError } = await timeout<any>(
+          (supabase.from('contacts') as any)
+            .update({ status: 'inspected', status_changed_at: now })
+            .eq('id', contact.id)
+        );
+        if (directError) throw directError;
+      }
 
       onDocumentsChanged?.();
       await onContactUpdated?.();
@@ -2969,6 +3198,19 @@ function StatusTab({ contact, onAdvance, canUndo }: { contact: any; onAdvance: (
           <p className="text-sm font-bold text-emerald-700">Job Complete — Paid</p>
           <p className="text-xs text-emerald-600 mt-1">This job has reached the final stage.</p>
         </div>
+      )}
+      
+      {/* Inspection Complete Button - Available outside inspection area */}
+      {(contact.status === 'appt_set' || contact.status === 'inspection_scheduled') && !isInspectionCompleted && (
+        <button
+          type="button"
+          onClick={handleMarkInspectionComplete}
+          disabled={advancing}
+          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+        >
+          <Shield size={18} />
+          {advancing ? 'Marking Complete...' : 'Mark Inspection Complete'}
+        </button>
       )}
 
       {/* Full pipeline — past stages show as done, future stages are tappable */}
@@ -4328,11 +4570,42 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
   const [creatingWorkOrder, setCreatingWorkOrder] = useState(false);
   const [loadingArtifacts, setLoadingArtifacts] = useState(true);
   const [undoPaymentTarget, setUndoPaymentTarget] = useState<'deposit' | 'final' | null>(null);
+  const [showEstimatePreview, setShowEstimatePreview] = useState(false);
+  const [shareLoading, setShareLoading] = useState(false);
 
   const isFinancialDocument = (doc: any) => {
     const type = String(doc?.type || '').toLowerCase();
     const name = String(doc?.name || '').toLowerCase();
     return ['estimate', 'invoice', 'contract'].includes(type) || /(invoice|estimate|contract|payment|receipt|finance)/.test(name);
+  };
+  
+  // Handle estimate sharing
+  const handleShareEstimate = async () => {
+    if (!latestEstimate || !contact) return;
+    
+    setShareLoading(true);
+    try {
+      // Create shareable link or send email
+      const shareUrl = `${window.location.origin}/estimates/${latestEstimate.id}/preview`;
+      
+      // If on mobile, use native sharing
+      if (navigator.share) {
+        await navigator.share({
+          title: `Estimate for ${contact.name}`,
+          text: `Please review your estimate from TrussCTR`,
+          url: shareUrl
+        });
+      } else {
+        // Fallback - copy to clipboard
+        await navigator.clipboard.writeText(shareUrl);
+        alert('Estimate link copied to clipboard');
+      }
+    } catch (error) {
+      console.error('Failed to share estimate:', error);
+      alert('Failed to share estimate');
+    } finally {
+      setShareLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -4424,9 +4697,30 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
         const targetIdx = PIPELINE.indexOf(targetStatus);
         // Only advance — never move backwards
         if (targetIdx > currentIdx) {
-          await (supabase.from('contacts') as any)
-            .update({ status: targetStatus, status_changed_at: new Date().toISOString() })
-            .eq('id', contact.id);
+          try {
+            const { updateContactStatus } = await import('../lib/statusManager');
+            const result = await updateContactStatus(
+              contact.id,
+              contact.company_id,
+              targetStatus,
+              user?.id,
+              `${kind === 'deposit' ? 'Deposit' : 'Final payment'} ${nextPaid ? 'recorded' : 'marked unpaid'} in mobile app.`
+            );
+            
+            if (!result.success) {
+              console.error('[MobileApp] Payment status update via statusManager failed:', result.error);
+              // Fallback to direct update
+              await (supabase.from('contacts') as any)
+                .update({ status: targetStatus, status_changed_at: new Date().toISOString() })
+                .eq('id', contact.id);
+            }
+          } catch (statusError) {
+            console.error('[MobileApp] Could not use statusManager for payment update:', statusError);
+            // Fallback to direct update
+            await (supabase.from('contacts') as any)
+              .update({ status: targetStatus, status_changed_at: new Date().toISOString() })
+              .eq('id', contact.id);
+          }
         }
       }
 
@@ -4472,9 +4766,31 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
         .single();
       if (error) throw error;
 
-      await (supabase.from('contacts') as any)
-        .update({ status: 'scheduled', status_changed_at: new Date().toISOString() })
-        .eq('id', contact.id);
+      // Use statusManager for consistent status updates
+      try {
+        const { updateContactStatus } = await import('../lib/statusManager');
+        const result = await updateContactStatus(
+          contact.id,
+          contact.company_id,
+          'scheduled' as CustomerStatus,
+          user?.id,
+          `Work order created in mobile app: ${data.title}`
+        );
+        
+        if (!result.success) {
+          console.error('[MobileApp] Work order status update via statusManager failed:', result.error);
+          // Fallback to direct update  
+          await (supabase.from('contacts') as any)
+            .update({ status: 'scheduled', status_changed_at: new Date().toISOString() })
+            .eq('id', contact.id);
+        }
+      } catch (statusError) {
+        console.error('[MobileApp] Could not use statusManager for work order:', statusError);
+        // Fallback to direct update
+        await (supabase.from('contacts') as any)
+          .update({ status: 'scheduled', status_changed_at: new Date().toISOString() })
+          .eq('id', contact.id);
+      }
 
       if (userId) {
         await (supabase.from('communications') as any).insert({
@@ -4553,6 +4869,26 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
                 View Estimates
               </button>
             </div>
+            {/* New estimate preview and share buttons */}
+            {latestEstimate && (
+              <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                <button 
+                  onClick={() => setShowEstimatePreview(true)} 
+                  className="flex items-center justify-center gap-2 rounded-xl bg-slate-100 py-3 text-xs font-bold text-slate-700"
+                >
+                  <Eye className="w-3 h-3" />
+                  Customer View
+                </button>
+                <button 
+                  onClick={handleShareEstimate}
+                  disabled={shareLoading}
+                  className="flex items-center justify-center gap-2 rounded-xl bg-accent py-3 text-xs font-bold text-white disabled:opacity-50"
+                >
+                  <Share2 className="w-3 h-3" />
+                  {shareLoading ? 'Sharing...' : 'Share'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="card p-5 space-y-4">

@@ -185,7 +185,7 @@ async function validateStatusChange(contactId: string, newStatus: string, oldSta
   // Get contact data for validation
   const { data: contact, error } = await supabase
     .from('contacts')
-    .select('id, status, contact_type, is_retail, claim_number, insurance_company')
+    .select('id, status, is_retail, claim_number, insurance_company')
     .eq('id', contactId)
     .single();
 
