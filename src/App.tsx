@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { BrowserRouter, HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import ScrollToTop from './components/ScrollToTop';
 import { Capacitor } from '@capacitor/core';
 import { SplashScreen } from '@capacitor/splash-screen';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -90,6 +91,7 @@ function AppRoutes() {
 
   return (
     <Suspense fallback={<AppLoadingScreen message="Loading screen..." />}>
+      <ScrollToTop />
       <Routes>
         {/* Always-accessible routes — work with or without a session */}
         <Route path="/reset-password" element={<ResetPassword />} />
