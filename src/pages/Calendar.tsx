@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, MapPin, User, Plus, X, Check } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, MapPin, Trash2, User, Plus, X, Check } from 'lucide-react';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, parseISO } from 'date-fns';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -14,8 +14,17 @@ type ContactRow = Database['public']['Tables']['contacts']['Row'];
 type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
 
 export default function CalendarPage() {
+  const addHourToTime = (timeValue: string) => {
+    const [hours, minutes] = timeValue.split(':').map(Number);
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return '10:00';
+    const next = new Date();
+    next.setHours(hours, minutes, 0, 0);
+    next.setMinutes(next.getMinutes() + 60);
+    return format(next, 'HH:mm');
+  };
+
   const navigate = useNavigate();
-  const { profile, loading: loadingAuth } = useAuth();
+  const { profile, user, loading: loadingAuth } = useAuth();
   const [searchParams] = useSearchParams();
   const contactId = searchParams.get('contactId');
   const actionParam = searchParams.get('action');
@@ -34,12 +43,16 @@ export default function CalendarPage() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [events, setEvents] = useState<PipelineEvent[]>([]);
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Add-event sheet state
   const [sheetOpen, setSheetOpen] = useState(false);
   const [eventDate, setEventDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [eventTime, setEventTime] = useState('09:00');
+  const [eventEndTime, setEventEndTime] = useState('10:00');
+  const [selectedContactId, setSelectedContactId] = useState(contactId || '');
+  const [contactSearch, setContactSearch] = useState('');
   const [eventNotes, setEventNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedOk, setSavedOk] = useState(false);
@@ -47,9 +60,11 @@ export default function CalendarPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Reschedule sheet state
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rescheduleEvent, setRescheduleEvent] = useState<PipelineEvent | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleTime, setRescheduleTime] = useState('');
+  const [rescheduleEndTime, setRescheduleEndTime] = useState('');
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const [rescheduleSavedOk, setRescheduleSavedOk] = useState(false);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
@@ -67,10 +82,19 @@ export default function CalendarPage() {
     }
   }, [eventDate, eventTime]);
 
+  useEffect(() => {
+    setSelectedContactId(contactId || '');
+  }, [contactId]);
+
   const fetchEvents = async () => {
     if (!profile?.company_id) return;
     setLoading(true);
     setLoadError(null);
+    console.log('[Calendar] fetchEvents:start', {
+      companyId: profile.company_id,
+      highlightContactId: highlightContactId ?? null,
+      actionParam: actionParam ?? null,
+    });
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = supabase as any;
@@ -83,6 +107,16 @@ export default function CalendarPage() {
         supabase.from('work_orders').select('*').eq('company_id', profile.company_id).order('scheduled_date', { ascending: true }),
         db.from('appointments').select('*').eq('company_id', profile.company_id),
       ]);
+
+      console.log('[Calendar] fetchEvents:query_status', {
+        companyId: profile.company_id,
+        contactsCount: contacts?.length ?? 0,
+        contactsError: contactError?.message ?? null,
+        workOrdersCount: workOrders?.length ?? 0,
+        workOrdersError: workOrderError?.message ?? null,
+        appointmentsCount: appointments?.length ?? 0,
+        appointmentsError: appointmentError?.message ?? null,
+      });
 
       if (contactError) throw contactError;
       if (workOrderError) throw workOrderError;
@@ -99,6 +133,7 @@ export default function CalendarPage() {
 
       const workOrderRows = (workOrders || []) as WorkOrderRow[];
       const contactRows = (contacts || []) as ContactRow[];
+      setContacts(contactRows);
       const workOrdersByContact = new Map<string, WorkOrderRow[]>();
       for (const order of workOrderRows) {
         const current = workOrdersByContact.get(order.contact_id) || [];
@@ -136,19 +171,30 @@ export default function CalendarPage() {
             eventType = 'build';
           }
 
+          // Mobile rows may come back with date/time columns or only start_time/end_time.
+          const startDate = apt.start_time ? new Date(apt.start_time) : null;
+          const derivedDate = !apt.date && startDate && !Number.isNaN(startDate.getTime())
+            ? startDate.toISOString().split('T')[0]
+            : apt.date;
+          const derivedTime = !apt.time && startDate && !Number.isNaN(startDate.getTime())
+            ? `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}:00`
+            : apt.time;
+
           // Build a safe ISO datetime — apt.time may be "HH:mm", "HH:mm:ss", or null
-          const timeStr = apt.time
-            ? apt.time.length === 5   // "HH:mm"
-              ? `${apt.time}:00`
-              : apt.time              // already "HH:mm:ss"
-            : '09:00:00';             // fallback when time is missing
+          const timeStr = derivedTime
+            ? derivedTime.length === 5   // "HH:mm"
+              ? `${derivedTime}:00`
+              : derivedTime              // already "HH:mm:ss"
+            : '09:00:00';                // fallback when time is missing
+          const eventDate = derivedDate || new Date().toISOString().split('T')[0];
 
           return {
             id: `apt-${apt.id}`,
             contactId: apt.contact_id,
             contactName,
             title: apt.title || 'Appointment',
-            date: `${apt.date}T${timeStr}`,
+            date: `${eventDate}T${timeStr}`,
+            endDate: apt.end_time || undefined,
             type: eventType,
             location: apt.location || location,
             crew: apt.assigned_to || null,   // required by PipelineEvent
@@ -167,6 +213,13 @@ export default function CalendarPage() {
       }
       merged.sort((left, right) => new Date(left.date).getTime() - new Date(right.date).getTime());
 
+      console.log('[Calendar] fetchEvents:merged', {
+        companyId: profile.company_id,
+        pipelineEventCount: nextEvents.length,
+        appointmentEventCount: appointmentEvents.length,
+        mergedCount: merged.length,
+        selectedDate: selectedDate.toISOString(),
+      });
       setEvents(merged);
 
       if (!actionParam) {
@@ -196,23 +249,42 @@ export default function CalendarPage() {
   }, [profile?.company_id, loadingAuth, displayContactFilter]);
 
   const handleSaveEvent = async () => {
-    if (!saveContactId || !profile?.company_id) {
-      setSaveError('Missing customer context. Open this flow from a customer profile and try again.');
+    const targetContactId = saveContactId || selectedContactId;
+    if (!targetContactId || !profile?.company_id) {
+      setSaveError('Choose a customer before saving this calendar appointment.');
+      console.warn('[Calendar] handleSaveEvent:missing_context', {
+        saveContactId: targetContactId ?? null,
+        companyId: profile?.company_id ?? null,
+      });
       return;
     }
-    if (!eventDate || !eventTime) {
-      setSaveError('Date and time are required.');
+    if (!eventDate || !eventTime || !eventEndTime) {
+      setSaveError('Start and end time are required.');
       return;
     }
 
     const parsedDateTime = new Date(`${eventDate}T${eventTime}`);
+    const parsedEndDateTime = new Date(`${eventDate}T${eventEndTime}`);
     if (Number.isNaN(parsedDateTime.getTime())) {
       setSaveError('Selected date/time is invalid. Please choose a valid schedule slot.');
+      return;
+    }
+    if (Number.isNaN(parsedEndDateTime.getTime()) || parsedEndDateTime <= parsedDateTime) {
+      setSaveError('End time must be after the start time.');
       return;
     }
 
     setSaveError(null);
     setSaving(true);
+    console.log('[Calendar] handleSaveEvent:start', {
+      companyId: profile.company_id,
+      saveContactId: targetContactId,
+      eventDate,
+      eventTime,
+      eventEndTime,
+      nextStepParam,
+      decodedLabel,
+    });
 
     // Helper: race any Supabase promise against a 15-second timeout
     const withTimeout = <T,>(promise: Promise<T>): Promise<T> =>
@@ -225,46 +297,47 @@ export default function CalendarPage() {
 
     try {
       const isoDateTime = parsedDateTime.toISOString();
-      const isMilestone = MILESTONE_TYPES.includes(nextStepParam as ContactMilestoneId);
+      const endDateTime = parsedEndDateTime.toISOString();
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const db = supabase as any;
+      const appointmentType = MILESTONE_TYPES.includes(nextStepParam as ContactMilestoneId)
+        ? nextStepParam
+        : 'inspection';
 
-      if (isMilestone) {
-        // Save as a contact schedule milestone (stored in notes field)
-        const { data: contactData, error: fetchErr } = await withTimeout<any>(
-          db.from('contacts').select('notes').eq('id', saveContactId).single()
-        );
+      console.log('[Calendar] handleSaveEvent:mode', { mode: 'appointment', nextStepParam, appointmentType });
 
-        if (fetchErr) throw fetchErr;
-        if (!contactData) throw new Error('Contact not found');
+      const { data: contactData, error: contactFetchErr } = await withTimeout<any>(
+        db.from('contacts').select('address, city, state, zip').eq('id', targetContactId).single()
+      );
 
-        const { schedule, plainNotes } = parseContactSchedule(
-          (contactData as { notes: string | null }).notes
-        );
-        const updated = updateScheduleMilestone(schedule, nextStepParam as ContactMilestoneId, { date: isoDateTime });
-        const newNotes = serializeContactSchedule(updated, eventNotes || plainNotes);
+      if (contactFetchErr) throw contactFetchErr;
 
-        const { error: updateErr } = await withTimeout<any>(
-          db.from('contacts').update({ notes: newNotes }).eq('id', saveContactId)
-        );
+      const location = [
+        (contactData as { address?: string | null } | null)?.address,
+        (contactData as { city?: string | null } | null)?.city,
+        (contactData as { state?: string | null } | null)?.state,
+        (contactData as { zip?: string | null } | null)?.zip,
+      ]
+        .filter(Boolean)
+        .join(', ') || null;
 
-        if (updateErr) throw updateErr;
-      } else {
-        // Save as a work order
-        const { error: insertErr } = await withTimeout<any>(
-          db.from('work_orders').insert({
-            contact_id: saveContactId,
-            company_id: profile.company_id,
-            title: decodedLabel,
-            scheduled_date: isoDateTime,
-            notes: eventNotes || null,
-            status: 'scheduled',
-          })
-        );
+      const { error: insertErr } = await withTimeout<any>(
+        db.from('appointments').insert({
+          contact_id: targetContactId,
+          company_id: profile.company_id,
+          title: decodedLabel,
+          type: appointmentType,
+          status: 'scheduled',
+          start_time: isoDateTime,
+          end_time: endDateTime,
+          notes: eventNotes || null,
+          location,
+          assigned_to: user?.id || null,
+        })
+      );
 
-        if (insertErr) throw insertErr;
-      }
+      if (insertErr) throw insertErr;
 
       // Advance contact pipeline status when a key step is scheduled
       const STATUS_ADVANCEMENT: Record<string, { from: string[]; to: string }> = {
@@ -272,18 +345,18 @@ export default function CalendarPage() {
         build:      { from: ['approved', 'signed_won'],        to: 'scheduled' },
       };
       const advancement = STATUS_ADVANCEMENT[nextStepParam];
-      if (advancement && saveContactId) {
+      if (advancement && targetContactId) {
         try {
           const { data: contactRow } = await db
             .from('contacts')
             .select('status')
-            .eq('id', saveContactId)
+            .eq('id', targetContactId)
             .single();
           if (contactRow && advancement.from.includes((contactRow as any).status)) {
             await db
               .from('contacts')
               .update({ status: advancement.to, status_changed_at: new Date().toISOString() })
-              .eq('id', saveContactId);
+              .eq('id', targetContactId);
           }
         } catch (err) {
           console.error('Error advancing contact status from calendar:', err);
@@ -292,17 +365,28 @@ export default function CalendarPage() {
 
       setSavedOk(true);
       setSaveError(null);
+      console.log('[Calendar] handleSaveEvent:success', {
+        companyId: profile.company_id,
+        saveContactId: targetContactId,
+      });
       await fetchEvents();
 
-      // Close sheet and navigate back to contact after brief success flash
+      // Close sheet and only navigate back when launched from a customer context.
       setTimeout(() => {
         setSavedOk(false);
         setSheetOpen(false);
-        navigate(`/contacts/${saveContactId}`);
+        if (saveContactId) {
+          navigate(`/contacts/${saveContactId}`);
+        }
       }, 1200);
     } catch (err) {
       console.error('Failed to save event:', err);
       const message = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[Calendar] handleSaveEvent:error', {
+        companyId: profile?.company_id ?? null,
+        saveContactId: targetContactId ?? null,
+        message,
+      });
       setSaveError(`Save failed. ${message}`);
     } finally {
       setSaving(false);
@@ -312,8 +396,15 @@ export default function CalendarPage() {
   const handleReschedule = async () => {
     if (!rescheduleEvent || !rescheduleDate || !rescheduleTime) return;
     const parsedDT = new Date(`${rescheduleDate}T${rescheduleTime}`);
+    const parsedEndDT = rescheduleEvent.id.startsWith('apt-')
+      ? new Date(`${rescheduleDate}T${rescheduleEndTime}`)
+      : null;
     if (Number.isNaN(parsedDT.getTime())) {
       setRescheduleError('Invalid date/time. Please try again.');
+      return;
+    }
+    if (rescheduleEvent.id.startsWith('apt-') && (!rescheduleEndTime || !parsedEndDT || Number.isNaN(parsedEndDT.getTime()) || parsedEndDT <= parsedDT)) {
+      setRescheduleError('End time must be after the start time.');
       return;
     }
     setRescheduleError(null);
@@ -333,10 +424,12 @@ export default function CalendarPage() {
       const newISO = parsedDT.toISOString();
 
       if (rescheduleEvent.id.startsWith('apt-')) {
-        // appointments table — store date and time separately
+        // appointments table — store start/end timestamps
         const aptId = rescheduleEvent.id.replace('apt-', '');
-        const timeStr = `${rescheduleTime}:00`;
-        const { error } = await withTimeout<any>(db.from('appointments').update({ date: rescheduleDate, time: timeStr }).eq('id', aptId));
+        const endISO = parsedEndDT!.toISOString();
+        const { error } = await withTimeout<any>(
+          db.from('appointments').update({ start_time: newISO, end_time: endISO }).eq('id', aptId)
+        );
         if (error) throw error;
       } else if (rescheduleEvent.source === 'work_order') {
         // work_orders table — single ISO datetime column
@@ -368,12 +461,50 @@ export default function CalendarPage() {
     }
   };
 
+  const handleDeleteEvent = async (event: PipelineEvent) => {
+    setDeletingId(event.id);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const db = supabase as any;
+      if (event.id.startsWith('apt-')) {
+        const aptId = event.id.replace('apt-', '');
+        await db.from('appointments').delete().eq('id', aptId);
+      } else if (event.source === 'work_order') {
+        await db.from('work_orders').delete().eq('id', event.id);
+      } else {
+        const milestoneId = event.type as ContactMilestoneId;
+        const { data: contactData } = await db.from('contacts').select('notes').eq('id', event.contactId).single();
+        if (contactData) {
+          const { schedule, plainNotes } = parseContactSchedule(contactData.notes);
+          const updated = updateScheduleMilestone(schedule, milestoneId, { date: undefined });
+          const newNotes = serializeContactSchedule(updated, plainNotes);
+          await db.from('contacts').update({ notes: newNotes }).eq('id', event.contactId);
+        }
+      }
+      await fetchEvents();
+    } catch (err) {
+      console.error('Delete event failed:', err);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const filteredEvents = useMemo(
     () => events.filter((event) => isSameDay(parseISO(event.date), selectedDate)),
     [events, selectedDate]
   );
 
   const upcomingEvents = useMemo(() => getUpcomingPipelineEvents(events).slice(0, 5), [events]);
+  const filteredContacts = useMemo(() => {
+    const query = contactSearch.trim().toLowerCase();
+    if (!query) return contacts;
+
+    return contacts.filter((contact) => {
+      const fullName = `${contact.first_name} ${contact.last_name}`.trim().toLowerCase();
+      const address = `${contact.address || ''} ${contact.city || ''} ${contact.state || ''} ${contact.zip || ''}`.toLowerCase();
+      return fullName.includes(query) || address.includes(query);
+    });
+  }, [contactSearch, contacts]);
 
   const renderHeader = () => (
     <div className="mb-8 flex justify-between items-center">
@@ -538,6 +669,12 @@ export default function CalendarPage() {
             <button
               onClick={() => {
                 setSaveError(null);
+                setSavedOk(false);
+                if (!saveContactId) {
+                  setSelectedContactId('');
+                  setContactSearch('');
+                }
+                setEventEndTime(addHourToTime(eventTime));
                 setSheetOpen(true);
               }}
               className="flex items-center gap-1 bg-accent text-white text-xs font-bold px-3 py-1.5 rounded-xl active:scale-95 transition-transform"
@@ -552,53 +689,71 @@ export default function CalendarPage() {
             filteredEvents.map((event) => {
               const isHighlighted = highlightContactId && event.contactId === highlightContactId;
               return (
-              <button
+              <div
                 key={event.id}
-                onClick={() => {
-                  const d = parseISO(event.date);
-                  setRescheduleEvent(event);
-                  setRescheduleDate(format(d, 'yyyy-MM-dd'));
-                  setRescheduleTime(format(d, 'HH:mm'));
-                  setRescheduleError(null);
-                  setRescheduleSavedOk(false);
-                }}
-                className={`card w-full p-4 text-left active:bg-slate-50 transition-colors border-l-4 ${
+                className={`card flex items-stretch border-l-4 ${
                   isHighlighted ? 'border-l-green-500' : highlightContactId ? 'border-l-blue-400' : 'border-l-transparent'
                 }`}
               >
-                <div className="flex gap-4">
-                  <div className={`w-1 rounded-full ${isHighlighted ? 'bg-green-500' : event.type === 'inspection' ? 'bg-amber-500' : event.type === 'build' ? 'bg-teal-500' : 'bg-blue-400'}`} />
-                  <div className="flex-1 space-y-2">
-                    <div className="flex justify-between items-start gap-3">
-                      <div>
-                        <h4 className="font-bold text-primary text-sm">{event.title}</h4>
-                        {isHighlighted && (
-                          <span className="text-[9px] font-black uppercase tracking-widest text-green-600">This Customer</span>
+                <button
+                  onClick={() => {
+                    const d = parseISO(event.date);
+                    setRescheduleEvent(event);
+                    setRescheduleDate(format(d, 'yyyy-MM-dd'));
+                    setRescheduleTime(format(d, 'HH:mm'));
+                    setRescheduleEndTime(
+                      event.endDate && !Number.isNaN(new Date(event.endDate).getTime())
+                        ? format(new Date(event.endDate), 'HH:mm')
+                        : addHourToTime(format(d, 'HH:mm'))
+                    );
+                    setRescheduleError(null);
+                    setRescheduleSavedOk(false);
+                  }}
+                  className="flex-1 p-4 text-left active:bg-slate-50 transition-colors"
+                >
+                  <div className="flex gap-4">
+                    <div className={`w-1 rounded-full shrink-0 ${isHighlighted ? 'bg-green-500' : event.type === 'inspection' ? 'bg-amber-500' : event.type === 'build' ? 'bg-teal-500' : 'bg-blue-400'}`} />
+                    <div className="flex-1 space-y-2">
+                      <div className="flex justify-between items-start gap-3">
+                        <div>
+                          <h4 className="font-bold text-primary text-sm">{event.title}</h4>
+                          {isHighlighted && (
+                            <span className="text-[9px] font-black uppercase tracking-widest text-green-600">This Customer</span>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
+                          <Clock size={10} /> {format(parseISO(event.date), 'p')}{event.endDate ? ` - ${format(parseISO(event.endDate), 'p')}` : ''}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <User size={12} />
+                          <span className="text-[11px] font-medium">{event.contactName}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <MapPin size={12} />
+                          <span className="text-[11px] font-medium truncate max-w-[150px]">{event.location || 'Location pending'}</span>
+                        </div>
+                        {event.crew && (
+                          <div className="flex items-center gap-1.5 text-accent">
+                            <User size={12} />
+                            <span className="text-[11px] font-bold">Crew: {event.crew}</span>
+                          </div>
                         )}
                       </div>
-                      <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1">
-                        <Clock size={10} /> {format(parseISO(event.date), 'p')}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                      <div className="flex items-center gap-1.5 text-slate-500">
-                        <User size={12} />
-                        <span className="text-[11px] font-medium">{event.contactName}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-slate-500">
-                        <MapPin size={12} />
-                        <span className="text-[11px] font-medium truncate max-w-[150px]">{event.location || 'Location pending'}</span>
-                      </div>
-                      {event.crew && (
-                        <div className="flex items-center gap-1.5 text-accent">
-                          <User size={12} />
-                          <span className="text-[11px] font-bold">Crew: {event.crew}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
-                </div>
-              </button>
+                </button>
+                <button
+                  onClick={() => handleDeleteEvent(event)}
+                  disabled={deletingId === event.id}
+                  className="flex items-center justify-center w-10 shrink-0 pr-2 text-slate-300 active:text-red-500 active:bg-red-50 transition-colors disabled:opacity-40 rounded-r-2xl"
+                >
+                  {deletingId === event.id
+                    ? <div className="h-3.5 w-3.5 rounded-full border-2 border-slate-300 border-t-transparent animate-spin" />
+                    : <Trash2 size={15} />}
+                </button>
+              </div>
               );
             })
           ) : (
@@ -628,7 +783,7 @@ export default function CalendarPage() {
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={handleReschedule}
-                    disabled={rescheduleSaving || rescheduleSavedOk || !rescheduleDate || !rescheduleTime}
+                    disabled={rescheduleSaving || rescheduleSavedOk || !rescheduleDate || !rescheduleTime || (rescheduleEvent.id.startsWith('apt-') && !rescheduleEndTime)}
                     className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50 flex items-center gap-1.5 ${
                       rescheduleSavedOk ? 'bg-green-500 text-white' : 'bg-accent text-white'
                     }`}
@@ -684,10 +839,22 @@ export default function CalendarPage() {
                 />
               </div>
 
+              {rescheduleEvent.id.startsWith('apt-') && (
+                <div className="space-y-1.5 mb-6">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">End Time</label>
+                  <input
+                    type="time"
+                    value={rescheduleEndTime}
+                    onChange={(e) => { setRescheduleError(null); setRescheduleEndTime(e.target.value); }}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                </div>
+              )}
+
               {/* Large save button in scroll area — always reachable */}
               <button
                 onClick={handleReschedule}
-                disabled={rescheduleSaving || rescheduleSavedOk || !rescheduleDate || !rescheduleTime}
+                disabled={rescheduleSaving || rescheduleSavedOk || !rescheduleDate || !rescheduleTime || (rescheduleEvent.id.startsWith('apt-') && !rescheduleEndTime)}
                 className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 mb-4 ${
                   rescheduleSavedOk ? 'bg-green-500 text-white' : 'bg-accent text-white'
                 }`}
@@ -739,7 +906,7 @@ export default function CalendarPage() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleSaveEvent}
-                    disabled={saving || savedOk || !eventDate || !eventTime}
+                    disabled={saving || savedOk || !eventDate || !eventTime || !eventEndTime || (!saveContactId && !selectedContactId)}
                     className={`rounded-xl px-3 py-2 text-xs font-black uppercase tracking-widest transition-all active:scale-95 ${
                       savedOk
                         ? 'bg-green-500 text-white'
@@ -767,6 +934,45 @@ export default function CalendarPage() {
                 </div>
               )}
 
+              {!saveContactId && (
+                <div className="mt-5 space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Search Customer</label>
+                  <input
+                    type="text"
+                    value={contactSearch}
+                    onChange={(e) => {
+                      setSaveError(null);
+                      setContactSearch(e.target.value);
+                    }}
+                    placeholder="Search by name or address"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Customer</label>
+                  <div className="relative">
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <select
+                      value={selectedContactId}
+                      onChange={(e) => {
+                        setSaveError(null);
+                        setSelectedContactId(e.target.value);
+                      }}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent appearance-none"
+                    >
+                      <option value="">Select customer</option>
+                      {filteredContacts.map((contact) => (
+                        <option key={contact.id} value={contact.id}>
+                          {`${contact.first_name} ${contact.last_name}`.trim()}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {contactSearch && filteredContacts.length === 0 && (
+                    <p className="text-xs font-medium text-slate-500">No customers match that search.</p>
+                  )}
+                </div>
+              )}
+
               {/* Date */}
               <div className="mt-5 space-y-1.5">
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Date</label>
@@ -790,6 +996,19 @@ export default function CalendarPage() {
                   onChange={(e) => {
                     setSaveError(null);
                     setEventTime(e.target.value);
+                  }}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+
+              <div className="mt-5 space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest">End Time</label>
+                <input
+                  type="time"
+                  value={eventEndTime}
+                  onChange={(e) => {
+                    setSaveError(null);
+                    setEventEndTime(e.target.value);
                   }}
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-base font-medium text-primary focus:outline-none focus:ring-2 focus:ring-accent"
                 />
@@ -846,7 +1065,7 @@ export default function CalendarPage() {
                               {format(parseISO(event.date), 'MMM d')}
                             </p>
                             <p className="text-[10px] text-slate-400">
-                              {format(parseISO(event.date), 'p')}
+                              {format(parseISO(event.date), 'p')}{event.endDate ? ` - ${format(parseISO(event.endDate), 'p')}` : ''}
                             </p>
                           </div>
                         </div>
@@ -863,7 +1082,7 @@ export default function CalendarPage() {
             >
               <button
                 onClick={handleSaveEvent}
-                disabled={saving || savedOk || !eventDate || !eventTime}
+                disabled={saving || savedOk || !eventDate || !eventTime || !eventEndTime || (!saveContactId && !selectedContactId)}
                 className={`w-full rounded-2xl py-4 text-sm font-black uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${
                   savedOk
                     ? 'bg-green-500 text-white'
@@ -875,7 +1094,7 @@ export default function CalendarPage() {
                 ) : saving ? (
                   <div className="w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
                 ) : (
-                  `Add ${decodedLabel} to Calendar`
+                  saveContactId ? `Add ${decodedLabel} to Calendar` : 'Add Appointment To Calendar'
                 )}
               </button>
             </div>

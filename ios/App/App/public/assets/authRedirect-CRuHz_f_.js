@@ -1,0 +1,1 @@
+function e(r){const t=r.trim();return t?t.replace(/\/+$/,""):null}function o(){const r=e("https://crm-kanban-integrate.vercel.app");return r?`${r}/reset-password`:window.location.protocol==="http:"||window.location.protocol==="https:"?`${window.location.origin}/reset-password`:null}export{o as g};
