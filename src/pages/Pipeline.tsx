@@ -15,15 +15,15 @@ type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
 
 // Updated to match web app pipeline exactly
 const STAGES: StageConfig[] = [
-  { statuses: ['prospect', 'lead'], label: 'Leads', color: 'bg-blue-500' },
+  { statuses: ['prospect', 'new_lead', 'lead'], label: 'Leads', color: 'bg-blue-500' },
   { statuses: ['contacted'], label: 'Contacted', color: 'bg-sky-500' },
-  { statuses: ['appt_set'], label: 'Appointment Set', color: 'bg-indigo-500' },
-  { statuses: ['inspection_completed'], label: 'Inspection', color: 'bg-cyan-500' },
-  { statuses: ['estimating'], label: 'Estimating', color: 'bg-purple-500' },
+  { statuses: ['appt_set', 'appointment_set', 'inspection_scheduled', 'claim_filed', 'adjuster_scheduled'], label: 'Appointment Set', color: 'bg-indigo-500' },
+  { statuses: ['inspection_completed', 'inspection_complete', 'inspected'], label: 'Inspection', color: 'bg-cyan-500' },
+  { statuses: ['estimating', 'supplement_filed'], label: 'Estimating', color: 'bg-purple-500' },
   { statuses: ['estimate_sent'], label: 'Estimate Sent', color: 'bg-amber-500' },
   { statuses: ['contingency'], label: 'Follow Up', color: 'bg-orange-500' },
   { statuses: ['approved'], label: 'Approved', color: 'bg-teal-500' },
-  { statuses: ['signed'], label: 'Signed', color: 'bg-emerald-500' },
+  { statuses: ['signed', 'signed_won'], label: 'Signed', color: 'bg-emerald-500' },
   { statuses: ['ordering_material'], label: 'Ordering Material', color: 'bg-yellow-500' },
   { statuses: ['in_progress'], label: 'In Progress', color: 'bg-primary' },
   { statuses: ['build_phase'], label: 'Build Phase', color: 'bg-red-500' },

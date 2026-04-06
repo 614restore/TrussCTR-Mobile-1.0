@@ -1,0 +1,64 @@
+default_platform(:ios)
+
+platform :ios do
+
+  desc "Build and upload to TestFlight"
+  lane :beta do
+    # Sync signing certificates and provisioning profiles
+    sync_code_signing(
+      type: "appstore",
+      app_identifier: "com.restore614.trussctr",
+      username: "jeffrey88newell@gmail.com",
+      team_id: "MSHVPW5B8U",
+      readonly: false
+    )
+
+    # Bump build number automatically
+    increment_build_number(
+      xcodeproj: "ios/App/App.xcodeproj"
+    )
+
+    # Build the app
+    build_app(
+      scheme: "App",
+      workspace: "ios/App/App.xcworkspace",
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "TrussCTR.ipa",
+      clean: true
+    )
+
+    # Upload to TestFlight
+    upload_to_testflight(
+      username: "jeffrey88newell@gmail.com",
+      app_identifier: "com.restore614.trussctr",
+      team_id: "MSHVPW5B8U",
+      skip_waiting_for_build_processing: true
+    )
+  end
+
+  desc "Build only (no upload)"
+  lane :build_only do
+    sync_code_signing(
+      type: "appstore",
+      app_identifier: "com.restore614.trussctr",
+      username: "jeffrey88newell@gmail.com",
+      team_id: "MSHVPW5B8U",
+      readonly: false
+    )
+
+    increment_build_number(
+      xcodeproj: "ios/App/App.xcodeproj"
+    )
+
+    build_app(
+      scheme: "App",
+      workspace: "ios/App/App.xcworkspace",
+      export_method: "app-store",
+      output_directory: "./build",
+      output_name: "TrussCTR.ipa",
+      clean: true
+    )
+  end
+
+end

@@ -7,6 +7,7 @@ export type PipelineEvent = {
   title: string;
   type: 'inspection' | 'build' | 'cleanup' | 'pick_up_check' | 'coc';
   date: string;
+  endDate?: string;
   location: string;
   crew: string | null;
   source: 'schedule' | 'work_order';
