@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Clock, MapPin, Trash2, User, Plus, X, Check } from 'lucide-react';
+import PullToRefresh from '../components/PullToRefresh';
 import { format, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, isSameMonth, isSameDay, parseISO } from 'date-fns';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -607,6 +608,7 @@ export default function CalendarPage() {
   );
 
   return (
+    <PullToRefresh onRefresh={fetchEvents}>
     <div className="p-6 space-y-8">
       {renderHeader()}
 
@@ -1102,5 +1104,6 @@ export default function CalendarPage() {
         </div>
       )}
     </div>
+    </PullToRefresh>
   );
 }

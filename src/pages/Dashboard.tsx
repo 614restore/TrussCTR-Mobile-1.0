@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, Users, Briefcase, DollarSign, Plus, Calendar, ChevronRight, CloudLightning, ShieldCheck, AlertTriangle, Wind, CloudRain } from 'lucide-react';
+import PullToRefresh from '../components/PullToRefresh';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -231,6 +232,7 @@ export default function Dashboard() {
   );
 
   return (
+    <PullToRefresh onRefresh={fetchDashboardData}>
     <div className="p-6 space-y-8">
       {/* Header */}
       <div className="flex justify-between items-center">
@@ -482,5 +484,6 @@ export default function Dashboard() {
         )}
       </div>
     </div>
+    </PullToRefresh>
   );
 }

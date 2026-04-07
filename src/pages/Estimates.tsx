@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Calculator, Plus, Search, ChevronLeft, Filter, FileText, DollarSign } from 'lucide-react';
+import PullToRefresh from '../components/PullToRefresh';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -68,6 +69,7 @@ export default function Estimates() {
   };
 
   return (
+    <PullToRefresh onRefresh={fetchEstimates}>
     <div className="min-h-screen bg-slate-50 pb-20">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10">
@@ -168,5 +170,6 @@ export default function Estimates() {
         <Plus size={28} />
       </button>
     </div>
+    </PullToRefresh>
   );
 }

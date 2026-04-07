@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ClipboardList, Plus, Search, ChevronLeft, Filter, Truck, Calendar } from 'lucide-react';
+import PullToRefresh from '../components/PullToRefresh';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
@@ -135,6 +136,7 @@ export default function WorkOrders() {
   };
 
   return (
+    <PullToRefresh onRefresh={fetchWorkOrders}>
     <div className="min-h-screen bg-slate-50 pb-20">
       {/* Header */}
       <div className="bg-white border-b border-slate-100 p-6 sticky top-0 z-10">
@@ -249,5 +251,6 @@ export default function WorkOrders() {
         )}
       </AnimatePresence>
     </div>
+    </PullToRefresh>
   );
 }
