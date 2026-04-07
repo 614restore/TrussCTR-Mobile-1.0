@@ -133,14 +133,21 @@ export default function Integrations() {
 
   // ── Load ───────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!profile?.company_id) return;
+    if (!profile?.company_id) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
 
     db.from('company_integrations')
       .select('*')
       .eq('company_id', profile.company_id)
       .maybeSingle()
-      .then(({ data }: any) => {
+      .then(({ data, error }: any) => {
+        if (error) {
+          console.error('[Integrations] Load error:', error);
+          return;
+        }
         if (data) {
           setRowId(data.id);
           setRow(data);
@@ -150,6 +157,9 @@ export default function Integrations() {
           setHtKey(data.hailtrace_api_key ?? '');
           setRhKey(data.roofhub_integration_key ?? '');
         }
+      })
+      .catch((err: any) => {
+        console.error('[Integrations] Unexpected error:', err);
       })
       .finally(() => setLoading(false));
   }, [profile?.company_id]);
