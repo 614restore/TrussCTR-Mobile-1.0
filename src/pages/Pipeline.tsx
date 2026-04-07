@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, Filter, List, LayoutGrid, Plus, MapPin, DollarSign, User, ChevronLeft, ChevronRight, Shield, FileText, Briefcase, Calendar, ClipboardList, Phone, Zap, StickyNote, CalendarPlus, Clock } from 'lucide-react';
+import PullToRefresh from '../components/PullToRefresh';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -240,6 +241,7 @@ export default function Pipeline() {
   };
 
   return (
+    <PullToRefresh onRefresh={fetchContacts}>
     <div className="h-full flex flex-col bg-slate-50">
       {/* Search & Filter Header */}
       <div className="p-6 space-y-4 bg-white border-b border-slate-100">
@@ -567,5 +569,6 @@ export default function Pipeline() {
         />
       </div>
     </div>
+    </PullToRefresh>
   );
 }
