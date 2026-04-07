@@ -46,6 +46,7 @@ export default function Pipeline() {
   const [contactPhotoMap, setContactPhotoMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [quickMenuContactId, setQuickMenuContactId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const sectionScrollerRef = useRef<HTMLDivElement | null>(null);
   const [canScrollSectionsLeft, setCanScrollSectionsLeft] = useState(false);
   const [canScrollSectionsRight, setCanScrollSectionsRight] = useState(false);
@@ -94,7 +95,7 @@ export default function Pipeline() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [profile?.company_id, loadingAuth]);
+  }, [profile?.company_id, loadingAuth, showArchived]);
 
   useEffect(() => {
     const updateSectionOverflow = () => {
@@ -112,7 +113,9 @@ export default function Pipeline() {
   const fetchContacts = async () => {
     try {
       const [{ data, error }, { data: apptData }, { data: photoDocs }] = await Promise.all([
-        supabase.from('contacts').select('*').eq('company_id', profile.company_id).neq('status', 'archived').order('updated_at', { ascending: false }),
+        showArchived
+          ? supabase.from('contacts').select('*').eq('company_id', profile.company_id).eq('status', 'archived').order('updated_at', { ascending: false })
+          : supabase.from('contacts').select('*').eq('company_id', profile.company_id).neq('status', 'archived').order('updated_at', { ascending: false }),
         supabase.from('appointments').select('id,contact_id,date,time,title,status').eq('company_id', profile.company_id).eq('status', 'scheduled'),
         supabase.from('documents').select('*').eq('company_id', profile.company_id).eq('type', 'photo'),
       ]);
@@ -246,7 +249,21 @@ export default function Pipeline() {
       {/* Search & Filter Header */}
       <div className="p-6 space-y-4 bg-white border-b border-slate-100">
         <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-primary">Pipeline</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-primary">
+              {showArchived ? 'Archived' : 'Pipeline'}
+            </h1>
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              className={`text-xs px-2 py-1 rounded-full font-medium border transition-colors ${
+                showArchived
+                  ? 'bg-slate-700 text-white border-slate-700'
+                  : 'bg-white text-slate-500 border-slate-200'
+              }`}
+            >
+              {showArchived ? 'Archived' : 'Archive'}
+            </button>
+          </div>
           <div className="flex bg-slate-100 p-1 rounded-xl">
             <button 
               onClick={() => setViewMode('kanban')}
@@ -270,6 +287,7 @@ export default function Pipeline() {
         </div>
 
         <div className="flex gap-3">
+
           <div className="relative flex-1">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input 
