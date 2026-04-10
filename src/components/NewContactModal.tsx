@@ -94,9 +94,18 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
 
     setLoading(true);
     setSaveError(null);
+    // Safety valve: never spin longer than 20 seconds regardless of what hangs
+    const saveTimer = setTimeout(() => {
+      setLoading(false);
+      setSaveError('Save timed out — check your connection and try again.');
+    }, 20000);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const currentUserId = sessionData?.session?.user?.id || user?.id || profile?.id || null;
+      // Resolve userId without blocking the main save if getSession hangs —
+      // fall back to cached values so iOS network hiccups can't freeze the form
+      const currentUserId: string | null = await Promise.race([
+        supabase.auth.getSession().then(({ data }) => data?.session?.user?.id ?? null),
+        new Promise<null>(res => setTimeout(() => res(null), 4000)),
+      ]) ?? user?.id ?? profile?.id ?? null;
 
       const shouldAdvanceToAppointmentSet =
         Boolean(formData.appt_date) &&
@@ -114,7 +123,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
         state:   formData.state.trim()   || null,
         zip:     formData.zip.trim()     || null,
         project_type: formData.project_type.trim() || null,
-        status: shouldAdvanceToAppointmentSet ? 'appointment_set' : formData.status,
+        status: shouldAdvanceToAppointmentSet ? 'appt_set' : formData.status,
         company_id:  companyId,
         assigned_to: currentUserId,
         lead_source: 'mobile_app',
@@ -187,6 +196,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
       });
       setSaveError(describeSaveError(err));
     } finally {
+      clearTimeout(saveTimer);
       setLoading(false);
     }
   };
