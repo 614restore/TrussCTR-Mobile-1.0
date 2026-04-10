@@ -26,15 +26,14 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 const PIPELINE_STAGES = [
-  { id: 'lead',            label: 'Leads',       color: 'bg-blue-500'   },
-  { id: 'contacted',       label: 'Contacted',   color: 'bg-sky-500'    },
-  { id: 'appointment_set', label: 'Appt Set',    color: 'bg-indigo-500' },
-  { id: 'inspected',       label: 'Inspected',   color: 'bg-amber-500'  },
-  { id: 'estimate_sent',   label: 'Est. Sent',   color: 'bg-orange-500' },
-  { id: 'approved',        label: 'Approved',    color: 'bg-emerald-500'},
-  { id: 'scheduled',       label: 'Scheduled',   color: 'bg-teal-500'   },
-  { id: 'in_progress',     label: 'In Progress', color: 'bg-primary'    },
-  { id: 'completed',       label: 'Completed',   color: 'bg-slate-800'  },
+  { id: 'lead',              label: 'Discovery',      color: 'bg-blue-500'    },
+  { id: 'appt_set',          label: 'Inspection',     color: 'bg-indigo-500'  },
+  { id: 'contingency',       label: 'Pending Scope',  color: 'bg-amber-500'   },
+  { id: 'signed',            label: 'Approval/Sold',  color: 'bg-emerald-500' },
+  { id: 'ordering_material', label: 'Pre-Production', color: 'bg-teal-500'    },
+  { id: 'in_progress',       label: 'Active Build',   color: 'bg-primary'     },
+  { id: 'invoicing',         label: 'Final Billing',  color: 'bg-orange-500'  },
+  { id: 'completed',         label: 'Closed/Paid',    color: 'bg-slate-800'   },
 ];
 type ContactRow = Database['public']['Tables']['contacts']['Row'];
 type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
@@ -175,7 +174,7 @@ export default function Dashboard() {
           name: `${c.first_name} ${c.last_name}`,
           action: `Status: ${c.status.replace('_', ' ')}`,
           time: new Date(c.updated_at).toLocaleDateString(),
-          value: formatCurrency(c.project_value)
+          value: c.project_value != null ? formatCurrency(c.project_value) : '—'
         }));
       
       setRecentActivity(activity);
