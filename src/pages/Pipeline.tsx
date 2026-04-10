@@ -14,25 +14,53 @@ import { buildDocumentDisplayUrl } from '../lib/documentAccess';
 
 type StageConfig = { statuses: CustomerStatus[]; label: string; color: string };
 
-// Updated to match web app pipeline exactly
+// 8-column Power Pipeline — each column groups multiple underlying statuses.
 const STAGES: StageConfig[] = [
-  { statuses: ['prospect', 'new_lead', 'lead'], label: 'Leads', color: 'bg-blue-500' },
-  { statuses: ['contacted'], label: 'Contacted', color: 'bg-sky-500' },
-  { statuses: ['appt_set', 'appointment_set', 'inspection_scheduled', 'claim_filed', 'adjuster_scheduled'], label: 'Appointment Set', color: 'bg-indigo-500' },
-  { statuses: ['inspection_completed', 'inspection_complete', 'inspected'], label: 'Inspection', color: 'bg-cyan-500' },
-  { statuses: ['estimating', 'supplement_filed'], label: 'Estimating', color: 'bg-purple-500' },
-  { statuses: ['estimate_sent'], label: 'Estimate Sent', color: 'bg-amber-500' },
-  { statuses: ['contingency'], label: 'Follow Up', color: 'bg-orange-500' },
-  { statuses: ['approved'], label: 'Approved', color: 'bg-teal-500' },
-  { statuses: ['signed', 'signed_won'], label: 'Signed', color: 'bg-emerald-500' },
-  { statuses: ['ordering_material'], label: 'Ordering Material', color: 'bg-yellow-500' },
-  { statuses: ['in_progress'], label: 'In Progress', color: 'bg-primary' },
-  { statuses: ['build_phase'], label: 'Build Phase', color: 'bg-red-500' },
-  { statuses: ['cleanup'], label: 'Cleanup', color: 'bg-pink-500' },
-  { statuses: ['invoicing'], label: 'Invoicing', color: 'bg-rose-500' },
-  { statuses: ['pending_payment'], label: 'Pending Payment', color: 'bg-amber-600' },
-  { statuses: ['completed'], label: 'Completed', color: 'bg-green-600' },
-  { statuses: ['lost'], label: 'Lost', color: 'bg-red-400' },
+  {
+    statuses: ['prospect', 'new_lead', 'lead', 'contacted'] as CustomerStatus[],
+    label: 'Discovery',
+    color: 'bg-slate-500',
+  },
+  {
+    statuses: ['appt_set', 'appointment_set', 'inspection_scheduled', 'claim_filed', 'adjuster_scheduled', 'inspection_completed', 'inspection_complete', 'inspected'] as CustomerStatus[],
+    label: 'Inspection',
+    color: 'bg-violet-500',
+  },
+  {
+    statuses: ['estimating', 'estimate_sent', 'contingency', 'supplement_filed', 'retail', 'follow_up'] as CustomerStatus[],
+    label: 'Pending Scope',
+    color: 'bg-amber-500',
+  },
+  {
+    statuses: ['approved', 'signed', 'signed_won'] as CustomerStatus[],
+    label: 'Approval / Sold',
+    color: 'bg-emerald-500',
+  },
+  {
+    statuses: ['ordering_material', 'scheduled'] as CustomerStatus[],
+    label: 'Pre-Production',
+    color: 'bg-cyan-500',
+  },
+  {
+    statuses: ['in_progress', 'build_phase', 'cleanup'] as CustomerStatus[],
+    label: 'Active Build',
+    color: 'bg-blue-600',
+  },
+  {
+    statuses: ['invoicing', 'pending_payment'] as CustomerStatus[],
+    label: 'Final Billing',
+    color: 'bg-rose-500',
+  },
+  {
+    statuses: ['completed', 'paid', 'payment_received'] as CustomerStatus[],
+    label: 'Closed / Paid',
+    color: 'bg-green-700',
+  },
+  {
+    statuses: ['lost'] as CustomerStatus[],
+    label: 'Lost',
+    color: 'bg-red-400',
+  },
 ];
 
 export default function Pipeline() {
@@ -186,6 +214,14 @@ export default function Pipeline() {
       : '';
     return timeLabel ? `${dayLabel} · ${timeLabel}` : dayLabel;
   };
+
+  // Contacts sorted alphabetically (last name, then first name) for list & map views
+  const alphabeticContacts = [...filteredContacts].sort((a, b) => {
+    const lastA = (a.last_name || '').toLowerCase();
+    const lastB = (b.last_name || '').toLowerCase();
+    if (lastA !== lastB) return lastA.localeCompare(lastB);
+    return (a.first_name || '').toLowerCase().localeCompare((b.first_name || '').toLowerCase());
+  });
 
   const openNavigation = (e: React.MouseEvent, address: string, city?: string, state?: string, zip?: string) => {
     e.stopPropagation();
@@ -500,7 +536,7 @@ export default function Pipeline() {
           </div>
         ) : viewMode === 'list' ? (
           <div className="p-6 space-y-3 overflow-y-auto h-full pb-20">
-            {filteredContacts.map((contact) => (
+            {alphabeticContacts.map((contact) => (
               <div 
                 key={contact.id}
                 onClick={() => navigate(`/contacts/${contact.id}`)}
@@ -535,8 +571,8 @@ export default function Pipeline() {
                 Map view shows leads near your current location. Tap a lead to navigate.
               </p>
             </div>
-            {filteredContacts.map((contact) => (
-              <div 
+            {alphabeticContacts.map((contact) => (
+              <div
                 key={contact.id}
                 className="card p-4 space-y-4"
               >

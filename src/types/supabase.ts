@@ -7,22 +7,40 @@ export type Json =
   | Json[]
 
 export type CustomerStatus =
+  // Legacy / alias statuses
   | 'new_lead'
-  | 'lead'
   | 'contacted'
   | 'inspection_scheduled'
   | 'inspection_complete'
   | 'appointment_set'
   | 'inspected'
-  | 'estimate_sent'
   | 'signed_won'
+  // Power Pipeline — 8-column canonical statuses
+  | 'prospect'
+  | 'lead'
+  | 'appt_set'
+  | 'claim_filed'
+  | 'adjuster_scheduled'
+  | 'inspection_completed'
+  | 'estimating'
+  | 'estimate_sent'
+  | 'contingency'
+  | 'supplement_filed'
+  | 'follow_up'
+  | 'retail'
   | 'approved'
+  | 'signed'
+  | 'ordering_material'
   | 'scheduled'
   | 'in_progress'
+  | 'build_phase'
+  | 'cleanup'
+  | 'invoicing'
+  | 'pending_payment'
+  | 'payment_received'
   | 'completed'
   | 'paid'
   | 'lost'
-  | 'retail'
 
 export interface Database {
   public: {

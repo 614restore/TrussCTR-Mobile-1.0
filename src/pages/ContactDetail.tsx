@@ -25,6 +25,8 @@ import { buildLegalDocumentStats, getSignatureParentName, isLegalDocument, LEGAL
 import { compressImageWithLightCompressor, PHOTO_POLICY_PRESETS, validateVideoForCloud } from '../lib/lightCompressor';
 import EagleViewPanel from '../components/EagleViewPanel';
 import RoofrPanel from '../components/RoofrPanel';
+import PaymentModal from '../components/PaymentModal';
+import { loadContactPayments, PAYMENT_METHOD_LABELS, type PaymentRecord } from '../lib/paymentService';
 
 const TABS = [
   { id: 'overview',    label: 'Overview',    icon: Info },
@@ -134,15 +136,41 @@ const ALL_STATUSES: { value: CustomerStatus; label: string }[] = [
   { value: 'lost', label: 'Lost' },
 ];
 
-// Normalize alias statuses to their canonical stage for progress bar positioning
+// Normalize any status variant to the 8-column Power Pipeline primary status
 function normalizeStatusForProgress(status: string): CustomerStatus {
   const aliases: Record<string, CustomerStatus> = {
-    new_lead: 'lead',
-    inspection_scheduled: 'appointment_set',
-    inspection_complete: 'inspected',
-    signed_won: 'approved',
-    retail: 'approved',
-    lost: 'completed',
+    // Discovery
+    prospect:             'lead',
+    new_lead:             'lead',
+    contacted:            'lead',
+    // Inspection
+    appointment_set:      'appt_set',
+    inspection_scheduled: 'appt_set',
+    claim_filed:          'appt_set',
+    adjuster_scheduled:   'appt_set',
+    inspection_complete:  'appt_set',
+    inspection_completed: 'appt_set',
+    inspected:            'appt_set',
+    // Pending Scope
+    estimating:           'contingency',
+    estimate_sent:        'contingency',
+    supplement_filed:     'contingency',
+    retail:               'contingency',
+    follow_up:            'contingency',
+    // Approval / Sold
+    approved:             'signed',
+    signed_won:           'signed',
+    // Pre-Production
+    scheduled:            'ordering_material',
+    // Active Build
+    build_phase:          'in_progress',
+    cleanup:              'in_progress',
+    // Final Billing
+    pending_payment:      'invoicing',
+    // Closed / Paid
+    paid:                 'completed',
+    payment_received:     'completed',
+    lost:                 'completed',
   };
   return (aliases[status] as CustomerStatus) ?? (status as CustomerStatus);
 }
@@ -162,6 +190,18 @@ export default function ContactDetail() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isPhotoSaving, setIsPhotoSaving] = useState(false);
   const [isLifecycleSaving, setIsLifecycleSaving] = useState(false);
+
+  // Document naming dialog state
+  const [pendingUploadFiles, setPendingUploadFiles] = useState<File[]>([]);
+  const [pendingUploadInputRef, setPendingUploadInputRef] = useState<HTMLInputElement | null>(null);
+  const [showUploadDialog, setShowUploadDialog] = useState(false);
+  const [uploadDialogName, setUploadDialogName] = useState('');
+  const [uploadDialogCategory, setUploadDialogCategory] = useState('other');
+
+  // Avatar state
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const [editForm, setEditForm] = useState<any>(null);
   const [showActions, setShowActions] = useState(false);
   const tabScrollerRef = useRef<HTMLDivElement | null>(null);
@@ -272,8 +312,21 @@ export default function ContactDetail() {
     try {
       const { data, error } = await supabase.from('documents').select('*').eq('contact_id', id).order('created_at', { ascending: false });
       if (error) throw error;
-      const docs = data || [];
+      const allDocs = data || [];
+
+      // Separate avatar doc from regular docs
+      const avatarDoc = allDocs.find((doc: any) => doc.name === '__contact_avatar__');
+      const docs = allDocs.filter((doc: any) => doc.name !== '__contact_avatar__');
       setDocuments(docs);
+
+      // Resolve avatar URL
+      const avatarDocAny = avatarDoc as any;
+      if (avatarDocAny?.url) {
+        const resolvedAvatarUrl = await buildDocumentDisplayUrl(String(avatarDocAny.url));
+        setAvatarUrl(resolvedAvatarUrl);
+      } else {
+        setAvatarUrl(null);
+      }
 
       const withUrls = await Promise.all(docs.map(async (doc: any) => {
         if (typeof doc.url === 'string') {
@@ -500,11 +553,30 @@ export default function ContactDetail() {
     }, 220);
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length || !id) return;
 
-    const uploadOne = async (file: File) => {
+    // For single-file uploads show the naming dialog; for multi-file, upload directly
+    if (files.length === 1) {
+      const file = files[0];
+      const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
+      const isImage = file.type.startsWith('image/');
+      setPendingUploadFiles(files);
+      setPendingUploadInputRef(e.target);
+      setUploadDialogName(nameWithoutExt);
+      setUploadDialogCategory(isImage ? 'photo' : 'other');
+      setShowUploadDialog(true);
+    } else {
+      // Multi-file: upload directly without dialog
+      handleUploadDirect(files, e.target, '', '');
+    }
+  };
+
+  const handleUploadDirect = async (files: File[], inputEl: HTMLInputElement | null, overrideName: string, overrideCategory: string) => {
+    if (!id) return;
+
+    const uploadOne = async (file: File, index: number) => {
       const videoError = await validateVideoForCloud(file);
       if (videoError) {
         alert(videoError);
@@ -522,18 +594,23 @@ export default function ContactDetail() {
             { type: 'image/jpeg' }
           )
         : file;
-      const fileExt = file.name.split('.').pop();
+      const fileExt = uploadFile.name.split('.').pop();
       const fileName = `${Math.random()}.${fileExt}`;
       const filePath = `${id}/${fileName}`;
       const bucket = isImage ? 'projectceo-photos' : 'documents';
       const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile);
       if (uploadError) throw uploadError;
       const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+
+      // Use override name/category for single-file dialog uploads; fall back to filename
+      const docName = (index === 0 && overrideName) ? overrideName : file.name.replace(/\.[^.]+$/, '');
+      const docType = (index === 0 && overrideCategory) ? overrideCategory : (isImage ? 'photo' : 'document');
+
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: id,
         company_id: contact.company_id,
-        name: file.name,
-        type: isImage ? 'photo' : 'document',
+        name: docName,
+        type: docType as any,
         url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
         size: uploadFile.size,
         uploaded_by: user?.id ?? 'unknown',
@@ -545,16 +622,76 @@ export default function ContactDetail() {
     let failed = 0;
     for (let i = 0; i < files.length; i++) {
       try {
-        await uploadOne(files[i]);
+        await uploadOne(files[i], i);
       } catch (err) {
         failed++;
         console.error(`Error uploading file ${i + 1}/${files.length}:`, err);
       }
     }
     fetchDocuments();
-    e.target.value = '';
+    if (inputEl) inputEl.value = '';
     if (failed > 0) {
       alert(`${failed} of ${files.length} file(s) failed to upload. The rest were saved.`);
+    }
+  };
+
+  const handleUploadDialogConfirm = async () => {
+    setShowUploadDialog(false);
+    await handleUploadDirect(pendingUploadFiles, pendingUploadInputRef, uploadDialogName.trim() || pendingUploadFiles[0]?.name || 'Document', uploadDialogCategory);
+    setPendingUploadFiles([]);
+    setPendingUploadInputRef(null);
+  };
+
+  const handleUploadDialogCancel = () => {
+    setShowUploadDialog(false);
+    if (pendingUploadInputRef) pendingUploadInputRef.value = '';
+    setPendingUploadFiles([]);
+    setPendingUploadInputRef(null);
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !id || !contact?.company_id) return;
+    e.target.value = '';
+    setAvatarUploading(true);
+    try {
+      const uploadFile = new File(
+        [await compressImageWithLightCompressor(file, {
+          maxWidth: 400,
+          maxHeight: 400,
+          quality: 0.85,
+        })],
+        'avatar.jpg',
+        { type: 'image/jpeg' }
+      );
+      const filePath = `${id}/avatar_${Date.now()}.jpg`;
+      const bucket = 'projectceo-photos';
+      const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, uploadFile, { upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+      const storedUrl = buildStoredDocumentUrl(publicUrl, bucket, filePath);
+
+      // Remove any existing avatar doc
+      await supabase.from('documents').delete().eq('contact_id', id).eq('name', '__contact_avatar__');
+
+      // Insert new avatar doc
+      const { error: dbError } = await supabase.from('documents').insert({
+        contact_id: id,
+        company_id: contact.company_id,
+        name: '__contact_avatar__',
+        type: 'photo',
+        url: storedUrl,
+        size: uploadFile.size,
+        uploaded_by: user?.id ?? 'unknown',
+      } as any);
+      if (dbError) throw dbError;
+
+      await fetchDocuments();
+    } catch (err) {
+      console.error('Error uploading avatar:', err);
+      alert('Failed to upload avatar photo.');
+    } finally {
+      setAvatarUploading(false);
     }
   };
 
@@ -868,20 +1005,42 @@ export default function ContactDetail() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <div className="h-20 w-20 overflow-hidden rounded-3xl border border-white/15 bg-white/10 shadow-lg">
-            {coverPhotoUrl ? (
-              <img src={coverPhotoUrl} alt={`${contact.first_name} ${contact.last_name}`} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
+          {/* Avatar circle — tap to change photo */}
+          <button
+            type="button"
+            className="relative h-20 w-20 shrink-0 overflow-hidden rounded-3xl border border-white/15 bg-white/10 shadow-lg group"
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={avatarUploading}
+            aria-label="Change contact photo"
+          >
+            {avatarUploading ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <span className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent" />
+              </div>
+            ) : avatarUrl ? (
+              <img src={avatarUrl} alt={`${contact.first_name} ${contact.last_name}`} className="h-full w-full object-cover" referrerPolicy="no-referrer" />
             ) : (
               <div className="flex h-full w-full items-center justify-center text-2xl font-black text-white/85">
                 {(contact.first_name?.[0] || '').toUpperCase()}{(contact.last_name?.[0] || '').toUpperCase()}
               </div>
             )}
-          </div>
+            {/* Camera overlay shown on hover/tap */}
+            <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity">
+              <Camera size={22} className="text-white" />
+            </div>
+          </button>
+          <input
+            ref={avatarInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarUpload}
+          />
           <div className="space-y-1 min-w-0">
             <h1 className="text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
             <p className="text-slate-300 text-sm flex items-center gap-1.5"><MapPin size={14} />{contact.address}, {contact.city}</p>
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-white/60">
-              {coverPhotoUrl ? 'Cover photo set' : 'No cover photo'}
+              {avatarUrl ? 'Tap photo to change' : 'Tap to add photo'}
             </p>
           </div>
         </div>
@@ -1144,6 +1303,69 @@ export default function ContactDetail() {
         </div>
       )}
       
+      {/* Document naming dialog */}
+      {showUploadDialog && pendingUploadFiles.length > 0 && (
+        <div className="fixed inset-0 z-[90] flex items-end bg-black/50" onClick={handleUploadDialogCancel}>
+          <div
+            className="w-full rounded-t-3xl bg-white"
+            style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 pt-4 pb-2">
+              <div className="mx-auto h-1 w-10 rounded-full bg-slate-200 mb-4" />
+              <h3 className="text-lg font-bold text-primary mb-1">Name this document</h3>
+              <p className="text-xs text-slate-500 mb-5">{pendingUploadFiles[0]?.name}</p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Document name</label>
+                  <input
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    value={uploadDialogName}
+                    onChange={(e) => setUploadDialogName(e.target.value)}
+                    placeholder="Enter document name"
+                    autoFocus
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Category</label>
+                  <select
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    value={uploadDialogCategory}
+                    onChange={(e) => setUploadDialogCategory(e.target.value)}
+                  >
+                    <option value="insurance">Insurance Documents</option>
+                    <option value="contract">Contracts</option>
+                    <option value="estimate">Estimates</option>
+                    <option value="invoice">Invoices</option>
+                    <option value="photo">Photos</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3 px-6 pt-5">
+              <button
+                type="button"
+                onClick={handleUploadDialogCancel}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-sm font-bold text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleUploadDialogConfirm}
+                className="flex-1 rounded-2xl bg-accent py-4 text-sm font-bold text-white"
+              >
+                Upload
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Estimate Preview Modal */}
       {showEstimatePreview && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4">
@@ -3162,7 +3384,7 @@ function StatusTab({ contact, onAdvance, canUndo }: { contact: any; onAdvance: (
   const [revertTarget, setRevertTarget] = useState<CustomerStatus | null>(null);
   const currentIndex = STAGES.indexOf(normalizeStatusForProgress(contact.status) as CustomerStatus);
   const nextStage = currentIndex >= 0 && currentIndex < STAGES.length - 1 ? STAGES[currentIndex + 1] : null;
-  const nextStageLabel = nextStage ? ALL_STATUSES.find(s => s.value === nextStage)?.label || nextStage.replace(/_/g, ' ') : null;
+  const nextStageLabel = nextStage ? getPipelineStageLabel(nextStage) : null;
 
   const handleAdvance = async (status: CustomerStatus) => {
     setAdvancing(true);
@@ -3225,7 +3447,7 @@ function StatusTab({ contact, onAdvance, canUndo }: { contact: any; onAdvance: (
           const isDone = i < currentIndex;
           const isCurrent = i === currentIndex;
           const isFuture = i > currentIndex;
-          const stageLabel = ALL_STATUSES.find(s => s.value === stage)?.label || stage.replace(/_/g, ' ');
+          const stageLabel = getPipelineStageLabel(stage);
           const canRevert = isDone && canUndo;
 
           return (
@@ -4562,6 +4784,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
 
 function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact: any; userId?: string; onEdit: () => void; onRefresh: () => void; canUndo?: boolean }) {
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [estimates, setEstimates] = useState<any[]>([]);
   const [latestEstimate, setLatestEstimate] = useState<any>(null);
   const [latestWorkOrder, setLatestWorkOrder] = useState<any>(null);
@@ -4572,6 +4795,10 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
   const [undoPaymentTarget, setUndoPaymentTarget] = useState<'deposit' | 'final' | null>(null);
   const [showEstimatePreview, setShowEstimatePreview] = useState(false);
   const [shareLoading, setShareLoading] = useState(false);
+  // Payment modal + history
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [loadingPayments, setLoadingPayments] = useState(false);
 
   const isFinancialDocument = (doc: any) => {
     const type = String(doc?.type || '').toLowerCase();
@@ -4649,6 +4876,25 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
 
     fetchFinancialArtifacts();
   }, [contact?.id]);
+
+  // Load payments from payments table
+  useEffect(() => {
+    if (!contact?.id) return;
+    setLoadingPayments(true);
+    loadContactPayments(contact.id)
+      .then(setPayments)
+      .catch((err) => console.error('[FinancialTab] Failed to load payments:', err))
+      .finally(() => setLoadingPayments(false));
+  }, [contact?.id]);
+
+  const refreshPayments = async () => {
+    try {
+      const updated = await loadContactPayments(contact.id);
+      setPayments(updated);
+    } catch (err) {
+      console.error('[FinancialTab] Failed to refresh payments:', err);
+    }
+  };
 
   const paymentEntries = [
     {
@@ -4896,52 +5142,138 @@ function FinancialTab({ contact, userId, onEdit, onRefresh, canUndo }: { contact
             <div>
               <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Payments</h3>
               <p className="mt-1 text-sm text-slate-600">
-                Payments are recorded directly on this customer. An invoice document is optional and does not block payment entry.
+                All payments recorded for this customer, tracked by job and processor.
               </p>
             </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-[10px] font-bold uppercase text-slate-500">
-              {paymentEntries.length} tracked
+              {payments.length} recorded
             </span>
           </div>
+
+          {/* Record / Request buttons */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-xs font-bold text-white"
+            >
+              <DollarSign size={14} />
+              Record Payment
+            </button>
+            <button
+              onClick={() => setShowPaymentModal(true)}
+              className="flex items-center justify-center gap-2 rounded-xl bg-white border border-slate-200 py-3 text-xs font-bold text-slate-700"
+            >
+              <Send size={14} />
+              Request Payment
+            </button>
+          </div>
+
+          {/* Payment history from payments table */}
           <div className="space-y-3">
-            {paymentEntries.length > 0 ? paymentEntries.map((entry) => (
-              <div key={entry.key} className="rounded-2xl bg-slate-50 p-4 space-y-3">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h4 className="text-sm font-bold text-primary">{entry.label}</h4>
-                    <p className="text-[11px] text-slate-500">
-                      {entry.date ? `Updated ${new Date(entry.date).toLocaleDateString()}` : 'No payment recorded yet'}
-                    </p>
+            {loadingPayments ? (
+              <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">Loading payment history...</div>
+            ) : payments.length > 0 ? (
+              payments.map((pmt) => (
+                <div key={pmt.id} className="rounded-2xl bg-slate-50 p-4 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-bold text-emerald-700">{formatCurrency(pmt.amount)}</span>
+                    <span className="text-[10px] font-bold px-2 py-1 rounded-md bg-emerald-100 text-emerald-600 uppercase">
+                      {PAYMENT_METHOD_LABELS[pmt.payment_method] || pmt.payment_method}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${entry.paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                    {entry.paid ? 'Paid' : 'Pending'}
-                  </span>
+                  <p className="text-[11px] text-slate-500">
+                    {new Date(pmt.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    {pmt.processed_by_name ? ` · Processed by ${pmt.processed_by_name}` : ''}
+                  </p>
+                  {(pmt.work_order_title || pmt.estimate_title) && (
+                    <p className="text-[11px] text-slate-500">
+                      {pmt.work_order_title
+                        ? `Work Order: ${pmt.work_order_title}${pmt.work_order_number ? ` (#${pmt.work_order_number})` : ''}`
+                        : `Estimate: ${pmt.estimate_title}${pmt.estimate_number ? ` (#${pmt.estimate_number})` : ''}`}
+                    </p>
+                  )}
+                  {pmt.reference_number && (
+                    <p className="text-[11px] text-slate-400">Ref: {pmt.reference_number}</p>
+                  )}
+                  {pmt.notes && (
+                    <p className="text-[11px] text-slate-400 italic">{pmt.notes}</p>
+                  )}
+                  {pmt.receipt_sent && (
+                    <p className="text-[10px] text-emerald-500 font-semibold">✓ Receipt sent</p>
+                  )}
                 </div>
-                <div className="flex items-center justify-between gap-4">
-                  <span className="text-xl font-bold text-primary">{formatCurrency(entry.amount)}</span>
-                  <button
-                    onClick={() => {
-                      if (entry.paid) {
-                        // Undo direction — require admin confirmation
-                        if (canUndo) setUndoPaymentTarget(entry.key);
-                      } else {
-                        togglePayment(entry.key);
-                      }
-                    }}
-                    disabled={savingField === entry.key || (entry.paid && !canUndo)}
-                    className={`rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50 ${entry.paid ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-white border border-slate-200 text-accent'}`}
-                  >
-                    {savingField === entry.key ? 'Saving...' : entry.paid ? (canUndo ? 'Undo Payment' : 'Paid ✓') : `Record ${entry.label}`}
-                  </button>
-                </div>
-              </div>
-            )) : (
+              ))
+            ) : (
               <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">
-                No payment schedule is on file yet. Add the customer financial amounts from the edit screen to start tracking payments here.
+                No payments recorded yet. Tap "Record Payment" to log a received payment or "Request Payment" to send a Stripe link.
               </div>
             )}
           </div>
+
+          {/* Legacy deposit/final toggles */}
+          {paymentEntries.length > 0 && (
+            <div className="border-t border-slate-100 pt-4 space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Legacy Payment Status</p>
+              {paymentEntries.map((entry) => (
+                <div key={entry.key} className="rounded-2xl bg-slate-50 p-4 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <h4 className="text-sm font-bold text-primary">{entry.label}</h4>
+                      <p className="text-[11px] text-slate-500">
+                        {entry.date ? `Updated ${new Date(entry.date).toLocaleDateString()}` : 'No payment recorded yet'}
+                      </p>
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded-md uppercase ${entry.paid ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                      {entry.paid ? 'Paid' : 'Pending'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-xl font-bold text-primary">{formatCurrency(entry.amount)}</span>
+                    <button
+                      onClick={() => {
+                        if (entry.paid) {
+                          if (canUndo) setUndoPaymentTarget(entry.key);
+                        } else {
+                          togglePayment(entry.key);
+                        }
+                      }}
+                      disabled={savingField === entry.key || (entry.paid && !canUndo)}
+                      className={`rounded-xl px-4 py-2 text-xs font-bold disabled:opacity-50 ${entry.paid ? 'bg-amber-50 border border-amber-200 text-amber-700' : 'bg-white border border-slate-200 text-accent'}`}
+                    >
+                      {savingField === entry.key ? 'Saving...' : entry.paid ? (canUndo ? 'Undo Payment' : 'Paid ✓') : `Mark ${entry.label} Paid`}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
+
+        {/* Payment Modal */}
+        {showPaymentModal && (
+          <PaymentModal
+            onClose={() => setShowPaymentModal(false)}
+            onSuccess={async (paymentId) => {
+              setShowPaymentModal(false);
+              await refreshPayments();
+              await onRefresh();
+            }}
+            contactId={contact.id}
+            contactName={contact.name || [contact.first_name, contact.last_name].filter(Boolean).join(' ') || 'Customer'}
+            contactEmail={contact.email}
+            companyId={contact.company_id}
+            companyName={profile?.company_name}
+            workOrderId={latestWorkOrder?.id}
+            workOrderTitle={latestWorkOrder?.title}
+            workOrderNumber={latestWorkOrder?.work_order_number}
+            estimateId={latestEstimate?.id}
+            estimateTitle={latestEstimate?.title}
+            estimateNumber={latestEstimate?.estimate_number}
+            estimateTotal={latestEstimate?.total}
+            processedById={userId || ''}
+            processedByName={[profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || profile?.name || 'Unknown'}
+          />
+        )}
         <div className="card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div>

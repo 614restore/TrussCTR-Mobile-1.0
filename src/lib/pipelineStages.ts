@@ -2,25 +2,17 @@ import { CustomerStatus } from '../types/supabase';
 
 type StatusLike = CustomerStatus | string | null | undefined;
 
-// Use the SAME status order as the web app (from crmData.ts)
+// 8-column Power Pipeline — one representative (primary) status per column.
+// Sub-statuses are mapped to their column primary via STATUS_ALIASES.
 const CANONICAL_STAGE_ORDER: CustomerStatus[] = [
-  'prospect',
-  'lead',
-  'contacted',
-  'appt_set',
-  'inspection_completed',
-  'estimating',
-  'estimate_sent',
-  'contingency',
-  'approved',
-  'signed',
-  'ordering_material',
-  'in_progress',
-  'build_phase',
-  'cleanup',
-  'invoicing',
-  'pending_payment',
-  'completed',
+  'lead',              // Discovery
+  'appt_set',          // Inspection
+  'contingency',       // Pending Scope
+  'signed',            // Approval / Sold
+  'ordering_material', // Pre-Production
+  'in_progress',       // Active Build
+  'invoicing',         // Final Billing
+  'completed',         // Closed / Paid
 ];
 
 const PIPELINE_PROGRESS_ORDER: CustomerStatus[] = [
@@ -28,75 +20,95 @@ const PIPELINE_PROGRESS_ORDER: CustomerStatus[] = [
   'lost',
 ];
 
-// Use the SAME labels as web app (from crmData.ts statusLabels)
+// Column-level display labels (shown in progress bar, pipeline list, next step CTA)
 const DISPLAY_LABELS: Record<string, string> = {
-  prospect: 'Prospect',
-  lead: 'Lead',
-  contacted: 'Contacted',
-  appt_set: 'Appointment Set',
-  inspection_completed: 'Inspection Completed',
-  estimating: 'Estimating',
-  estimate_sent: 'Estimate Sent',
-  contingency: 'Contingency',
-  approved: 'Approved / Final Scope',
-  signed: 'Signed Customer',
-  ordering_material: 'Ordering Material',
-  in_progress: 'In Progress',
-  build_phase: 'Build Phase',
-  cleanup: 'Cleanup',
-  invoicing: 'Invoicing',
-  pending_payment: 'Pending Payment',
-  completed: 'Completed',
-  lost: 'Lost',
-  retail: 'Retail Customer',
-  claim_filed: 'Claim Filed',
-  adjuster_scheduled: 'Adjuster Scheduled',
-  supplement_filed: 'Supplement Filed',
+  // 8 Power Pipeline columns
+  lead:              'Discovery',
+  appt_set:          'Inspection',
+  contingency:       'Pending Scope',
+  signed:            'Approval / Sold',
+  ordering_material: 'Pre-Production',
+  in_progress:       'Active Build',
+  invoicing:         'Final Billing',
+  completed:         'Closed / Paid',
+  lost:              'Lost',
+  // Sub-status labels (used when displaying the raw DB status)
+  prospect:              'Prospect',
+  contacted:             'Contacted',
+  claim_filed:           'Claim Filed',
+  adjuster_scheduled:    'Adjuster Scheduled',
+  inspection_completed:  'Inspection Completed',
+  inspected:             'Inspected',
+  estimating:            'Estimating',
+  estimate_sent:         'Estimate Sent',
+  supplement_filed:      'Supplement Filed',
+  retail:                'Retail',
+  approved:              'Approved',
+  scheduled:             'Scheduled',
+  build_phase:           'Build Phase',
+  cleanup:               'Cleanup',
+  pending_payment:       'Pending Payment',
+  paid:                  'Paid',
 };
 
-// Use the SAME next step logic as web app auto-progression
+// Next-column labels for the "Next Step" CTA card
 const NEXT_LABELS: Record<string, string> = {
-  prospect: 'Lead',
-  lead: 'Contacted',
-  contacted: 'Appointment Set',
-  appt_set: 'Inspection',
-  inspection_completed: 'Estimating',
-  estimating: 'Estimate Sent',
-  estimate_sent: 'Contingency',
-  contingency: 'Approved',
-  approved: 'Signed Customer',
-  signed: 'Ordering Material',
-  ordering_material: 'In Progress',
-  in_progress: 'Build Phase',
-  build_phase: 'Cleanup',
-  cleanup: 'Completed',
-  invoicing: 'Pending Payment',
-  pending_payment: 'Completed',
-  completed: 'Closed',
-  lost: 'Closed',
-  retail: 'Scheduled',
+  lead:              'Inspection',
+  appt_set:          'Pending Scope',
+  contingency:       'Approval / Sold',
+  signed:            'Pre-Production',
+  ordering_material: 'Active Build',
+  in_progress:       'Final Billing',
+  invoicing:         'Closed / Paid',
+  completed:         'Closed',
+  lost:              'Closed',
 };
 
-// Legacy status mapping for backwards compatibility
+// Maps every known sub-status (including legacy DB values) to its column's primary status.
 const STATUS_ALIASES: Record<string, CustomerStatus> = {
-  new_lead: 'lead',
-  appointment_set: 'appt_set',
+  // Discovery
+  prospect:             'lead',
+  new_lead:             'lead',
+  contacted:            'lead',
+  // Inspection
+  appointment_set:      'appt_set',
   inspection_scheduled: 'appt_set',
-  inspection_complete: 'inspection_completed',
-  inspected: 'inspection_completed',
-  signed_won: 'signed',
-  job_started: 'in_progress',
+  claim_filed:          'appt_set',
+  adjuster_scheduled:   'appt_set',
+  inspection_complete:  'appt_set',
+  inspection_completed: 'appt_set',
+  inspected:            'appt_set',
+  // Pending Scope
+  estimating:           'contingency',
+  estimate_sent:        'contingency',
+  supplement_filed:     'contingency',
+  retail:               'contingency',
+  follow_up:            'contingency',
+  // Approval / Sold
+  approved:             'signed',
+  signed_won:           'signed',
+  // Pre-Production
+  scheduled:            'ordering_material',
+  // Active Build
+  job_started:          'in_progress',
+  build_phase:          'in_progress',
+  cleanup:              'in_progress',
+  // Final Billing
+  pending_payment:      'invoicing',
+  // Closed / Paid
+  paid:                 'completed',
+  payment_received:     'completed',
 };
 
 export function normalizePipelineStatus(status?: StatusLike): CustomerStatus {
   if (!status) return 'lead';
-  if (STATUS_ALIASES[status]) return STATUS_ALIASES[status];
-  return status as CustomerStatus;
+  const s = String(status).trim().toLowerCase();
+  if (STATUS_ALIASES[s]) return STATUS_ALIASES[s];
+  return s as CustomerStatus;
 }
 
 export function toPipelineBoardStage(status?: StatusLike): CustomerStatus {
-  const normalized = normalizePipelineStatus(status);
-  return normalized;
+  return normalizePipelineStatus(status);
 }
 
 export function getReachedPipelineStatuses(status?: StatusLike): Set<CustomerStatus> {
@@ -122,11 +134,15 @@ export function getPipelineStageOrder() {
 }
 
 export function getPipelineStageLabel(status?: StatusLike) {
+  const raw = String(status || '');
+  if (DISPLAY_LABELS[raw]) return DISPLAY_LABELS[raw];
   const normalized = normalizePipelineStatus(status);
-  return DISPLAY_LABELS[String(status || '')] || DISPLAY_LABELS[normalized] || 'Lead';
+  return DISPLAY_LABELS[normalized] || 'Discovery';
 }
 
 export function getNextPipelineStageLabel(status?: StatusLike) {
+  const raw = String(status || '');
+  if (NEXT_LABELS[raw]) return NEXT_LABELS[raw];
   const normalized = normalizePipelineStatus(status);
-  return NEXT_LABELS[String(status || '')] || NEXT_LABELS[normalized] || 'Next Step';
+  return NEXT_LABELS[normalized] || 'Next Step';
 }

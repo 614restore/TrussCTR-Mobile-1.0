@@ -4,13 +4,11 @@ platform :ios do
 
   desc "Build and upload to TestFlight"
   lane :beta do
-    # Sync signing certificates and provisioning profiles
-    sync_code_signing(
-      type: "appstore",
-      app_identifier: "com.restore614.trussctr",
-      username: "jeffrey88newell@gmail.com",
-      team_id: "MSHVPW5B8U",
-      readonly: false
+    # Use Xcode automatic signing
+    automatic_code_signing(
+      path: "ios/App/App.xcodeproj",
+      use_automatic_signing: true,
+      team_id: "F8DF3ML3MW"
     )
 
     # Bump build number automatically
@@ -21,8 +19,13 @@ platform :ios do
     # Build the app
     build_app(
       scheme: "App",
-      workspace: "ios/App/App.xcworkspace",
+      project: "ios/App/App.xcodeproj",
       export_method: "app-store",
+      xcargs: "-allowProvisioningUpdates",
+      export_options: {
+        signingStyle: "automatic",
+        teamID: "F8DF3ML3MW"
+      },
       output_directory: "./build",
       output_name: "TrussCTR.ipa",
       clean: true
@@ -32,32 +35,8 @@ platform :ios do
     upload_to_testflight(
       username: "jeffrey88newell@gmail.com",
       app_identifier: "com.restore614.trussctr",
-      team_id: "MSHVPW5B8U",
+      team_id: "F8DF3ML3MW",
       skip_waiting_for_build_processing: true
-    )
-  end
-
-  desc "Build only (no upload)"
-  lane :build_only do
-    sync_code_signing(
-      type: "appstore",
-      app_identifier: "com.restore614.trussctr",
-      username: "jeffrey88newell@gmail.com",
-      team_id: "MSHVPW5B8U",
-      readonly: false
-    )
-
-    increment_build_number(
-      xcodeproj: "ios/App/App.xcodeproj"
-    )
-
-    build_app(
-      scheme: "App",
-      workspace: "ios/App/App.xcworkspace",
-      export_method: "app-store",
-      output_directory: "./build",
-      output_name: "TrussCTR.ipa",
-      clean: true
     )
   end
 
