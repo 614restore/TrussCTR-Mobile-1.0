@@ -215,14 +215,6 @@ export default function Pipeline() {
     return timeLabel ? `${dayLabel} · ${timeLabel}` : dayLabel;
   };
 
-  // Contacts sorted alphabetically (last name, then first name) for list & map views
-  const alphabeticContacts = [...filteredContacts].sort((a, b) => {
-    const lastA = (a.last_name || '').toLowerCase();
-    const lastB = (b.last_name || '').toLowerCase();
-    if (lastA !== lastB) return lastA.localeCompare(lastB);
-    return (a.first_name || '').toLowerCase().localeCompare((b.first_name || '').toLowerCase());
-  });
-
   const openNavigation = (e: React.MouseEvent, address: string, city?: string, state?: string, zip?: string) => {
     e.stopPropagation();
     const parts = [address, city, state, zip].filter(Boolean);
@@ -267,6 +259,14 @@ export default function Pipeline() {
       .toLowerCase();
 
     return haystack.includes(normalizedQuery);
+  });
+
+  // Contacts sorted alphabetically (last name, then first name) for list & map views
+  const alphabeticContacts = [...filteredContacts].sort((a, b) => {
+    const lastA = (a.last_name || '').toLowerCase();
+    const lastB = (b.last_name || '').toLowerCase();
+    if (lastA !== lastB) return lastA.localeCompare(lastB);
+    return (a.first_name || '').toLowerCase().localeCompare((b.first_name || '').toLowerCase());
   });
 
   const scrollSections = (direction: 'left' | 'right') => {
