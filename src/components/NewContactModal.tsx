@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { X, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../lib/supabase';
@@ -205,12 +206,12 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
   const labelCls = 'text-xs font-bold text-slate-600 ml-1';
   const sectionHdr = 'text-[10px] font-bold text-slate-400 uppercase tracking-widest';
 
-  return (
+  return ReactDOM.createPortal(
     <AnimatePresence>
       {isOpen && (
         <div
-          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center px-0 sm:px-4 sm:pb-0"
-          style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))', overflowX: 'hidden' }}
+          className="fixed inset-0 z-[9999] flex items-end justify-center"
+          style={{ overflowX: 'hidden' }}
         >
           <motion.div
             initial={{ opacity: 0 }}
@@ -224,8 +225,13 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
             initial={{ opacity: 0, y: 100 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 100 }}
-            className="relative w-full max-w-lg bg-white rounded-t-[32px] sm:rounded-[32px] shadow-2xl flex max-h-[88dvh] flex-col overflow-hidden"
-            style={{ maxWidth: '100vw', overflowX: 'hidden' }}
+            className="relative w-full bg-white rounded-t-[32px] shadow-2xl flex flex-col overflow-hidden"
+            style={{
+              maxWidth: '100vw',
+              overflowX: 'hidden',
+              maxHeight: 'calc(100dvh - env(safe-area-inset-top, 44px) - 1rem)',
+              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+            }}
           >
             {/* Header */}
             <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex justify-between items-center bg-white flex-shrink-0">
@@ -502,6 +508,7 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
           </motion.div>
         </div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
