@@ -77,8 +77,8 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
     return 'Failed to create contact. Please try again.';
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
 
     const firstName = formData.first_name.trim();
     const lastName  = formData.last_name.trim();
@@ -240,6 +240,15 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
                 <X size={20} className="text-slate-400" />
               </button>
             </div>
+
+            {/* Error banner — always visible below header */}
+            {saveError && (
+              <div className="mx-6 mt-3 rounded-2xl bg-red-50 border border-red-100 px-4 py-3 flex items-start gap-2">
+                <span className="text-red-500 text-xs font-bold mt-0.5">⚠</span>
+                <p className="text-xs text-red-700 font-medium flex-1">{saveError}</p>
+                <button type="button" onClick={() => setSaveError(null)} className="text-red-400 text-xs">✕</button>
+              </div>
+            )}
 
             {/* Scrollable form body */}
             <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
@@ -484,16 +493,10 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
               </div>
 
               {/* Footer */}
-              <div className="border-t border-slate-100 bg-white px-6 pt-4 pb-6 space-y-3">
-                {saveError && (
-                  <div className="rounded-2xl bg-red-50 border border-red-100 px-4 py-3 flex items-start gap-2">
-                    <span className="text-red-500 text-xs font-bold mt-0.5">⚠</span>
-                    <p className="text-xs text-red-700 font-medium flex-1">{saveError}</p>
-                    <button type="button" onClick={() => setSaveError(null)} className="text-red-400 text-xs">✕</button>
-                  </div>
-                )}
+              <div className="border-t border-slate-100 bg-white px-6 pt-4 pb-6">
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSubmit()}
                   disabled={loading}
                   className="w-full bg-primary text-white py-5 rounded-[24px] font-bold shadow-xl shadow-primary/20 active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
                 >
