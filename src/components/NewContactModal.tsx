@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { X, ChevronDown, ChevronUp } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Capacitor } from '@capacitor/core';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 
@@ -57,6 +58,17 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
       setSaveError(null);
       setShowInsurance(false);
       setShowSchedule(false);
+      return;
+    }
+    // Pre-warm the Supabase PostgREST connection on native iOS so the
+    // TCP/TLS handshake is done while the user fills the form, not when
+    // they tap Save.  HEAD request — no rows transferred.
+    if (Capacitor.isNativePlatform()) {
+      (supabase.from('contacts') as any)
+        .select('id', { count: 'exact', head: true })
+        .limit(1)
+        .then(() => {})
+        .catch(() => {});
     }
   }, [isOpen]);
 
@@ -95,25 +107,28 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
 
     setLoading(true);
     setSaveError(null);
-    // Safety valve: never spin longer than 20 seconds regardless of what hangs
+    // Safety valve: never spin longer than 15 seconds regardless of what hangs
     const saveTimer = setTimeout(() => {
       setLoading(false);
       setSaveError('Save timed out — check your connection and try again.');
-    }, 20000);
+    }, 15000);
     try {
-      // Resolve userId without blocking the main save if getSession hangs —
-      // fall back to cached values so iOS network hiccups can't freeze the form
-      const currentUserId: string | null = await Promise.race([
-        supabase.auth.getSession().then(({ data }) => data?.session?.user?.id ?? null),
-        new Promise<null>(res => setTimeout(() => res(null), 4000)),
-      ]) ?? user?.id ?? profile?.id ?? null;
+      // Use cached user ID — skipping getSession() avoids an extra network round-trip
+      // on slow mobile connections that eats into the timeout budget.
+      const currentUserId: string | null = user?.id ?? profile?.id ?? null;
 
       const shouldAdvanceToAppointmentSet =
         Boolean(formData.appt_date) &&
         formData.appt_type === 'inspection' &&
         ['lead', 'new_lead', 'contacted'].includes(formData.status);
 
+      // Generate UUID client-side so we don't need .select('id').single() after insert.
+      // This uses Prefer: return=minimal (no response body), which is faster on mobile
+      // and avoids the RLS SELECT policy evaluation on the insert response.
+      const contactId = crypto.randomUUID();
+
       const payload = {
+        id:         contactId,
         first_name: firstName,
         last_name:  lastName,
         phone1:  formData.phone1.trim()  || null,
@@ -149,43 +164,48 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
         status_changed_at: new Date().toISOString(),
       };
 
-      const { data, error } = await (supabase.from('contacts') as any)
-        .insert(payload)
-        .select('id')
-        .single();
+      const { error } = await (supabase.from('contacts') as any)
+        .insert(payload);
 
       if (error) throw error;
-      if (!data?.id) throw new Error('Contact save did not return a record. Please try again.');
 
-      const saveAppointment = async () => {
-        if (!formData.appt_date) return;
+      // Save appointment BEFORE closing so any error can be shown to the user
+      if (formData.appt_date) {
         const aptTitle =
           formData.appt_type === 'inspection' ? 'Inspection'
           : formData.appt_type === 'build'    ? 'Build / Installation'
           : formData.appt_notes.trim()        || 'Appointment';
 
+        const timePart = formData.appt_time.length === 5
+          ? `${formData.appt_time}:00`
+          : formData.appt_time;
+        const startISO = new Date(`${formData.appt_date}T${timePart}`).toISOString();
+        const endISO   = new Date(new Date(`${formData.appt_date}T${timePart}`).getTime() + 60 * 60 * 1000).toISOString();
+
         const { error: aptErr } = await (supabase as any).from('appointments').insert({
-          contact_id: data.id,
-          company_id: companyId,
-          date:   formData.appt_date,
-          time:   `${formData.appt_time}:00`,
-          title:  aptTitle,
-          type:   formData.appt_type,
-          status: 'scheduled',
-          location: formData.address.trim() || null,
+          contact_id:  contactId,
+          company_id:  companyId,
+          date:        formData.appt_date,
+          time:        timePart,
+          start_time:  startISO,
+          end_time:    endISO,
+          title:       aptTitle,
+          type:        formData.appt_type,
+          status:      'scheduled',
+          location:    formData.address.trim() || null,
           assigned_to: currentUserId,
         });
 
         if (aptErr) {
           console.error('[NewContact] Appointment insert error:', aptErr);
+          setSaveError(`Contact saved but appointment could not be scheduled: ${aptErr.message || 'Unknown error'}`);
+          setLoading(false);
+          return;
         }
-      };
+      }
 
       setLoading(false);
       onClose();
-      void saveAppointment().catch((appointmentErr) => {
-        console.error('[NewContact] Post-save appointment error:', appointmentErr);
-      });
       Promise.resolve(onSuccess()).catch((refreshErr) => {
         console.error('[NewContact] Post-save refresh error:', refreshErr);
       });

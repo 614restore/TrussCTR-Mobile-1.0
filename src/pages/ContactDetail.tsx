@@ -484,6 +484,15 @@ export default function ContactDetail() {
     const parsed = parseContactSchedule(contact?.notes);
     setEditForm({ ...contact, notes: parsed.plainNotes });
     setIsEditing(true);
+    // Pre-warm the Supabase connection so Save doesn't pay the TCP/TLS
+    // setup cost after the user has spent time filling in the form.
+    if (Capacitor.isNativePlatform()) {
+      (supabase.from('contacts') as any)
+        .select('id', { count: 'exact', head: true })
+        .limit(1)
+        .then(() => {})
+        .catch(() => {});
+    }
   };
 
   const saveEdit = async () => {
@@ -510,8 +519,13 @@ export default function ContactDetail() {
         updates.status_changed_at = new Date().toISOString();
       }
 
+      // Strip DB-managed fields — sending id/created_at/updated_at inflates the payload
+      // and makes PostgREST do unnecessary work, which tips over the timeout on slow mobile.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { id: _id, created_at: _ca, updated_at: _ua, ...cleanUpdates } = updates;
+
       // Race the Supabase call against a 15-second timeout so it never hangs forever on iOS
-      const updatePromise = (supabase.from('contacts') as any).update(updates).eq('id', editForm.id);
+      const updatePromise = (supabase.from('contacts') as any).update(cleanUpdates).eq('id', editForm.id);
       const timeoutPromise = new Promise<{ error: Error }>((_resolve, reject) =>
         setTimeout(() => reject(new Error('Save timed out — check your connection and try again.')), 15000)
       );
