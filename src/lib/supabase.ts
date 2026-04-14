@@ -43,9 +43,18 @@ const fetchWithTimeout = Capacitor.isNativePlatform()
         readTimeout:    TIMEOUT_MS,
       });
 
+      // Strip forbidden response headers (e.g. Set-Cookie) before constructing
+      // the Response object — WebKit throws "The string did not match the
+      // expected pattern" if these are passed to the Response constructor.
+      const FORBIDDEN = new Set(['set-cookie', 'set-cookie2']);
+      const safeHeaders: Record<string, string> = {};
+      Object.entries(res.headers || {}).forEach(([k, v]) => {
+        if (!FORBIDDEN.has(k.toLowerCase())) safeHeaders[k] = v;
+      });
+
       return new Response(
         res.data != null && (res.data as string).length > 0 ? res.data as string : null,
-        { status: res.status, headers: res.headers as HeadersInit }
+        { status: res.status, headers: safeHeaders }
       );
     }
   : (url: RequestInfo | URL, options?: RequestInit): Promise<Response> => {
