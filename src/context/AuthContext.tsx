@@ -127,6 +127,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setProfile(null);
           return;
         }
+
+        // If the token expires within the next 5 minutes, refresh it now
+        // while the user is reading the screen — not mid-save when they tap
+        // a button. This prevents the auth refresh from eating into the
+        // write timeout budget on the next Supabase call.
+        const expiresAt = session.expires_at ?? 0; // unix seconds
+        const fiveMinutes = 5 * 60;
+        if (expiresAt - Date.now() / 1000 < fiveMinutes) {
+          supabase.auth.refreshSession().catch(() => {/* silent — will retry on next request */});
+        }
+
         setSession(session);
         setUser(session.user);
         setProfile(prev => {
