@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase, supabaseUrl } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
-import { Lock, Eye, EyeOff, CheckCircle, AlertCircle } from 'lucide-react';
+import { Lock, Eye, EyeOff, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
 
 // Shown when must_change_password = true (temp password), after a Supabase
@@ -110,13 +110,8 @@ export default function ResetPassword() {
 
     setLoading(true);
     try {
-      // Always use the service-role edge function — it bypasses both the
-      // "Secure password change" restriction (blocks updateUser() on normal
-      // SIGNED_IN sessions) and any implicit-flow token limitations.
-      //
-      // Retry getSession up to 3 times with a short delay — detectSessionInUrl
-      // auto-processes the hash tokens concurrently with the manual setSession()
-      // call in establishRecoverySession, which can cause "Lock was stolen" races.
+      // Retry getSession up to 3 times — detectSessionInUrl can race with
+      // the manual setSession() call in establishRecoverySession.
       let session = null;
       for (let attempt = 0; attempt < 3; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, 350));
@@ -125,16 +120,33 @@ export default function ResetPassword() {
       }
       if (!session?.access_token) throw new Error('No active session. Please use the reset link from your email.');
 
-      const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`,
-        },
-        body: JSON.stringify({ password }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data?.error || `Server error (${res.status}). Please try again.`);
+      // Try the edge function first (clears must_change_password atomically).
+      // Fall back to direct Supabase updateUser() if the function is unreachable.
+      let edgeFailed = false;
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/confirm-password-change`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { edgeFailed = true; console.warn('[ResetPassword] Edge fn error:', data?.error); }
+      } catch {
+        edgeFailed = true;
+        console.warn('[ResetPassword] Edge function unreachable — using fallback');
+      }
+
+      if (edgeFailed) {
+        const { error: directErr } = await supabase.auth.updateUser({ password });
+        if (directErr) throw new Error(directErr.message);
+        // Clear must_change_password flag directly
+        if (session.user?.id) {
+          await supabase.from('profiles').update({ must_change_password: false }).eq('id', session.user.id);
+        }
+      }
 
       clearRecoverySession();
       setSuccess(true);
@@ -246,6 +258,18 @@ export default function ResetPassword() {
               )}
             </button>
           </form>
+        )}
+
+        {/* Escape hatch — prevents users being permanently trapped on this screen */}
+        {!success && (
+          <button
+            type="button"
+            onClick={() => supabase.auth.signOut().then(() => navigate('/login'))}
+            className="flex items-center justify-center gap-1.5 w-full text-xs text-slate-400 hover:text-slate-600 transition-colors py-2"
+          >
+            <LogOut size={13} />
+            Sign out and return to login
+          </button>
         )}
       </div>
     </div>

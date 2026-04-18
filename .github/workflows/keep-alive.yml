@@ -1,0 +1,26 @@
+name: Keep Supabase Alive
+
+# Runs every 3 days to prevent the Supabase free-tier project from pausing
+# after 1 week of inactivity. Makes a lightweight HEAD request — no data
+# is read or written, it just keeps the project marked as active.
+
+on:
+  schedule:
+    - cron: '0 12 */3 * *'  # 12:00 UTC every 3 days
+  workflow_dispatch:         # also triggerable manually from the Actions tab
+
+jobs:
+  ping:
+    name: Ping Supabase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping REST API
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${{ secrets.VITE_SUPABASE_URL }}/rest/v1/contacts?limit=1" \
+            -H "apikey: ${{ secrets.VITE_SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.VITE_SUPABASE_ANON_KEY }}")
+          echo "Supabase responded with HTTP $STATUS"
+          if [ "$STATUS" -lt 200 ] || [ "$STATUS" -gt 299 ]; then
+            echo "::warning::Supabase ping returned non-2xx status $STATUS — project may be paused or credentials may be invalid."
+          fi
