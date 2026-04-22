@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Mail, Lock, AlertCircle, CheckCircle, ArrowRight, Eye, EyeOff } from 'lucide-react';
+import { Mail, Lock, AlertCircle, CheckCircle, Eye, EyeOff } from 'lucide-react';
 import trussLogo from '../assets/trussctr-logo.png';
 import { getPasswordResetRedirectUrl } from '../lib/authRedirect';
 
@@ -18,7 +18,6 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
     setError(null);
-
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
@@ -33,7 +32,7 @@ export default function Login() {
         msg.toLowerCase().includes('network') ||
         msg.toLowerCase().includes('fetch')
       ) {
-        setError('Unable to reach the server. Check your internet connection and try again.');
+        setError('Unable to reach the server. Check your connection and try again.');
       } else {
         setError(msg || 'Sign-in failed. Please try again.');
       }
@@ -44,16 +43,11 @@ export default function Login() {
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email) {
-      setError('Please enter your email address first.');
-      return;
-    }
+    if (!email) { setError('Please enter your email address first.'); return; }
     setForgotLoading(true);
     setError(null);
     try {
       const redirectTo = getPasswordResetRedirectUrl();
-      // On Capacitor (native), redirectTo is null — omit it and let Supabase
-      // use the redirect URL configured in the dashboard (Auth → URL Configuration).
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
         ...(redirectTo ? { redirectTo } : {}),
       });
@@ -67,7 +61,7 @@ export default function Login() {
         msg.toLowerCase().includes('network') ||
         msg.toLowerCase().includes('fetch')
       ) {
-        setError('Unable to reach the server. Check your internet connection and try again.');
+        setError('Unable to reach the server. Check your connection and try again.');
       } else {
         setError(msg || 'Failed to send reset email. Please try again.');
       }
@@ -76,82 +70,105 @@ export default function Login() {
     }
   };
 
+  const BG_DARK = '#0a1628';
+  const CARD_BG = 'rgba(255,255,255,0.07)';
+  const INPUT_BG = 'rgba(255,255,255,0.08)';
+  const INPUT_BORDER = 'rgba(255,255,255,0.12)';
+
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(160deg, #0f172a 0%, #1E3A5F 55%, #1e3a5f 100%)' }}>
+    <div
+      className="min-h-screen flex flex-col overflow-hidden relative"
+      style={{ background: `linear-gradient(160deg, #0d1f3c 0%, ${BG_DARK} 60%)` }}
+    >
       {/* Safe area top */}
       <div style={{ height: 'env(safe-area-inset-top)' }} />
 
-      {/* Hero — logo + wordmark */}
-      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-10 pb-6">
-        <div className="flex flex-col items-center gap-5">
-          {/* Logo with glow */}
-          <div
-            className="h-24 w-24 rounded-[2rem] overflow-hidden border border-white/10"
-            style={{
-              boxShadow: '0 0 40px rgba(59,130,246,0.35), 0 8px 32px rgba(0,0,0,0.4)',
-            }}
-          >
-            <img src={trussLogo} alt="TrussCTR" className="h-full w-full object-cover" />
-          </div>
+      {/* Watermark logo */}
+      <div
+        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+        aria-hidden
+      >
+        <img
+          src={trussLogo}
+          alt=""
+          className="w-80 h-80 object-contain"
+          style={{ opacity: 0.04 }}
+        />
+      </div>
 
+      {/* Hero wordmark */}
+      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-12 pb-4 relative z-10">
+        <div className="flex flex-col items-center gap-3">
+          <img src={trussLogo} alt="TrussCTR" className="h-20 w-20 object-contain rounded-2xl" />
           <div className="text-center space-y-1">
-            <h1 className="text-4xl font-bold text-white tracking-tight">TrussCTR</h1>
-            <p className="text-blue-300/80 text-sm font-medium tracking-wide">Contractor CRM · Mobile</p>
+            <h1 className="text-4xl font-extrabold tracking-tight">
+              <span className="text-white">Truss</span><span style={{ color: '#3B82F6' }}>CTR</span>
+            </h1>
+            <p
+              className="text-xs font-bold uppercase tracking-[0.25em]"
+              style={{ color: '#3B82F6' }}
+            >
+              Contractor CRM · Mobile
+            </p>
           </div>
         </div>
       </div>
 
-      {/* Form card — slides up from the bottom */}
+      {/* Glass card */}
       <div
-        className="w-full rounded-t-[2.5rem] px-6 pt-8 pb-6"
-        style={{
-          background: 'rgba(255,255,255,0.97)',
-          boxShadow: '0 -8px 40px rgba(0,0,0,0.25)',
-          paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))',
-        }}
+        className="relative z-10 w-full px-5 pb-6"
+        style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
       >
-        {/* ── Forgot sent confirmation ── */}
-        {forgotSent ? (
-          <div className="space-y-6">
-            <div className="flex flex-col items-center gap-4 text-center py-4">
-              <div className="h-16 w-16 rounded-full bg-emerald-50 flex items-center justify-center">
-                <CheckCircle size={34} className="text-emerald-500" />
-              </div>
+        <div
+          className="rounded-3xl px-6 pt-6 pb-7"
+          style={{
+            background: CARD_BG,
+            border: `1px solid ${INPUT_BORDER}`,
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            boxShadow: '0 8px 40px rgba(0,0,0,0.4)',
+          }}
+        >
+
+          {/* ── Reset sent confirmation ── */}
+          {forgotSent ? (
+            <div className="flex flex-col items-center gap-4 py-4 text-center">
+              <CheckCircle size={48} style={{ color: '#3B82F6' }} />
               <div className="space-y-1">
-                <p className="font-bold text-slate-800 text-lg">Check your inbox</p>
-                <p className="text-sm text-slate-500 leading-relaxed">
-                  We sent a password reset link to <span className="font-semibold text-slate-700">{email}</span>. Follow the link in the email to set a new password.
+                <p className="text-white font-bold text-lg">Check your inbox</p>
+                <p className="text-white/60 text-sm leading-relaxed">
+                  We sent a reset link to{' '}
+                  <span className="text-white font-semibold">{email}</span>.
+                  Follow the link to set a new password.
                 </p>
               </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setForgotMode(false); setForgotSent(false); setError(null); }}
-              className="w-full bg-accent text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all"
-            >
-              Back to Sign In
-            </button>
-          </div>
-
-        /* ── Forgot password form ── */
-        ) : forgotMode ? (
-          <form onSubmit={handleForgotPassword} className="space-y-5">
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold text-slate-800">Reset Password</h2>
-              <p className="text-sm text-slate-500">Enter your email and we'll send a reset link.</p>
+              <button
+                onClick={() => { setForgotMode(false); setForgotSent(false); setError(null); }}
+                className="mt-2 w-full py-4 rounded-2xl font-bold text-white text-base active:scale-95 transition-all"
+                style={{ background: 'linear-gradient(135deg, #3B82F6, #1E3A5F)', boxShadow: '0 4px 20px rgba(59,130,246,0.4)' }}
+              >
+                Back to Sign In
+              </button>
             </div>
 
-            {error && (
-              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm">
-                <AlertCircle size={18} className="shrink-0" />
-                <span className="font-medium">{error}</span>
+          /* ── Forgot password form ── */
+          ) : forgotMode ? (
+            <form onSubmit={handleForgotPassword} className="space-y-5">
+              <div className="space-y-0.5">
+                <h2 className="text-white text-xl font-bold">Reset Password</h2>
+                <p className="text-white/50 text-sm">Enter your email to receive a reset link.</p>
               </div>
-            )}
 
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email Address</label>
+              {error && (
+                <div className="flex items-center gap-2 bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-2xl text-sm">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* Email */}
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.4)' }} />
                 <input
                   type="email"
                   required
@@ -159,120 +176,149 @@ export default function Login() {
                   inputMode="email"
                   autoCapitalize="none"
                   autoCorrect="off"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-11 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
-                  placeholder="you@company.com"
+                  placeholder="Email address"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  className="w-full py-4 pl-11 pr-4 rounded-2xl text-white text-sm outline-none transition-all"
+                  style={{
+                    background: INPUT_BG,
+                    border: `1px solid ${INPUT_BORDER}`,
+                    caretColor: '#3B82F6',
+                  }}
+                  onFocus={e => (e.target.style.borderColor = 'rgba(59,130,246,0.6)')}
+                  onBlur={e => (e.target.style.borderColor = INPUT_BORDER)}
                 />
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={forgotLoading}
-              className="w-full bg-accent text-white font-bold py-4 rounded-2xl shadow-lg shadow-accent/20 active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2"
-            >
-              {forgotLoading ? (
-                <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <>Send Reset Link <ArrowRight size={18} /></>
-              )}
-            </button>
+              <button
+                type="submit"
+                disabled={forgotLoading}
+                className="w-full py-4 rounded-2xl font-bold text-white text-base active:scale-95 transition-all disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, #3B82F6, #1E3A5F)', boxShadow: '0 4px 20px rgba(59,130,246,0.4)' }}
+              >
+                {forgotLoading
+                  ? <span className="flex items-center justify-center gap-2"><span className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /></span>
+                  : 'Send Reset Link'}
+              </button>
 
-            <button
-              type="button"
-              onClick={() => { setForgotMode(false); setError(null); }}
-              className="w-full text-slate-400 text-xs font-bold uppercase tracking-widest py-2 hover:text-slate-600 transition-colors"
-            >
-              Back to Sign In
-            </button>
-          </form>
-
-        /* ── Sign in form ── */
-        ) : (
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold text-slate-800">Welcome back</h2>
-              <p className="text-sm text-slate-500">Sign in to your account to continue.</p>
-            </div>
-
-            {error && (
-              <div className="bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl flex items-center gap-3 text-sm">
-                <AlertCircle size={18} className="shrink-0" />
-                <span className="font-medium">{error}</span>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {/* Email */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Email</label>
-                <div className="relative">
-                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input
-                    type="email"
-                    required
-                    inputMode="email"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-11 pr-4 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              {/* Password */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Password</label>
-                <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-4 pl-11 pr-12 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-all"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    tabIndex={-1}
-                    onClick={() => setShowPassword(v => !v)}
-                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 active:text-slate-600 transition-colors"
-                  >
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Forgot password link */}
-            <div className="flex justify-end -mt-1">
               <button
                 type="button"
-                onClick={() => { setForgotMode(true); setError(null); }}
-                className="text-accent text-xs font-semibold hover:text-accent/80 transition-colors"
+                onClick={() => { setForgotMode(false); setError(null); }}
+                className="w-full text-center text-white/40 text-xs font-bold uppercase tracking-widest py-1 active:opacity-60 transition-opacity"
               >
-                Forgot password?
+                Back to Sign In
               </button>
-            </div>
+            </form>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-all disabled:opacity-60 flex items-center justify-center gap-2 text-white"
-              style={{ background: 'linear-gradient(135deg, #3B82F6 0%, #1E3A5F 100%)', boxShadow: '0 4px 20px rgba(59,130,246,0.35)' }}
-            >
-              {loading ? (
-                <div className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <>Sign In <ArrowRight size={18} /></>
+          /* ── Sign in form ── */
+          ) : (
+            <form onSubmit={handleLogin} className="space-y-4">
+              {/* Tab-style header — matches QuoteMGR aesthetic */}
+              <div className="flex border-b pb-4" style={{ borderColor: 'rgba(255,255,255,0.1)' }}>
+                <div className="flex-1 text-center">
+                  <span
+                    className="text-base font-bold pb-3 inline-block border-b-2"
+                    style={{ color: '#3B82F6', borderColor: '#3B82F6' }}
+                  >
+                    Sign In
+                  </span>
+                </div>
+              </div>
+
+              {error && (
+                <div className="flex items-center gap-2 bg-red-500/15 border border-red-500/30 text-red-300 px-4 py-3 rounded-2xl text-sm">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>{error}</span>
+                </div>
               )}
-            </button>
-          </form>
-        )}
+
+              {/* Email field */}
+              <div className="relative">
+                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.4)' }} />
+                <input
+                  type="email"
+                  required
+                  inputMode="email"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  placeholder="Email address"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full py-4 pl-11 pr-4 rounded-2xl text-white text-sm outline-none transition-all"
+                  style={{
+                    background: INPUT_BG,
+                    border: `1px solid ${INPUT_BORDER}`,
+                    caretColor: '#3B82F6',
+                  }}
+                  onFocus={e => (e.target.style.borderColor = 'rgba(59,130,246,0.6)')}
+                  onBlur={e => (e.target.style.borderColor = INPUT_BORDER)}
+                />
+              </div>
+
+              {/* Password field */}
+              <div className="relative">
+                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2" style={{ color: 'rgba(255,255,255,0.4)' }} />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="Password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full py-4 pl-11 pr-12 rounded-2xl text-white text-sm outline-none transition-all"
+                  style={{
+                    background: INPUT_BG,
+                    border: `1px solid ${INPUT_BORDER}`,
+                    caretColor: '#3B82F6',
+                  }}
+                  onFocus={e => (e.target.style.borderColor = 'rgba(59,130,246,0.6)')}
+                  onBlur={e => (e.target.style.borderColor = INPUT_BORDER)}
+                />
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => setShowPassword(v => !v)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 transition-opacity active:opacity-60"
+                  style={{ color: 'rgba(255,255,255,0.4)' }}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+
+              {/* Forgot password */}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => { setForgotMode(true); setError(null); }}
+                  className="text-sm font-medium transition-opacity active:opacity-60"
+                  style={{ color: 'rgba(255,255,255,0.5)' }}
+                >
+                  Forgot Password?
+                </button>
+              </div>
+
+              {/* Sign in button */}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-4 rounded-2xl font-bold text-white text-base active:scale-95 transition-all disabled:opacity-60 mt-1"
+                style={{
+                  background: 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
+                  boxShadow: '0 4px 24px rgba(59,130,246,0.45)',
+                }}
+              >
+                {loading
+                  ? <span className="flex items-center justify-center gap-2"><span className="h-5 w-5 border-2 border-white border-t-transparent rounded-full animate-spin inline-block" /></span>
+                  : 'Sign In'}
+              </button>
+
+              {/* Invite note */}
+              <p className="text-center text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                Need access?{' '}
+                <span style={{ color: 'rgba(255,255,255,0.5)' }}>Contact your company admin.</span>
+              </p>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );

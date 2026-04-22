@@ -40,7 +40,7 @@ type WorkOrderRow = Database['public']['Tables']['work_orders']['Row'];
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { profile, loading: loadingAuth } = useAuth();
+  const { profile, user, loading: loadingAuth } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [stats, setStats] = useState({
     pipelineValue: 0,
