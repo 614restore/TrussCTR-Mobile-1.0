@@ -214,7 +214,10 @@ export default function Dashboard() {
 
   const totalContacts = (Object.values(stageCounts) as number[]).reduce((a, b) => a + b, 0);
 
-  if (loadingAuth) return (
+  // Show spinner while auth is loading OR while user is authenticated but profile
+  // hasn't arrived yet (profile loads async after the 1.5s splash timeout).
+  // Only show NoProfileState after we're confident the profile fetch is truly done.
+  if (loadingAuth || (user && !profile)) return (
     <div className="h-full flex items-center justify-center">
       <div className="animate-spin rounded-full h-8 w-8 border-4 border-accent border-t-transparent"></div>
     </div>

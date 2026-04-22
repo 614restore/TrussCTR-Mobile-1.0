@@ -65,7 +65,7 @@ const STAGES: StageConfig[] = [
 
 export default function Pipeline() {
   const navigate = useNavigate();
-  const { profile, loading: loadingAuth } = useAuth();
+  const { profile, user, loading: loadingAuth } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'kanban' | 'list' | 'map'>('kanban');
   const [searchQuery, setSearchQuery] = useState('');
@@ -224,7 +224,7 @@ export default function Pipeline() {
     window.open(isIOS ? `maps://maps.apple.com/?q=${query}` : `https://maps.google.com/?q=${query}`, '_blank', 'noopener');
   };
 
-  if (loadingAuth) return (
+  if (loadingAuth || (user && !profile)) return (
     <div className="h-full flex items-center justify-center">
       <div className="animate-spin rounded-full h-8 w-8 border-4 border-accent border-t-transparent"></div>
     </div>

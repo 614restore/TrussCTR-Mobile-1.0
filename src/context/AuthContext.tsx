@@ -196,6 +196,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       if (data) {
+        // If company_id is set but the join returned no company data (RLS timing issue),
+        // fetch the company separately as a fallback so the UI always has company info.
+        if (data.company_id && !data.companies) {
+          const { data: companyData } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('id', data.company_id)
+            .maybeSingle();
+          if (companyData) data = { ...data, companies: companyData };
+        }
         setProfile(data as any);
       }
     } catch (err) {
