@@ -68,12 +68,21 @@ export default function More() {
     <div className="w-full max-w-full overflow-x-hidden p-6 space-y-8">
       {/* Profile Header */}
         <div className="flex min-w-0 items-center gap-4">
-        <div className="h-16 w-16 rounded-3xl bg-slate-200 border-4 border-white shadow-lg overflow-hidden">
-          <img 
-            src={profile?.avatar_url || `https://picsum.photos/seed/${user?.id}/200/200`} 
-            alt="Avatar" 
-            referrerPolicy="no-referrer" 
-          />
+        <div className="h-16 w-16 rounded-3xl border-4 border-white shadow-lg overflow-hidden shrink-0">
+          {profile?.avatar_url ? (
+            <img
+              src={profile.avatar_url}
+              alt="Avatar"
+              referrerPolicy="no-referrer"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="h-full w-full bg-accent flex items-center justify-center">
+              <span className="text-white text-xl font-bold select-none">
+                {profile?.first_name?.[0]?.toUpperCase() || profile?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || '?'}
+              </span>
+            </div>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-bold text-primary">{profile?.first_name ? `${profile.first_name} ${profile.last_name || ''}` : profile?.name || user?.email?.split('@')[0]}</h1>

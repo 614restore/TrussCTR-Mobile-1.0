@@ -5,16 +5,20 @@ function normalizeBaseUrl(rawUrl?: string | null) {
   return trimmed.replace(/\/+$/, '');
 }
 
-export function getPasswordResetRedirectUrl() {
+export function getPasswordResetRedirectUrl(): string | null {
   const configuredBaseUrl = normalizeBaseUrl(import.meta.env.VITE_APP_URL);
 
   if (configuredBaseUrl) {
     return `${configuredBaseUrl}/reset-password`;
   }
 
-  if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+  const proto = window.location.protocol;
+  if (proto === 'http:' || proto === 'https:') {
     return `${window.location.origin}/reset-password`;
   }
 
+  // Capacitor/native: protocol is "capacitor:" — no origin-based URL is valid.
+  // Return null so the caller omits redirectTo and Supabase uses the URL
+  // configured in the dashboard (Authentication → URL Configuration → Redirect URLs).
   return null;
 }
