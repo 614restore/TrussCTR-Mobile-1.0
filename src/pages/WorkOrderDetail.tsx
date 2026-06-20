@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ChevronLeft, Calendar, MapPin, User, 
+import {
+  ChevronLeft, Calendar, MapPin, User,
   ClipboardList, Package, Clock, CheckCircle2,
-  Phone, Mail, MessageSquare, Truck
+  Phone, Mail, MessageSquare, Truck, X, Save, Plus, Trash2
 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -16,14 +16,22 @@ export default function WorkOrderDetail() {
   const { profile } = useAuth();
   const [order, setOrder] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<string | null>(null);
+
+  // Edit sheet state
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+
+  // Add material sheet state
+  const [showAddMaterial, setShowAddMaterial] = useState(false);
+  const [materialName, setMaterialName] = useState('');
+  const [materialQty, setMaterialQty] = useState('1');
+  const [addingMaterial, setAddingMaterial] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      fetchOrderDetail();
-    }
+    if (id) fetchOrderDetail();
   }, [id]);
-
-  const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
     if (toast) {
@@ -53,7 +61,7 @@ export default function WorkOrderDetail() {
         `)
         .eq('id', id)
         .single();
-      
+
       if (error) throw error;
       setOrder(data);
     } catch (err) {
@@ -65,14 +73,13 @@ export default function WorkOrderDetail() {
 
   const updateStatus = async (newStatus: string) => {
     try {
-      const { error } = await (supabase
-        .from('work_orders') as any)
+      const { error } = await (supabase.from('work_orders') as any)
         .update({
           status: newStatus,
           completed_date: newStatus === 'completed' ? new Date().toISOString() : null,
         })
         .eq('id', id);
-      
+
       if (error) throw error;
       const contactStatusMap: Record<string, string> = {
         scheduled: 'scheduled',
@@ -102,6 +109,91 @@ export default function WorkOrderDetail() {
     }
   };
 
+  const openEdit = () => {
+    setEditForm({
+      title: order.title || '',
+      scheduled_date: order.scheduled_date ? order.scheduled_date.slice(0, 10) : '',
+      assigned_to: order.assigned_to || '',
+      description: order.description || '',
+      labor_cost: order.labor_cost ?? '',
+      material_cost: order.material_cost ?? '',
+    });
+    setShowEdit(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const updates: any = {
+        title: editForm.title,
+        assigned_to: editForm.assigned_to || null,
+        description: editForm.description || null,
+        labor_cost: editForm.labor_cost !== '' ? parseFloat(editForm.labor_cost) : null,
+        material_cost: editForm.material_cost !== '' ? parseFloat(editForm.material_cost) : null,
+      };
+      if (editForm.scheduled_date) {
+        updates.scheduled_date = new Date(editForm.scheduled_date).toISOString();
+      }
+
+      const { error } = await (supabase.from('work_orders') as any)
+        .update(updates)
+        .eq('id', id);
+
+      if (error) throw error;
+      setOrder({ ...order, ...updates });
+      setShowEdit(false);
+      showToast('Work order updated');
+    } catch (err) {
+      console.error('Error saving work order:', err);
+      showToast('Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addMaterial = async () => {
+    if (!materialName.trim()) return;
+    setAddingMaterial(true);
+    try {
+      const qty = parseInt(materialQty) || 1;
+      const currentMaterials = (order.materials && typeof order.materials === 'object')
+        ? order.materials
+        : {};
+      const updated = { ...currentMaterials, [materialName.trim()]: qty };
+
+      const { error } = await (supabase.from('work_orders') as any)
+        .update({ materials: updated })
+        .eq('id', id);
+
+      if (error) throw error;
+      setOrder({ ...order, materials: updated });
+      setMaterialName('');
+      setMaterialQty('1');
+      setShowAddMaterial(false);
+      showToast('Material added');
+    } catch (err) {
+      console.error('Error adding material:', err);
+      showToast('Failed to add material');
+    } finally {
+      setAddingMaterial(false);
+    }
+  };
+
+  const removeMaterial = async (item: string) => {
+    try {
+      const updated = { ...order.materials };
+      delete updated[item];
+      const { error } = await (supabase.from('work_orders') as any)
+        .update({ materials: updated })
+        .eq('id', id);
+      if (error) throw error;
+      setOrder({ ...order, materials: updated });
+      showToast('Material removed');
+    } catch {
+      showToast('Failed to remove material');
+    }
+  };
+
   if (loading) return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center">
       <div className="animate-spin rounded-full h-8 w-8 border-4 border-accent border-t-transparent"></div>
@@ -126,6 +218,8 @@ export default function WorkOrderDetail() {
       default: return 'bg-slate-400';
     }
   };
+
+  const inputCls = 'w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-primary focus:outline-none focus:ring-2 focus:ring-accent bg-slate-50';
 
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
@@ -152,12 +246,7 @@ export default function WorkOrderDetail() {
         <div className="card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Customer Information</h2>
-            <button 
-              onClick={() => showToast('Edit feature coming soon')}
-              className="text-accent text-xs font-bold"
-            >
-              Edit
-            </button>
+            <button onClick={openEdit} className="text-accent text-xs font-bold">Edit</button>
           </div>
           <div className="flex items-center gap-4">
             <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-primary font-bold">
@@ -169,21 +258,21 @@ export default function WorkOrderDetail() {
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2 pt-2">
-            <a 
+            <a
               href={`tel:${order.contacts?.phone1}`}
               className="flex flex-col items-center gap-2 p-3 bg-slate-50 rounded-2xl active:scale-95 transition-transform"
             >
               <Phone size={18} className="text-blue-500" />
               <span className="text-[9px] font-bold text-slate-500 uppercase">Call</span>
             </a>
-            <a 
+            <a
               href={`sms:${order.contacts?.phone1}`}
               className="flex flex-col items-center gap-2 p-3 bg-slate-50 rounded-2xl active:scale-95 transition-transform"
             >
               <MessageSquare size={18} className="text-emerald-500" />
               <span className="text-[9px] font-bold text-slate-500 uppercase">SMS</span>
             </a>
-            <a 
+            <a
               href={`mailto:${order.contacts?.email}`}
               className="flex flex-col items-center gap-2 p-3 bg-slate-50 rounded-2xl active:scale-95 transition-transform"
             >
@@ -235,14 +324,9 @@ export default function WorkOrderDetail() {
         <div className="card p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Materials</h2>
-            <button 
-              onClick={() => showToast('Add material feature coming soon')}
-              className="text-accent text-xs font-bold"
-            >
-              Add Item
-            </button>
+            <button onClick={() => setShowAddMaterial(true)} className="text-accent text-xs font-bold">Add Item</button>
           </div>
-          {order.materials && typeof order.materials === 'object' ? (
+          {order.materials && typeof order.materials === 'object' && Object.keys(order.materials).length > 0 ? (
             <div className="space-y-3">
               {Object.entries(order.materials).map(([item, qty]: [string, any], i) => (
                 <div key={i} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
@@ -252,7 +336,15 @@ export default function WorkOrderDetail() {
                     </div>
                     <span className="text-sm font-medium text-primary">{item}</span>
                   </div>
-                  <span className="text-sm font-bold text-slate-600">x{qty}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-bold text-slate-600">x{qty}</span>
+                    <button
+                      onClick={() => removeMaterial(item)}
+                      className="p-1 text-slate-300 active:text-red-400 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -283,13 +375,13 @@ export default function WorkOrderDetail() {
 
       {/* Action Bar */}
       <div className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-100 p-4 flex gap-3 z-20">
-        <button 
+        <button
           onClick={() => updateStatus('in_progress')}
           className="flex-1 bg-slate-100 text-primary py-4 rounded-2xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-transform"
         >
           Start Job
         </button>
-        <button 
+        <button
           onClick={() => updateStatus('completed')}
           className="flex-1 bg-accent text-white py-4 rounded-2xl text-xs font-bold uppercase tracking-widest active:scale-95 transition-transform flex items-center justify-center gap-2"
         >
@@ -297,6 +389,181 @@ export default function WorkOrderDetail() {
           Complete Job
         </button>
       </div>
+
+      {/* Edit Bottom Sheet */}
+      <AnimatePresence>
+        {showEdit && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-30"
+              onClick={() => setShowEdit(false)}
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="fixed bottom-0 inset-x-0 bg-white rounded-t-3xl z-40 max-h-[85vh] overflow-y-auto"
+            >
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-primary">Edit Work Order</h2>
+                  <button onClick={() => setShowEdit(false)} className="p-2 text-slate-400">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Title</label>
+                    <input
+                      className={inputCls}
+                      value={editForm.title}
+                      onChange={e => setEditForm({ ...editForm, title: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Scheduled Date</label>
+                    <input
+                      type="date"
+                      className={inputCls}
+                      value={editForm.scheduled_date}
+                      onChange={e => setEditForm({ ...editForm, scheduled_date: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Assigned Crew</label>
+                    <input
+                      className={inputCls}
+                      value={editForm.assigned_to}
+                      onChange={e => setEditForm({ ...editForm, assigned_to: e.target.value })}
+                      placeholder="Crew name or ID"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Description</label>
+                    <textarea
+                      className={`${inputCls} resize-none`}
+                      rows={3}
+                      value={editForm.description}
+                      onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Labor Cost ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className={inputCls}
+                        value={editForm.labor_cost}
+                        onChange={e => setEditForm({ ...editForm, labor_cost: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Material Cost ($)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className={inputCls}
+                        value={editForm.material_cost}
+                        onChange={e => setEditForm({ ...editForm, material_cost: e.target.value })}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={saveEdit}
+                  disabled={saving || !editForm.title?.trim()}
+                  className="w-full bg-accent text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest active:scale-95 transition-transform flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {saving ? (
+                    <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  ) : (
+                    <Save size={16} />
+                  )}
+                  Save Changes
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Add Material Bottom Sheet */}
+      <AnimatePresence>
+        {showAddMaterial && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/40 z-30"
+              onClick={() => setShowAddMaterial(false)}
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              className="fixed bottom-0 inset-x-0 bg-white rounded-t-3xl z-40"
+            >
+              <div className="p-6 space-y-5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-primary">Add Material</h2>
+                  <button onClick={() => setShowAddMaterial(false)} className="p-2 text-slate-400">
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Item Name</label>
+                    <input
+                      className={inputCls}
+                      value={materialName}
+                      onChange={e => setMaterialName(e.target.value)}
+                      placeholder="e.g. Architectural Shingles"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Quantity</label>
+                    <input
+                      type="number"
+                      min="1"
+                      className={inputCls}
+                      value={materialQty}
+                      onChange={e => setMaterialQty(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={addMaterial}
+                  disabled={addingMaterial || !materialName.trim()}
+                  className="w-full bg-accent text-white py-4 rounded-2xl text-sm font-bold uppercase tracking-widest active:scale-95 transition-transform flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {addingMaterial ? (
+                    <div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  ) : (
+                    <Plus size={16} />
+                  )}
+                  Add Material
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Toast */}
       <AnimatePresence>

@@ -327,8 +327,8 @@ export default function DocumentSigner() {
   const companyState = extractState(companyAddress);
   // Use the contact's state for state-specific compliance (e.g. Ohio HSSA)
   const propertyState = (contact?.state || extractState(propertyAddress)).toUpperCase();
-  const contractorName = (profile as any)?.companies?.name || '614 Restore LLC';
-  const contractorPhone = (profile as any)?.companies?.phone || '(614) 808-8899';
+  const contractorName = (profile as any)?.companies?.name || '';
+  const contractorPhone = (profile as any)?.companies?.phone || '';
   const todayDate = new Date();
   const today = todayDate.toLocaleDateString();
   const cancelDeadline = addBusinessDays(todayDate, 3).toLocaleDateString();

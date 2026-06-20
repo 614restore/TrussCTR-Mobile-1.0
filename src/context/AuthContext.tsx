@@ -24,10 +24,32 @@ const AuthContext = createContext<AuthContextType>({
   refreshProfile: async () => {},
 });
 
+const PROFILE_CACHE_KEY = 'trussctr_profile_v2';
+
+function readProfileCache(): any | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeProfileCache(data: any) {
+  try { localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(data)); } catch {}
+}
+
+function clearProfileCache() {
+  try { localStorage.removeItem(PROFILE_CACHE_KEY); } catch {}
+}
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSession] = useState<any>(null);
   const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
+
+  // Seed profile from cache immediately so pages never flash placeholder data
+  const [profile, setProfile] = useState<any>(() => readProfileCache());
+
   const [loading, setLoading] = useState(true);
   const [isRecoverySession, setIsRecoverySession] = useState(false);
   const isFetchingProfile = useRef(false);
@@ -37,15 +59,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let isMounted = true;
 
-    // Hard timeout: always unblock the app within 1.5 seconds even if Supabase hangs.
-    // On native, the splash covers ~2s — this ensures the app never gets stuck behind
-    // a slow token refresh or network call.
+    // Hard timeout: always unblock the app within 3 seconds even if Supabase hangs.
     const loadingTimeout = window.setTimeout(() => {
       if (isMounted) {
         console.warn('[Auth] Loading timeout — forcing app unblock');
         setLoading(false);
       }
-    }, 1500);
+    }, 3000);
 
     const init = async () => {
       try {
@@ -53,18 +73,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (error) console.error('Error getting session:', error);
         if (!isMounted) return;
 
-        const session = data?.session ?? null;
-        setSession(session);
-        setUser(session?.user ?? null);
+        const currentSession = data?.session ?? null;
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
 
-        // Unblock the app immediately — profile loads in background
-        setLoading(false);
-
-        if (session?.user) {
-          lastUserId.current = session.user.id;
-          fetchProfile(session.user.id, session.user.email); // no await — background
+        if (currentSession?.user) {
+          lastUserId.current = currentSession.user.id;
+          // Await profile so loading stays true until data is ready (hard timeout is safety net)
+          await fetchProfile(currentSession.user.id, currentSession.user.email);
         } else {
           setProfile(null);
+          clearProfileCache();
+          setLoading(false);
         }
       } catch (err) {
         console.error('Auth init error:', err);
@@ -92,10 +112,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       if (event === 'TOKEN_REFRESHED' && session?.user) {
-        // After dormancy: token refreshed but profile may be null — re-fetch if needed
+        // Re-fetch profile if it went missing during dormancy
         setProfile(prev => {
-          if (!prev) {
-            isFetchingProfile.current = false; // allow re-fetch
+          if (!prev && !isFetchingProfile.current) {
+            isFetchingProfile.current = false;
             fetchProfile(session.user.id, session.user.email);
           }
           return prev;
@@ -111,6 +131,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         lastUserId.current = null;
         isFetchingProfile.current = false;
         setProfile(null);
+        clearProfileCache();
         setLoading(false);
       }
     });
@@ -125,24 +146,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setSession(null);
           setUser(null);
           setProfile(null);
+          clearProfileCache();
           return;
         }
 
-        // If the token expires within the next 5 minutes, refresh it now
-        // while the user is reading the screen — not mid-save when they tap
-        // a button. This prevents the auth refresh from eating into the
-        // write timeout budget on the next Supabase call.
-        const expiresAt = session.expires_at ?? 0; // unix seconds
+        // Proactively refresh the token if it expires within 5 minutes
+        const expiresAt = session.expires_at ?? 0;
         const fiveMinutes = 5 * 60;
         if (expiresAt - Date.now() / 1000 < fiveMinutes) {
-          supabase.auth.refreshSession().catch(() => {/* silent — will retry on next request */});
+          supabase.auth.refreshSession().catch(() => {});
         }
 
         setSession(session);
         setUser(session.user);
+
+        // Re-fetch profile in background if missing (e.g. after long dormancy)
         setProfile(prev => {
           if (!prev) {
-            isFetchingProfile.current = false; // clear stale guard
+            isFetchingProfile.current = false;
             fetchProfile(session.user.id, session.user.email);
           }
           return prev;
@@ -161,14 +182,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 
   const fetchProfile = async (userId: string, email?: string) => {
-    // Prevent duplicate simultaneous fetches
     if (isFetchingProfile.current) return;
     isFetchingProfile.current = true;
 
     try {
       const cleanEmail = email?.trim();
 
-      // Single query: fetch profile + company in one round trip via join
       const tryFetch = async (filter: { field: string; value: string }) => {
         return supabase
           .from('profiles')
@@ -177,12 +196,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           .maybeSingle();
       };
 
+      // Fetch profile (retry once on lock contention)
       let { data, error } = await tryFetch({ field: 'id', value: userId });
       if (error?.message?.includes('Lock was stolen')) {
         await new Promise((r) => setTimeout(r, 250));
         ({ data, error } = await tryFetch({ field: 'id', value: userId }));
       }
-
       if (error) console.error('Error fetching profile by id:', error);
 
       // Fallback: try by email if not found by id
@@ -196,17 +215,71 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       if (data) {
-        // If company_id is set but the join returned no company data (RLS timing issue),
-        // fetch the company separately as a fallback so the UI always has company info.
+        // If company join returned no data (RLS timing), retry with exponential backoff
         if (data.company_id && !data.companies) {
-          const { data: companyData } = await supabase
-            .from('companies')
-            .select('*')
-            .eq('id', data.company_id)
-            .maybeSingle();
-          if (companyData) data = { ...data, companies: companyData };
+          for (const delay of [300, 700, 1500]) {
+            await new Promise((r) => setTimeout(r, delay));
+            const { data: companyData } = await supabase
+              .from('companies')
+              .select('*')
+              .eq('id', data.company_id)
+              .maybeSingle();
+            if (companyData) {
+              data = { ...data, companies: companyData };
+              break;
+            }
+          }
         }
+
         setProfile(data as any);
+        writeProfileCache(data);
+      } else {
+        // No profile row — auto-create company + profile from signup metadata on first login
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (!authUser) return;
+
+          const meta = authUser.user_metadata ?? {};
+          const firstName = meta.first_name || cleanEmail?.split('@')[0] || 'Owner';
+          const lastName  = meta.last_name  || '';
+          const companyName = meta.company_name || `${firstName}'s Company`;
+
+          const { data: newCompany, error: companyErr } = await (supabase.from('companies') as any)
+            .insert({ name: companyName, email: cleanEmail })
+            .select()
+            .single();
+
+          if (companyErr && !companyErr.message?.includes('duplicate')) {
+            console.error('[Auth] Failed to create company:', companyErr);
+            return;
+          }
+
+          const companyId = newCompany?.id;
+          if (!companyId) return;
+
+          const { data: newProfile, error: profileErr } = await (supabase.from('profiles') as any)
+            .insert({
+              id: userId,
+              email: cleanEmail,
+              first_name: firstName,
+              last_name: lastName,
+              company_id: companyId,
+              role: 'owner',
+              is_active: true,
+            })
+            .select('*, companies(*)')
+            .single();
+
+          if (profileErr) {
+            console.error('[Auth] Failed to create profile:', profileErr);
+            return;
+          }
+
+          setProfile(newProfile as any);
+          writeProfileCache(newProfile);
+        } catch (createErr) {
+          console.error('[Auth] Auto-onboarding error:', createErr);
+        }
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
@@ -219,31 +292,49 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // Hide the native splash screen as soon as auth finishes loading
   useEffect(() => {
     if (!loading) {
-      SplashScreen.hide().catch(() => {/* web/non-native, ignore */});
+      SplashScreen.hide().catch(() => {});
     }
   }, [loading]);
 
-  // Safety-net: if user is present but profile is null after loading,
-  // schedule a recovery re-fetch. This covers any edge case the event handlers miss.
+  // Safety-net: if user is present but profile is null after loading, schedule recovery re-fetch
   useEffect(() => {
     if (loading || !user || profile) return;
     const timer = window.setTimeout(() => {
       console.warn('[Auth] User present but profile missing — attempting recovery fetch.');
-      isFetchingProfile.current = false; // bypass guard
+      isFetchingProfile.current = false;
       fetchProfile(user.id, user.email);
     }, 1500);
     return () => window.clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, user, profile]);
 
+  // Reconciler: if profile exists but companies is missing despite company_id,
+  // silently re-fetch the company row in the background (RLS race condition recovery)
+  useEffect(() => {
+    if (!profile?.company_id || profile?.companies) return;
+    const timer = window.setTimeout(async () => {
+      const { data: companyData } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', profile.company_id)
+        .maybeSingle();
+      if (companyData) {
+        const updated = { ...profile, companies: companyData };
+        setProfile(updated as any);
+        writeProfileCache(updated);
+      }
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.company_id, profile?.companies]);
+
   const refreshProfile = async () => {
     if (user?.id) {
       setLoading(true);
-      isFetchingProfile.current = false; // allow refresh to bypass guard
+      isFetchingProfile.current = false;
       await fetchProfile(user.id, user.email);
     }
   };
-
 
   const clearRecoverySession = () => setIsRecoverySession(false);
   const requestPasswordChange = () => setIsRecoverySession(true);
