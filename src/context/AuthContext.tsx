@@ -59,13 +59,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let isMounted = true;
 
-    // Hard timeout: always unblock the app within 3 seconds even if Supabase hangs.
+    // Hard timeout: always unblock the app within 1.5 seconds even if Supabase hangs.
     const loadingTimeout = window.setTimeout(() => {
       if (isMounted) {
         console.warn('[Auth] Loading timeout — forcing app unblock');
         setLoading(false);
       }
-    }, 3000);
+    }, 1500);
 
     const init = async () => {
       try {
@@ -215,22 +215,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
 
       if (data) {
-        // If company join returned no data (RLS timing), retry with exponential backoff
-        if (data.company_id && !data.companies) {
-          for (const delay of [300, 700, 1500]) {
-            await new Promise((r) => setTimeout(r, delay));
-            const { data: companyData } = await supabase
-              .from('companies')
-              .select('*')
-              .eq('id', data.company_id)
-              .maybeSingle();
-            if (companyData) {
-              data = { ...data, companies: companyData };
-              break;
-            }
-          }
-        }
-
+        // Set profile immediately — if companies is missing the reconciler useEffect
+        // will fetch it in the background without blocking login.
         setProfile(data as any);
         writeProfileCache(data);
       } else {
