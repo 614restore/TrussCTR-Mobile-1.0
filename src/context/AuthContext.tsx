@@ -207,6 +207,55 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           if (companyData) data = { ...data, companies: companyData };
         }
         setProfile(data as any);
+      } else {
+        // No profile exists — auto-create company + profile from signup metadata.
+        // This fires on first login after signup (email confirmed).
+        try {
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          if (!authUser) return;
+
+          const meta = authUser.user_metadata ?? {};
+          const firstName = meta.first_name || cleanEmail?.split('@')[0] || 'Owner';
+          const lastName  = meta.last_name  || '';
+          const companyName = meta.company_name || `${firstName}'s Company`;
+
+          // Create company first
+          const { data: newCompany, error: companyErr } = await (supabase.from('companies') as any)
+            .insert({ name: companyName, email: cleanEmail })
+            .select()
+            .single();
+
+          if (companyErr && !companyErr.message?.includes('duplicate')) {
+            console.error('[Auth] Failed to create company:', companyErr);
+            return;
+          }
+
+          const companyId = newCompany?.id;
+          if (!companyId) return;
+
+          // Create profile linked to the new company
+          const { data: newProfile, error: profileErr } = await (supabase.from('profiles') as any)
+            .insert({
+              id: userId,
+              email: cleanEmail,
+              first_name: firstName,
+              last_name: lastName,
+              company_id: companyId,
+              role: 'owner',
+              is_active: true,
+            })
+            .select('*, companies(*)')
+            .single();
+
+          if (profileErr) {
+            console.error('[Auth] Failed to create profile:', profileErr);
+            return;
+          }
+
+          setProfile(newProfile as any);
+        } catch (createErr) {
+          console.error('[Auth] Auto-onboarding error:', createErr);
+        }
       }
     } catch (err) {
       console.error('Error fetching profile:', err);
