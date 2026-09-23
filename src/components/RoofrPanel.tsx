@@ -1,7 +1,7 @@
 // RoofrPanel — order Roofr aerial measurement reports from the customer's
 // Documents tab, display measurements inline, and save to the customer's files.
 import React, { useState, useEffect, useCallback } from 'react';
-import { Ruler, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, ExternalLink, Settings } from 'lucide-react';
+import { Ruler, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, ExternalLink, Settings, DollarSign } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { buildStoredDocumentUrl } from '../lib/documentAccess';
 import { RoofrClient, RoofrReport } from '../lib/integrations/roofr';
@@ -89,6 +89,8 @@ export default function RoofrPanel({
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [tierRates, setTierRates] = useState<{ good: string; better: string; best: string }>({ good: '', better: '', best: '' });
+  const [activeTier, setActiveTier] = useState<'good' | 'better' | 'best'>('good');
   const { msg, toast } = useToast();
 
   const fullAddress = [address, city, state, zip].filter(Boolean).join(', ');
@@ -210,6 +212,25 @@ export default function RoofrPanel({
       let fileBlob: Blob;
       let ext = 'html';
 
+      // Build pricing summary rows for the saved document
+      const sq = order.measurements?.totalSquares ?? 0;
+      const pricingHtml = (() => {
+        const rates = {
+          good:   parseFloat(tierRates.good)   || 0,
+          better: parseFloat(tierRates.better) || 0,
+          best:   parseFloat(tierRates.best)   || 0,
+        };
+        const hasAny = rates.good > 0 || rates.better > 0 || rates.best > 0;
+        if (!hasAny || sq === 0) return '';
+        const fmt = (n: number) => n > 0 ? `$${(n * sq).toLocaleString(undefined, { maximumFractionDigits: 0 })} ($${n}/sq)` : '—';
+        return `<h2 style="color:#7c3aed;margin-top:24px">Per Square Pricing</h2>
+          <table><thead><tr><th>Tier</th><th>$/Square</th><th>Total (${sq} sq)</th></tr></thead><tbody>
+          <tr><td>Good</td><td>${rates.good > 0 ? '$'+rates.good : '—'}</td><td>${rates.good > 0 ? fmt(rates.good).split(' ')[0] : '—'}</td></tr>
+          <tr><td>Better</td><td>${rates.better > 0 ? '$'+rates.better : '—'}</td><td>${rates.better > 0 ? fmt(rates.better).split(' ')[0] : '—'}</td></tr>
+          <tr><td>Best</td><td>${rates.best > 0 ? '$'+rates.best : '—'}</td><td>${rates.best > 0 ? fmt(rates.best).split(' ')[0] : '—'}</td></tr>
+          </tbody></table>`;
+      })();
+
       if (order.downloadUrl && !order.reportId.startsWith('DEMO-')) {
         const res = await fetch(order.downloadUrl);
         if (!res.ok) throw new Error('Could not download report PDF');
@@ -239,7 +260,9 @@ export default function RoofrPanel({
           <p><strong>Type:</strong> ${order.reportType} &nbsp;·&nbsp; <strong>Order:</strong> ${order.reportId}</p>
           <p><strong>Ordered:</strong> ${new Date(order.orderedAt).toLocaleString()}</p>
           <table><thead><tr><th>Measurement</th><th>Value</th></tr></thead>
-          <tbody>${rows}</tbody></table></body></html>`], { type: 'text/html' });
+          <tbody>${rows}</tbody></table>
+          ${pricingHtml}
+          </body></html>`], { type: 'text/html' });
       }
 
       const safeName = repName.replace(/\s+/g, '_');
@@ -380,6 +403,92 @@ export default function RoofrPanel({
                     </div>
                   </div>
                 )}
+
+                {/* Per Square Pricing */}
+                {order.status === 'completed' && order.measurements && (() => {
+                  const sq = order.measurements.totalSquares;
+                  const rates = {
+                    good:   parseFloat(tierRates.good)   || 0,
+                    better: parseFloat(tierRates.better) || 0,
+                    best:   parseFloat(tierRates.best)   || 0,
+                  };
+                  const totals = {
+                    good:   rates.good   * sq,
+                    better: rates.better * sq,
+                    best:   rates.best   * sq,
+                  };
+                  const tiers = ['good', 'better', 'best'] as const;
+                  const tierColors: Record<string, string> = {
+                    good:   'border-slate-400 bg-slate-100 text-slate-800',
+                    better: 'border-blue-400 bg-blue-100 text-blue-800',
+                    best:   'border-violet-400 bg-violet-100 text-violet-800',
+                  };
+                  const activeColors: Record<string, string> = {
+                    good:   'border-slate-500 bg-slate-200 text-slate-900',
+                    better: 'border-blue-500 bg-blue-200 text-blue-900',
+                    best:   'border-violet-500 bg-violet-200 text-violet-900',
+                  };
+                  return (
+                    <div className="mt-3 border border-violet-100 rounded-xl bg-violet-50 p-3 space-y-3">
+                      <div className="flex items-center gap-1.5">
+                        <DollarSign size={13} className="text-violet-600" />
+                        <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wider">Per Square Pricing</p>
+                        <span className="text-[10px] text-violet-400 ml-1">{sq} sq</span>
+                      </div>
+
+                      {/* Tier tabs */}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {tiers.map((tier) => (
+                          <button
+                            key={tier}
+                            onClick={() => setActiveTier(tier)}
+                            className={`rounded-lg border-2 px-2 py-1.5 text-[10px] font-bold capitalize transition-colors ${
+                              activeTier === tier ? activeColors[tier] : 'border-slate-200 bg-white text-slate-500'
+                            }`}
+                          >
+                            {tier}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* $/sq input for active tier */}
+                      <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2">
+                        <span className="text-xs font-bold text-slate-400">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="5"
+                          placeholder="0"
+                          value={tierRates[activeTier]}
+                          onChange={(e) => setTierRates(prev => ({ ...prev, [activeTier]: e.target.value }))}
+                          className="flex-1 text-sm font-bold text-slate-800 bg-transparent outline-none min-w-0"
+                        />
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap">/ sq — <span className="capitalize">{activeTier}</span></span>
+                      </div>
+
+                      {/* Tier totals comparison */}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {tiers.map((tier) => (
+                          <div
+                            key={tier}
+                            className={`rounded-lg px-2 py-2 border-2 ${activeTier === tier ? activeColors[tier] : tierColors[tier]}`}
+                          >
+                            <p className="text-[9px] font-bold uppercase tracking-wider opacity-70 capitalize">{tier}</p>
+                            <p className="text-xs font-bold mt-0.5">
+                              {rates[tier] > 0
+                                ? `$${totals[tier].toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                : <span className="opacity-40">—</span>
+                              }
+                            </p>
+                            {rates[tier] > 0 && (
+                              <p className="text-[9px] opacity-60">${rates[tier]}/sq</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Actions */}
                 <div className="flex flex-wrap gap-2 pt-1">
