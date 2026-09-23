@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { X, Upload, FileText, CheckCircle2, AlertCircle, ChevronRight, Building2 } from 'lucide-react';
+import { X, Upload, FileText, CheckCircle2, AlertCircle, ChevronRight, Building2, Clock } from 'lucide-react';
 import {
   parseRoofrPdf,
   roofrToEstimatorPatch,
@@ -7,22 +7,43 @@ import {
   type StructureMeasurements,
   type EstimatorPatch,
 } from '../lib/roofrParser';
+import { fetchDocumentObjectUrl } from '../lib/documentAccess';
+
+export type SavedMeasurementDoc = {
+  id: string;
+  name: string;
+  category: string | null;
+  url: string;
+  created_at: string;
+};
 
 type Props = {
   onClose: () => void;
   onApply: (patch: EstimatorPatch, measurements: StructureMeasurements) => void;
+  savedDocs?: SavedMeasurementDoc[];
 };
 
 type ParseState = 'idle' | 'parsing' | 'preview' | 'error';
 
-// Which structure the user has selected
 type StructureSelection =
   | { type: 'combined' }
-  | { type: 'single'; index: number }; // 1-based
+  | { type: 'single'; index: number };
 
-function MeasurementRow({
-  label, value, unit,
-}: { label: string; value: number | string | null; unit?: string }) {
+const CATEGORY_LABEL: Record<string, { label: string; icon: string }> = {
+  roof:    { label: 'Roof',    icon: '🏠' },
+  walls:   { label: 'Walls',   icon: '🧱' },
+  premium: { label: 'Premium', icon: '⭐' },
+};
+
+function categoryMeta(cat: string | null) {
+  return (cat && CATEGORY_LABEL[cat]) || { label: 'Other', icon: '📄' };
+}
+
+function formatDate(d: string) {
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function MeasurementRow({ label, value, unit }: { label: string; value: number | string | null; unit?: string }) {
   if (value === null || value === undefined) return null;
   return (
     <div className="flex items-center justify-between py-2 border-b border-slate-100 last:border-0">
@@ -32,24 +53,14 @@ function MeasurementRow({
   );
 }
 
-function StructureCard({
-  label,
-  sub,
-  selected,
-  onSelect,
-}: {
-  label: string;
-  sub: string;
-  selected: boolean;
-  onSelect: () => void;
+function StructureCard({ label, sub, selected, onSelect }: {
+  label: string; sub: string; selected: boolean; onSelect: () => void;
 }) {
   return (
     <button
       onClick={onSelect}
       className={`flex-1 rounded-2xl border-2 p-3 text-left transition-all active:scale-95 ${
-        selected
-          ? 'border-accent bg-accent/5'
-          : 'border-slate-200 bg-white'
+        selected ? 'border-accent bg-accent/5' : 'border-slate-200 bg-white'
       }`}
     >
       <div className="flex items-center gap-2 mb-1">
@@ -74,7 +85,19 @@ function getMeasurementsForSelection(
   return { ...(s ?? result), suggestedWaste: result.suggestedWaste };
 }
 
-export default function RoofrImportModal({ onClose, onApply }: Props) {
+// Group saved docs by category
+function groupByCategory(docs: SavedMeasurementDoc[]) {
+  const order = ['roof', 'walls', 'premium', null];
+  const map = new Map<string | null, SavedMeasurementDoc[]>();
+  for (const doc of docs) {
+    const key = doc.category ?? null;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(doc);
+  }
+  return order.filter((k) => map.has(k)).map((k) => ({ category: k, docs: map.get(k)! }));
+}
+
+export default function RoofrImportModal({ onClose, onApply, savedDocs = [] }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parseState, setParseState] = useState<ParseState>('idle');
   const [errorMsg, setErrorMsg] = useState('');
@@ -102,12 +125,25 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
         return;
       }
       setResult(parsed);
-      // Default to combined if multi-structure, otherwise the only structure
       setSelection({ type: 'combined' });
       setParseState('preview');
     } catch (err) {
       console.error('[RoofrImport]', err);
       setErrorMsg('Could not read this PDF. Please make sure it is a valid Roofr measurement report.');
+      setParseState('error');
+    }
+  };
+
+  const handleSavedDoc = async (doc: SavedMeasurementDoc) => {
+    setParseState('parsing');
+    setFileName(doc.name);
+    try {
+      const { blob } = await fetchDocumentObjectUrl(doc.url);
+      const file = new File([blob], doc.name, { type: 'application/pdf' });
+      await handleFile(file);
+    } catch (err) {
+      console.error('[RoofrImport] saved doc load failed', err);
+      setErrorMsg('Could not load this saved report. Try uploading the PDF directly.');
       setParseState('error');
     }
   };
@@ -124,8 +160,9 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
     onApply(roofrToEstimatorPatch(m), m);
   };
 
-  // Active measurements based on selection
   const active = result ? getMeasurementsForSelection(result, selection) : null;
+  const grouped = groupByCategory(savedDocs);
+  const hasSaved = savedDocs.length > 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50">
@@ -142,8 +179,8 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
               <FileText size={18} className="text-blue-600" />
             </div>
             <div>
-              <p className="font-bold text-primary text-base">Import Roofr Report</p>
-              <p className="text-[11px] text-slate-400">Extracts measurements from your PDF</p>
+              <p className="font-bold text-primary text-base">Import Measurements</p>
+              <p className="text-[11px] text-slate-400">Use saved report or upload a new PDF</p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 text-slate-400 active:scale-90 transition-transform">
@@ -151,7 +188,49 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+          {/* ── SAVED REPORTS section (idle/error only) ── */}
+          {hasSaved && (parseState === 'idle' || parseState === 'error') && (
+            <div className="space-y-3">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 ml-1">
+                Saved Reports for This Customer
+              </p>
+              {grouped.map(({ category, docs }) => {
+                const { label, icon } = categoryMeta(category);
+                return (
+                  <div key={category ?? 'other'} className="space-y-2">
+                    <p className="text-xs font-bold text-slate-500 ml-1">{icon} {label}</p>
+                    {docs.map((doc) => (
+                      <button
+                        key={doc.id}
+                        onClick={() => handleSavedDoc(doc)}
+                        className="w-full flex items-center gap-3 p-3 rounded-xl bg-slate-50 hover:bg-blue-50 active:scale-[0.98] transition-all text-left border border-slate-100"
+                      >
+                        <div className="h-8 w-8 rounded-lg bg-white border border-slate-100 flex items-center justify-center shrink-0">
+                          <FileText size={15} className="text-blue-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                          <p className="text-[10px] text-slate-400 flex items-center gap-1">
+                            <Clock size={9} />
+                            {formatDate(doc.created_at)}
+                          </p>
+                        </div>
+                        <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+
+              <div className="relative flex items-center gap-3 py-1">
+                <div className="flex-1 h-px bg-slate-100" />
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">or upload new</p>
+                <div className="flex-1 h-px bg-slate-100" />
+              </div>
+            </div>
+          )}
 
           {/* ── IDLE / ERROR: Upload area ── */}
           {(parseState === 'idle' || parseState === 'error') && (
@@ -189,24 +268,26 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
                 </div>
               )}
 
-              <div className="rounded-2xl bg-slate-50 p-4 space-y-2">
-                <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">What gets imported</p>
-                {[
-                  ['Total Squares', 'Pre-fills roof area'],
-                  ['Waste Factor', 'Set to 15% (Roofr standard)'],
-                  ['Eaves + Rakes (LF)', 'Updates drip edge qty'],
-                  ['Ridges (LF)', 'Updates ridge cap qty'],
-                  ['Valleys (LF)', 'Updates valley flashing qty'],
-                  ['Pitch', 'Shown for reference'],
-                ].map(([field, desc]) => (
-                  <div key={field} className="flex items-center gap-2">
-                    <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
-                    <span className="text-xs text-slate-600">
-                      <span className="font-semibold">{field}</span> — {desc}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              {!hasSaved && (
+                <div className="rounded-2xl bg-slate-50 p-4 space-y-2">
+                  <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">What gets imported</p>
+                  {[
+                    ['Total Squares', 'Pre-fills roof area'],
+                    ['Waste Factor', 'Set to 15% (Roofr standard)'],
+                    ['Eaves + Rakes (LF)', 'Updates drip edge qty'],
+                    ['Ridges (LF)', 'Updates ridge cap qty'],
+                    ['Valleys (LF)', 'Updates valley flashing qty'],
+                    ['Pitch', 'Shown for reference'],
+                  ].map(([field, desc]) => (
+                    <div key={field} className="flex items-center gap-2">
+                      <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                      <span className="text-xs text-slate-600">
+                        <span className="font-semibold">{field}</span> — {desc}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
@@ -231,22 +312,17 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
                 </p>
               </div>
 
-              {/* ── Structure selector (only shown for multi-structure reports) ── */}
               {isMultiStructure && (
                 <div className="space-y-2">
                   <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 ml-1">
                     Select Structure to Import
                   </p>
-
-                  {/* Combined option */}
                   <StructureCard
                     label="All Structures"
                     sub={`${result.totalSquares ?? '?'} SQ combined`}
                     selected={selection.type === 'combined'}
                     onSelect={() => setSelection({ type: 'combined' })}
                   />
-
-                  {/* Per-structure options */}
                   <div className="flex gap-2">
                     {result.structures.map((s) => (
                       <StructureCard
@@ -261,7 +337,6 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
                 </div>
               )}
 
-              {/* ── Measurements for selected structure ── */}
               <div className="card p-4">
                 <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">
                   {isMultiStructure
@@ -311,7 +386,7 @@ export default function RoofrImportModal({ onClose, onApply }: Props) {
               onClick={() => { setParseState('idle'); setResult(null); }}
               className="flex-1 bg-slate-100 text-primary font-bold py-4 rounded-2xl text-sm"
             >
-              Try Another
+              {hasSaved ? 'Back' : 'Try Another'}
             </button>
             <button
               onClick={handleApply}
