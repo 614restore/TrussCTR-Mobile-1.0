@@ -252,11 +252,20 @@ export default function RoofrPanel({
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
 
+      // Map Roofr report type → document category
+      const roofrCategory = ((): string => {
+        const t = (order.reportType ?? '').toLowerCase();
+        if (t.includes('wall')) return 'walls';
+        if (t.includes('premium') || t.includes('enhanced')) return 'premium';
+        return 'roof'; // standard / default
+      })();
+
       const { error: dbError } = await supabase.from('documents').insert({
         contact_id: contactId,
         company_id: companyId,
         name: `Roofr ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`,
-        type: 'document',
+        type: 'measurement',
+        category: roofrCategory,
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
         size: fileBlob.size,
         uploaded_by: userId ?? 'Roofr',

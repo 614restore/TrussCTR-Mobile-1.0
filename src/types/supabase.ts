@@ -105,10 +105,13 @@ export interface Database {
           company_id: string
           contact_id: string
           name: string
-          type: 'contract' | 'estimate' | 'invoice' | 'photo' | 'insurance' | 'other'
+          type: 'contract' | 'estimate' | 'invoice' | 'photo' | 'insurance' | 'measurement' | 'document' | 'signed' | 'other'
+          category: 'roof' | 'walls' | 'premium' | 'general' | null
           url: string
           size: number
           uploaded_by: string
+          starred?: boolean
+          photo_notes?: string | null
           created_at: string
         }
         Insert: Omit<Database['public']['Tables']['documents']['Row'], 'id' | 'created_at'>
