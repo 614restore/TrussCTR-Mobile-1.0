@@ -624,17 +624,23 @@ export default function ContactDetail() {
       const docType  = isMeasurement ? 'measurement' : rawCategory;
       const docCategory: string | null = isMeasurement ? rawCategory.split(':')[1] : null;
 
-      const { error: dbError } = await supabase.from('documents').insert({
+      const { data: inserted, error: dbError } = await (supabase.from('documents') as any).insert({
         contact_id: id,
         company_id: contact.company_id,
         name: docName,
         type: docType as any,
-        category: docCategory as any,
         url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
         size: uploadFile.size,
         uploaded_by: user?.id ?? 'unknown',
-      } as any);
+      }).select('id').single();
       if (dbError) throw dbError;
+      // Set category separately so upload still works if the migration hasn't run yet
+      if (docCategory && inserted?.id) {
+        (supabase.from('documents') as any)
+          .update({ category: docCategory })
+          .eq('id', inserted.id)
+          .then(() => {});
+      }
       return true;
     };
 
