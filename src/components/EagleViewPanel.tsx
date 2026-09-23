@@ -92,6 +92,7 @@ export default function EagleViewPanel({
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dupWarning, setDupWarning] = useState<string | null>(null);
   const { msg, toast } = useToast();
 
   const fullAddress = [address, city, state, zip].filter(Boolean).join(', ');
@@ -197,8 +198,26 @@ export default function EagleViewPanel({
   };
 
   // ── Save ─────────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
+  const handleSave = async (force = false) => {
     if (!order) return;
+
+    const intendedName = `EagleView ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`;
+
+    if (!force) {
+      const { data: existing } = await supabase
+        .from('documents')
+        .select('name, created_at')
+        .eq('contact_id', contactId)
+        .eq('name', intendedName)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        setDupWarning(intendedName);
+        toast({ text: `A document named "${intendedName}" already exists. Click Save Again to overwrite.`, type: 'info' });
+        return;
+      }
+    }
+
+    setDupWarning(null);
     setSaving(true);
     try {
       let fileBlob: Blob;
@@ -345,12 +364,14 @@ export default function EagleViewPanel({
                   )}
                   {order.status === 'completed' && (
                     <button
-                      onClick={handleSave}
+                      onClick={() => dupWarning ? handleSave(true) : handleSave()}
                       disabled={saving}
-                      className="flex items-center gap-1.5 bg-accent text-white px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50"
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50 ${
+                        dupWarning ? 'bg-amber-500 text-white' : 'bg-accent text-white'
+                      }`}
                     >
                       {saving ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                      {saving ? 'Saving…' : 'Save to Documents'}
+                      {saving ? 'Saving…' : dupWarning ? '⚠️ Save Anyway?' : 'Save to Documents'}
                     </button>
                   )}
                   {(order.status === 'failed' || order.status === 'cancelled') && (

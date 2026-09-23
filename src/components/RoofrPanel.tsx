@@ -91,6 +91,7 @@ export default function RoofrPanel({
   const [saving, setSaving] = useState(false);
   const [tierRates, setTierRates] = useState<{ good: string; better: string; best: string }>({ good: '', better: '', best: '' });
   const [activeTier, setActiveTier] = useState<'good' | 'better' | 'best'>('good');
+  const [dupWarning, setDupWarning] = useState<string | null>(null);
   const { msg, toast } = useToast();
 
   const fullAddress = [address, city, state, zip].filter(Boolean).join(', ');
@@ -205,8 +206,28 @@ export default function RoofrPanel({
   };
 
   // ── Save to documents ───────────────────────────────────────────────────────
-  const handleSave = async () => {
+  const handleSave = async (force = false) => {
     if (!order) return;
+
+    // Build the display name we intend to use
+    const intendedName = `Roofr ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`;
+
+    // Duplicate check: query existing docs for this contact and look for same name
+    if (!force) {
+      const { data: existing } = await supabase
+        .from('documents')
+        .select('name, created_at')
+        .eq('contact_id', contactId)
+        .eq('name', intendedName)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        setDupWarning(intendedName);
+        toast({ text: `A document named "${intendedName}" already exists. Click Save Again to overwrite.`, type: 'info' });
+        return;
+      }
+    }
+
+    setDupWarning(null);
     setSaving(true);
     try {
       let fileBlob: Blob;
@@ -517,12 +538,16 @@ export default function RoofrPanel({
                         </a>
                       )}
                       <button
-                        onClick={handleSave}
+                        onClick={() => dupWarning ? handleSave(true) : handleSave()}
                         disabled={saving}
-                        className="flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50"
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50 ${
+                          dupWarning
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-emerald-600 text-white'
+                        }`}
                       >
                         {saving ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                        {saving ? 'Saving…' : 'Save to Documents'}
+                        {saving ? 'Saving…' : dupWarning ? '⚠️ Save Anyway?' : 'Save to Documents'}
                       </button>
                     </>
                   )}

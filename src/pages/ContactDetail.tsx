@@ -200,6 +200,11 @@ export default function ContactDetail() {
   const [dialogSaving, setDialogSaving] = useState(false);
   const [docsSavedToast, setDocsSavedToast] = useState<string | null>(null);
 
+  // Duplicate detection state
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [duplicateDetails, setDuplicateDetails] = useState<Array<{ fileName: string; docName: string; uploadedAt: string }>>([]);
+  const [duplicateProceed, setDuplicateProceed] = useState<(() => void) | null>(null);
+
   // Avatar state
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -569,23 +574,46 @@ export default function ContactDetail() {
     }, 220);
   };
 
+  const findFileDuplicates = (files: File[]) =>
+    files.flatMap(file => {
+      const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
+      const match = documents.find(doc =>
+        doc.name?.toLowerCase() === baseName &&
+        Number(doc.size) === file.size
+      );
+      return match
+        ? [{ fileName: file.name, docName: match.name, uploadedAt: match.created_at as string }]
+        : [];
+    });
+
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length || !id) return;
 
-    // For single-file uploads show the naming dialog; for multi-file, upload directly
-    if (files.length === 1) {
-      const file = files[0];
-      const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
-      const isImage = file.type.startsWith('image/');
-      setPendingUploadFiles(files);
-      setPendingUploadInputRef(e.target);
-      setUploadDialogName(nameWithoutExt);
-      setUploadDialogCategory(isImage ? 'photo' : 'other');
-      setShowUploadDialog(true);
+    const dupes = findFileDuplicates(files);
+
+    const proceedWithUpload = () => {
+      setShowDuplicateWarning(false);
+      if (files.length === 1) {
+        const file = files[0];
+        const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
+        const isImage = file.type.startsWith('image/');
+        setPendingUploadFiles(files);
+        setPendingUploadInputRef(e.target);
+        setUploadDialogName(nameWithoutExt);
+        setUploadDialogCategory(isImage ? 'photo' : 'other');
+        setShowUploadDialog(true);
+      } else {
+        handleUploadDirect(files, e.target, '', '');
+      }
+    };
+
+    if (dupes.length > 0) {
+      setDuplicateDetails(dupes);
+      setDuplicateProceed(() => proceedWithUpload);
+      setShowDuplicateWarning(true);
     } else {
-      // Multi-file: upload directly without dialog
-      handleUploadDirect(files, e.target, '', '');
+      proceedWithUpload();
     }
   };
 
@@ -1346,6 +1374,62 @@ export default function ContactDetail() {
         </div>
       )}
       
+      {/* Duplicate file warning */}
+      {showDuplicateWarning && (
+        <div
+          className="fixed inset-0 z-[95] flex items-end bg-black/50"
+          onClick={() => setShowDuplicateWarning(false)}
+        >
+          <div
+            className="w-full rounded-t-3xl bg-white"
+            style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 pt-4 pb-2">
+              <div className="mx-auto h-1 w-10 rounded-full bg-slate-200 mb-4" />
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                  <span className="text-base">⚠️</span>
+                </div>
+                <h3 className="text-lg font-bold text-primary">Duplicate Detected</h3>
+              </div>
+              <p className="text-sm text-slate-500 mb-4">
+                {duplicateDetails.length === 1
+                  ? 'A file with the same name and size already exists for this contact.'
+                  : `${duplicateDetails.length} files with matching names and sizes already exist for this contact.`}
+              </p>
+              <div className="space-y-2 mb-2">
+                {duplicateDetails.map((d, i) => (
+                  <div key={i} className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
+                    <p className="text-xs font-bold text-amber-800">{d.fileName}</p>
+                    <p className="text-[11px] text-amber-600 mt-0.5">
+                      Already saved as <em>{d.docName}</em>
+                      {d.uploadedAt ? ` · ${new Date(d.uploadedAt).toLocaleDateString()}` : ''}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-3 px-6 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowDuplicateWarning(false)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-sm font-bold text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => duplicateProceed?.()}
+                className="flex-1 rounded-2xl bg-amber-500 py-4 text-sm font-bold text-white"
+              >
+                Upload Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Document naming / save dialog */}
       {showUploadDialog && pendingUploadFiles.length > 0 && (
         <div
