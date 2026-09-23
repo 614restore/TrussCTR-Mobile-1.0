@@ -198,6 +198,7 @@ export default function ContactDetail() {
   const [uploadDialogName, setUploadDialogName] = useState('');
   const [uploadDialogCategory, setUploadDialogCategory] = useState('other');
   const [dialogSaving, setDialogSaving] = useState(false);
+  const [uploadDialogIsMeasurement, setUploadDialogIsMeasurement] = useState(false);
   const [docsSavedToast, setDocsSavedToast] = useState<string | null>(null);
 
   // Duplicate detection state
@@ -598,10 +599,14 @@ export default function ContactDetail() {
         const file = files[0];
         const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
         const isImage = file.type.startsWith('image/');
+        const lowerName = file.name.toLowerCase();
+        const isMeasurementPdf = !isImage && lowerName.endsWith('.pdf') &&
+          /\b(roofr|eagle[_\-]?view|measurement|aerial|roof[_\-]?report)\b/i.test(lowerName);
         setPendingUploadFiles(files);
         setPendingUploadInputRef(e.target);
         setUploadDialogName(nameWithoutExt);
-        setUploadDialogCategory(isImage ? 'photo' : 'other');
+        setUploadDialogCategory(isImage ? 'photo' : isMeasurementPdf ? 'measurement:roof' : 'other');
+        setUploadDialogIsMeasurement(isMeasurementPdf);
         setShowUploadDialog(true);
       } else {
         handleUploadDirect(files, e.target, '', '');
@@ -710,6 +715,7 @@ export default function ContactDetail() {
     if (pendingUploadInputRef) pendingUploadInputRef.value = '';
     setPendingUploadFiles([]);
     setPendingUploadInputRef(null);
+    setUploadDialogIsMeasurement(false);
   };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1446,7 +1452,13 @@ export default function ContactDetail() {
               <h3 className="text-lg font-bold text-primary mb-1">
                 Save to {contact?.first_name ? `${contact.first_name}'s` : 'Customer'} Documents
               </h3>
-              <p className="text-xs text-slate-500 mb-5">{pendingUploadFiles[0]?.name}</p>
+              <p className="text-xs text-slate-500 mb-3">{pendingUploadFiles[0]?.name}</p>
+              {uploadDialogIsMeasurement && (
+                <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2 mb-4">
+                  <span className="text-base">📐</span>
+                  <p className="text-xs font-semibold text-blue-700">Measurement report detected — pre-selected category.</p>
+                </div>
+              )}
 
               <div className="space-y-4">
                 <div>
@@ -1489,6 +1501,14 @@ export default function ContactDetail() {
               </div>
             </div>
 
+            {dialogSaving && (
+              <div className="px-6 pb-2">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full animate-pulse rounded-full bg-accent" style={{ width: '60%', transition: 'width 0.5s ease' }} />
+                </div>
+                <p className="mt-1.5 text-center text-[10px] text-slate-400">Uploading…</p>
+              </div>
+            )}
             <div className="flex gap-3 px-6 pt-5">
               <button
                 type="button"
@@ -4434,6 +4454,7 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
 
 function DocumentsTab({ contactId, companyId, address, city, state, zip, contactName, userId, documents, onUpload, onLegalUpload, onDocumentSaved, onDeleteDocument }: { contactId: string; companyId: string; address: string; city: string; state: string; zip: string; contactName?: string; userId?: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void; onDocumentSaved?: () => void; onDeleteDocument?: (docId: string, url: string) => Promise<void> }) {
   const navigate = useNavigate();
+  const handleBuildEstimate = () => navigate(`/contacts/${contactId}/estimate`);
   const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
   const [editMode, setEditMode] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -4899,6 +4920,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
             contactName={contactName}
             userId={userId}
             onDocumentSaved={onDocumentSaved}
+            onBuildEstimate={handleBuildEstimate}
           />
           <RoofrPanel
             contactId={contactId}
@@ -4910,6 +4932,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
             contactName={contactName}
             userId={userId}
             onDocumentSaved={onDocumentSaved}
+            onBuildEstimate={handleBuildEstimate}
           />
 
           {/* Before & After Report */}

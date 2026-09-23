@@ -1,7 +1,7 @@
 // RoofrPanel — order Roofr aerial measurement reports from the customer's
 // Documents tab, display measurements inline, and save to the customer's files.
 import React, { useState, useEffect, useCallback } from 'react';
-import { Ruler, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, ExternalLink, Settings, DollarSign } from 'lucide-react';
+import { Ruler, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, ExternalLink, Settings, DollarSign, X, TrendingUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { buildStoredDocumentUrl } from '../lib/documentAccess';
 import { RoofrClient, RoofrReport } from '../lib/integrations/roofr';
@@ -16,6 +16,7 @@ interface Props {
   contactName?: string;
   userId?: string;
   onDocumentSaved?: () => void;
+  onBuildEstimate?: () => void;
 }
 
 type OrderStatus = 'pending' | 'processing' | 'completed' | 'failed';
@@ -80,7 +81,7 @@ function useToast() {
 }
 
 export default function RoofrPanel({
-  contactId, companyId, address, city, state, zip, contactName, userId, onDocumentSaved,
+  contactId, companyId, address, city, state, zip, contactName, userId, onDocumentSaved, onBuildEstimate,
 }: Props) {
   const [configStatus, setConfigStatus] = useState<'unknown' | 'ok' | 'missing'>('unknown');
   const [client, setClient] = useState<RoofrClient | null>(null);
@@ -92,6 +93,8 @@ export default function RoofrPanel({
   const [tierRates, setTierRates] = useState<{ good: string; better: string; best: string }>({ good: '', better: '', best: '' });
   const [activeTier, setActiveTier] = useState<'good' | 'better' | 'best'>('good');
   const [dupWarning, setDupWarning] = useState<string | null>(null);
+  const [showEstimateOffer, setShowEstimateOffer] = useState(false);
+  const [existingEstCount, setExistingEstCount] = useState(0);
   const { msg, toast } = useToast();
 
   const fullAddress = [address, city, state, zip].filter(Boolean).join(', ');
@@ -329,6 +332,10 @@ export default function RoofrPanel({
       }
 
       toast({ text: 'Report saved to customer documents!', type: 'success' });
+      // Check existing estimates so we can offer to build one
+      const { data: estRows } = await supabase.from('estimates').select('id').eq('contact_id', contactId);
+      setExistingEstCount(estRows?.length ?? 0);
+      setShowEstimateOffer(true);
       persist(null);
       onDocumentSaved?.();
     } catch (err: any) {
@@ -387,6 +394,50 @@ export default function RoofrPanel({
             <span className="font-semibold">Property: </span>
             {fullAddress || <span className="text-slate-400 italic">No address — add in Overview tab</span>}
           </div>
+
+          {/* Post-save estimate offer */}
+          {showEstimateOffer && (
+            <div className="bg-white border border-violet-200 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp size={15} className="text-violet-600" />
+                  <p className="text-sm font-bold text-slate-800">Build an Estimate?</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEstimateOffer(false)}
+                  className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              {existingEstCount > 0 ? (
+                <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+                  ⚠️ This customer already has {existingEstCount} estimate{existingEstCount !== 1 ? 's' : ''} on file. Create another?
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Use the saved measurements to start a quote — no re-entry needed.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowEstimateOffer(false); onBuildEstimate?.(); }}
+                  className="flex-1 bg-violet-600 text-white py-2.5 rounded-xl text-xs font-bold active:scale-95"
+                >
+                  {existingEstCount > 0 ? 'Create New Estimate' : 'Build Estimate'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEstimateOffer(false)}
+                  className="flex-1 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold active:scale-95"
+                >
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
 
           {order ? (
             <div className="space-y-3">
