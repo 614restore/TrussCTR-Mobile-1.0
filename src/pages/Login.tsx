@@ -4,7 +4,7 @@ import {
   Mail, Lock, Eye, EyeOff, User, Building2,
   AlertCircle, CheckCircle, ArrowLeft,
 } from 'lucide-react';
-import trussLogo from '../assets/trussctr-logo.png';
+import trussLogo from '../assets/trussctr-logo.webp';
 import { getPasswordResetRedirectUrl } from '../lib/authRedirect';
 
 /* ─── Brand tokens ─────────────────────────────────────────── */
