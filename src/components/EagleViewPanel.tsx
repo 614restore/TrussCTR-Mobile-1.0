@@ -114,8 +114,8 @@ export default function EagleViewPanel({
           .eq('company_id', companyId)
           .eq('integration_type', 'eagleview')
           .eq('is_active', true)
-          .single();
-        if (error && error.code !== 'PGRST116') { setConfigStatus('missing'); return; }
+          .maybeSingle();
+        if (error) { setConfigStatus('missing'); return; }
         const credentials = data != null ? (data as any).credentials : null;
         const apiKey = credentials?.apiKey;
         const clientId = credentials?.clientId;

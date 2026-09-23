@@ -113,8 +113,8 @@ export default function RoofrPanel({
           .eq('company_id', companyId)
           .eq('integration_type', 'roofr')
           .eq('is_active', true)
-          .single();
-        if (error && error.code !== 'PGRST116') { setConfigStatus('missing'); return; }
+          .maybeSingle();
+        if (error) { setConfigStatus('missing'); return; }
         const credentials = data != null ? (data as any).credentials : null;
         const apiKey = credentials?.apiKey;
         if (!apiKey) { setConfigStatus('missing'); return; }
@@ -230,7 +230,7 @@ export default function RoofrPanel({
     setDupWarning(null);
     setSaving(true);
     try {
-      let fileBlob: Blob;
+      let fileBlob: Blob | undefined;
       let ext = 'html';
 
       // Build pricing summary rows for the saved document
@@ -252,12 +252,18 @@ export default function RoofrPanel({
           </tbody></table>`;
       })();
 
+      // Try to download actual PDF; fall back to demo HTML on failure (e.g. CSP-blocked sandbox URLs)
       if (order.downloadUrl && !order.reportId.startsWith('DEMO-')) {
-        const res = await fetch(order.downloadUrl);
-        if (!res.ok) throw new Error('Could not download report PDF');
-        fileBlob = await res.blob();
-        ext = 'pdf';
-      } else {
+        try {
+          const res = await fetch(order.downloadUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          fileBlob = await res.blob();
+          ext = 'pdf';
+        } catch {
+          // Fall through to demo HTML
+        }
+      }
+      if (!fileBlob) {
         const m = order.measurements;
         const rows = m ? `
           <tr><td>Total Squares</td><td>${m.totalSquares} sq</td></tr>
@@ -291,7 +297,7 @@ export default function RoofrPanel({
       const fileName = `Roofr_${order.reportType}_${safeName}_${date}.${ext}`;
       const filePath = `${contactId}/${Math.random().toString(36).slice(2)}.${ext}`;
 
-      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, fileBlob);
+      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, fileBlob!);
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
@@ -310,7 +316,7 @@ export default function RoofrPanel({
         name: `Roofr ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`,
         type: 'measurement',
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
-        size: fileBlob.size,
+        size: fileBlob!.size,
         uploaded_by: userId ?? 'Roofr',
       }).select('id').single();
       if (dbError) throw dbError;

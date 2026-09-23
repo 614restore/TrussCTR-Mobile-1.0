@@ -152,15 +152,14 @@ function extractMeasurements(block: string, index: number): StructureMeasurement
   };
 }
 
+// ── pdfjs setup (module-level so Vite bundles the worker URL correctly) ──────
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+
 // ── Main parser ──────────────────────────────────────────────────────────────
 
 export async function parseRoofrPdf(file: File): Promise<RoofrMeasurements> {
-  const pdfjsLib = await import('pdfjs-dist');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url
-  ).toString();
-
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 

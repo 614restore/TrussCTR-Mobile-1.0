@@ -230,9 +230,10 @@ export default function DocumentViewer() {
                   </button>
                 </div>
               ) : isPdf ? (
+                // Safari can't render PDF blob: URLs in iframes — use the signed URL directly
                 <iframe
                   title={viewerState.name}
-                  src={viewerState.objectUrl}
+                  src={viewerState.sourceUrl || viewerState.objectUrl || ''}
                   className="h-[78vh] w-full rounded-2xl bg-slate-50"
                 />
               ) : isImage ? (
