@@ -4,7 +4,7 @@ import { ArrowLeft, Plus, Minus, Save, Eye, EyeOff, Trash2, FileUp } from 'lucid
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, cn } from '../lib/utils';
-import RoofrImportModal from '../components/RoofrImportModal';
+import RoofrImportModal, { type SavedMeasurementDoc } from '../components/RoofrImportModal';
 import type { EstimatorPatch, StructureMeasurements } from '../lib/roofrParser';
 import {
   buildDefaultQuoteMeta,
@@ -68,6 +68,7 @@ export default function RetailEstimator() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [showRoofrImport, setShowRoofrImport] = useState(false);
   const [roofrBanner, setRoofrBanner] = useState<string | null>(null);
+  const [savedMeasurements, setSavedMeasurements] = useState<SavedMeasurementDoc[]>([]);
 
   const isOwnerOrAdmin = profile?.role === 'owner' || profile?.role === 'admin';
 
@@ -90,12 +91,20 @@ export default function RetailEstimator() {
   useEffect(() => {
     const loadContact = async () => {
       if (!id) return;
-      const { data } = await supabase.from('contacts').select('*').eq('id', id).maybeSingle();
+      const [{ data }, { data: measureDocs }] = await Promise.all([
+        supabase.from('contacts').select('*').eq('id', id).maybeSingle(),
+        (supabase.from('documents') as any)
+          .select('id, name, category, url, created_at')
+          .eq('contact_id', id)
+          .eq('type', 'measurement')
+          .order('created_at', { ascending: false }),
+      ]);
       const record: any = data;
       if (record) {
         setContact(record);
         setEstimateTitle(`${record.project_type || 'Retail'} Quote`);
       }
+      setSavedMeasurements(measureDocs || []);
     };
     loadContact();
   }, [id]);
@@ -303,16 +312,16 @@ export default function RetailEstimator() {
           </div>
         )}
 
-        {/* Roofr Import button — owner/admin only */}
-        {isOwnerOrAdmin && (
-          <button
-            onClick={() => setShowRoofrImport(true)}
-            className="w-full flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-blue-200 bg-blue-50 py-3 text-sm font-bold text-blue-600 active:scale-95 transition-transform"
-          >
-            <FileUp size={16} />
-            Import Roofr PDF Report
-          </button>
-        )}
+        {/* Measurement import — all users; shows saved docs + upload */}
+        <button
+          onClick={() => setShowRoofrImport(true)}
+          className="w-full flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-blue-200 bg-blue-50 py-3 text-sm font-bold text-blue-600 active:scale-95 transition-transform"
+        >
+          <FileUp size={16} />
+          {savedMeasurements.length > 0
+            ? `Import Measurements (${savedMeasurements.length} saved)`
+            : 'Import Measurement PDF'}
+        </button>
 
         <section className="rounded-3xl bg-slate-900 p-6 text-white shadow-xl">
           <div className="mb-4 flex items-center justify-between">
@@ -534,6 +543,7 @@ export default function RetailEstimator() {
         <RoofrImportModal
           onClose={() => setShowRoofrImport(false)}
           onApply={applyRoofrPatch}
+          savedDocs={savedMeasurements}
         />
       )}
     </div>
