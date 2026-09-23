@@ -252,16 +252,31 @@ export default function RoofrPanel({
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
 
-      const { error: dbError } = await supabase.from('documents').insert({
+      // Map Roofr report type → document category
+      const roofrCategory = ((): string => {
+        const t = (order.reportType ?? '').toLowerCase();
+        if (t.includes('wall')) return 'walls';
+        if (t.includes('premium') || t.includes('enhanced')) return 'premium';
+        return 'roof'; // standard / default
+      })();
+
+      const { data: inserted, error: dbError } = await (supabase.from('documents') as any).insert({
         contact_id: contactId,
         company_id: companyId,
         name: `Roofr ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`,
-        type: 'document',
+        type: 'measurement',
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
         size: fileBlob.size,
         uploaded_by: userId ?? 'Roofr',
-      } as any);
+      }).select('id').single();
       if (dbError) throw dbError;
+      // Set category after insert so saving works even if migration hasn't run yet
+      if (inserted?.id) {
+        (supabase.from('documents') as any)
+          .update({ category: roofrCategory })
+          .eq('id', inserted.id)
+          .then(() => {});
+      }
 
       toast({ text: 'Report saved to customer documents!', type: 'success' });
       persist(null);

@@ -1,5 +1,9 @@
 // Comprehensive Permissions System
-import type { UserRole } from './crmData';
+type UserRole =
+  | 'owner' | 'admin' | 'manager' | 'user'
+  | 'sales_manager' | 'sales_rep' | 'production_manager' | 'project_manager'
+  | 'field_tech' | 'office_staff' | 'subcontractor' | 'sales' | 'production'
+  | 'billing' | 'canvas' | 'canvasser' | 'field_contractor';
 
 export type PermissionCategory = 
   | 'users_roles'
@@ -279,6 +283,24 @@ export const defaultPermissions: Record<UserRole, Record<PermissionCategory, Per
     invoicing: 'none',
     payments: 'none',
     reports_dashboards: 'none',
+    integrations: 'none',
+    communications: 'own',
+    settings_configs: 'none',
+  },
+  // Generic "user" role — same as sales_rep
+  user: {
+    users_roles: 'none',
+    contacts_leads: 'own',
+    jobs_workflows: 'own',
+    estimates_quotes: 'own',
+    contracts: 'own',
+    scheduling_calendar: 'team',
+    tasks_assignments: 'own',
+    photos_files: 'own',
+    materials_inventory: 'none',
+    invoicing: 'create',
+    payments: 'read',
+    reports_dashboards: 'own',
     integrations: 'none',
     communications: 'own',
     settings_configs: 'none',

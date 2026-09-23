@@ -618,9 +618,13 @@ export default function ContactDetail() {
 
       // Use override name/category for single-file dialog uploads; fall back to filename
       const docName = (index === 0 && overrideName) ? overrideName : file.name.replace(/\.[^.]+$/, '');
-      const docType = (index === 0 && overrideCategory) ? overrideCategory : (isImage ? 'photo' : 'document');
+      const rawCategory = (index === 0 && overrideCategory) ? overrideCategory : (isImage ? 'photo' : 'other');
+      // "measurement:roof" → type='measurement', category='roof'
+      const isMeasurement = rawCategory.startsWith('measurement:');
+      const docType  = isMeasurement ? 'measurement' : rawCategory;
+      const docCategory: string | null = isMeasurement ? rawCategory.split(':')[1] : null;
 
-      const { error: dbError } = await supabase.from('documents').insert({
+      const { data: inserted, error: dbError } = await (supabase.from('documents') as any).insert({
         contact_id: id,
         company_id: contact.company_id,
         name: docName,
@@ -628,8 +632,15 @@ export default function ContactDetail() {
         url: buildStoredDocumentUrl(publicUrl, bucket, filePath),
         size: uploadFile.size,
         uploaded_by: user?.id ?? 'unknown',
-      } as any);
+      }).select('id').single();
       if (dbError) throw dbError;
+      // Set category separately so upload still works if the migration hasn't run yet
+      if (docCategory && inserted?.id) {
+        (supabase.from('documents') as any)
+          .update({ category: docCategory })
+          .eq('id', inserted.id)
+          .then(() => {});
+      }
       return true;
     };
 
@@ -1349,12 +1360,21 @@ export default function ContactDetail() {
                     value={uploadDialogCategory}
                     onChange={(e) => setUploadDialogCategory(e.target.value)}
                   >
-                    <option value="insurance">Insurance Documents</option>
-                    <option value="contract">Contracts</option>
-                    <option value="estimate">Estimates</option>
-                    <option value="invoice">Invoices</option>
-                    <option value="photo">Photos</option>
-                    <option value="other">Other</option>
+                    <optgroup label="Measurements">
+                      <option value="measurement:roof">📐 Roof Measurement</option>
+                      <option value="measurement:walls">🧱 Walls Report</option>
+                      <option value="measurement:premium">⭐ Premium Report (All)</option>
+                    </optgroup>
+                    <optgroup label="Documents">
+                      <option value="insurance">Insurance Documents</option>
+                      <option value="contract">Contracts</option>
+                      <option value="estimate">Estimates</option>
+                      <option value="invoice">Invoices</option>
+                      <option value="other">Other</option>
+                    </optgroup>
+                    <optgroup label="Media">
+                      <option value="photo">Photos</option>
+                    </optgroup>
                   </select>
                 </div>
               </div>
@@ -4330,12 +4350,18 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
     ...nonLegalDocs.filter((d) => d.type === 'contract' || d.type === 'signed'),
     ...nonLegalDocs.filter((d) => d.type !== 'contract' && d.type !== 'signed'),
   ];
+  // Measurements — any doc with type 'measurement' or a category set
+  const measurements = allVisible.filter((d) => d.type === 'measurement' || d.category);
+  const roofDocs    = measurements.filter((d) => d.category === 'roof');
+  const wallsDocs   = measurements.filter((d) => d.category === 'walls');
+  const premiumDocs = measurements.filter((d) => d.category === 'premium');
 
   const TABS_CONFIG = [
-    { id: 'all',    label: 'All' },
-    { id: 'photos', label: `Photos${photos.length ? ` (${photos.length})` : ''}` },
-    { id: 'docs',   label: `Docs${nonLegalDocs.length ? ` (${nonLegalDocs.length})` : ''}` },
-    { id: 'legal',  label: `Legal${signedLegalDocs.length ? ` ✓` : ''}` },
+    { id: 'all',          label: 'All' },
+    { id: 'measurements', label: `Measurements${measurements.length ? ` (${measurements.length})` : ''}` },
+    { id: 'photos',       label: `Photos${photos.length ? ` (${photos.length})` : ''}` },
+    { id: 'docs',         label: `Docs${nonLegalDocs.length ? ` (${nonLegalDocs.length})` : ''}` },
+    { id: 'legal',        label: `Legal${signedLegalDocs.length ? ` ✓` : ''}` },
   ];
 
   return (
@@ -4360,6 +4386,44 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
       ══════════════════════════════════ */}
       {filter === 'all' && (
         <div className="space-y-5">
+          {/* Measurements summary */}
+          {measurements.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Measurements</h3>
+                <button onClick={() => setFilter('measurements')} className="text-[10px] font-bold text-accent uppercase tracking-widest">
+                  View all {measurements.length}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {measurements.slice(0, 3).map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => navigate(`/documents/view/${doc.id}`)}
+                    className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl text-left active:bg-slate-50"
+                  >
+                    <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${
+                      doc.category === 'walls' ? 'bg-orange-50' : doc.category === 'premium' ? 'bg-amber-50' : 'bg-blue-50'
+                    }`}>
+                      <FileText size={16} className={
+                        doc.category === 'walls' ? 'text-orange-400' : doc.category === 'premium' ? 'text-amber-400' : 'text-blue-400'
+                      } />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                      <p className="text-[10px] text-slate-400 capitalize">
+                        {doc.category === 'roof' ? '📐 Roof' : doc.category === 'walls' ? '🧱 Walls' : doc.category === 'premium' ? '⭐ Premium' : 'Measurement'}
+                        {' · '}{new Date(doc.created_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Photos summary */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -4467,6 +4531,114 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
             Upload File or Photo
             <input type="file" multiple className="hidden" onChange={onUpload} accept="image/*,application/pdf" />
           </label>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════
+          MEASUREMENTS TAB
+      ══════════════════════════════════ */}
+      {filter === 'measurements' && (
+        <div className="space-y-6">
+          {/* Upload measurement button */}
+          <label className="flex items-center justify-center gap-2 w-full py-3 bg-accent/10 border border-accent/20 rounded-xl text-xs font-bold text-accent cursor-pointer active:bg-accent/20">
+            <Plus size={16} />
+            Upload Measurement Document
+            <input type="file" className="hidden" onChange={onUpload} accept="application/pdf,image/*" />
+          </label>
+
+          {measurements.length === 0 && (
+            <div className="text-center py-10 text-slate-400 text-sm">
+              <p className="font-bold mb-1">No measurement documents yet</p>
+              <p className="text-xs">Upload a Roofr report, walls report, or premium report above.</p>
+            </div>
+          )}
+
+          {/* Roof Measurements */}
+          {roofDocs.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                📐 Roof Measurements
+                <span className="text-slate-300">({roofDocs.length})</span>
+              </h3>
+              <div className="space-y-2">
+                {roofDocs.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => navigate(`/documents/view/${doc.id}`)}
+                    className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl text-left active:bg-slate-50"
+                  >
+                    <div className="h-10 w-10 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                      <FileText size={18} className="text-blue-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                      <p className="text-[10px] text-slate-400">{new Date(doc.created_at).toLocaleDateString()} · {(doc.size / 1024 / 1024).toFixed(1)} MB</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Walls Reports */}
+          {wallsDocs.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                🧱 Walls Reports
+                <span className="text-slate-300">({wallsDocs.length})</span>
+              </h3>
+              <div className="space-y-2">
+                {wallsDocs.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => navigate(`/documents/view/${doc.id}`)}
+                    className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl text-left active:bg-slate-50"
+                  >
+                    <div className="h-10 w-10 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
+                      <FileText size={18} className="text-orange-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                      <p className="text-[10px] text-slate-400">{new Date(doc.created_at).toLocaleDateString()} · {(doc.size / 1024 / 1024).toFixed(1)} MB</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Premium Reports */}
+          {premiumDocs.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                ⭐ Premium Reports
+                <span className="text-slate-300">({premiumDocs.length})</span>
+              </h3>
+              <div className="space-y-2">
+                {premiumDocs.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => navigate(`/documents/view/${doc.id}`)}
+                    className="w-full flex items-center gap-3 p-3 bg-white border border-slate-100 rounded-xl text-left active:bg-slate-50"
+                  >
+                    <div className="h-10 w-10 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                      <FileText size={18} className="text-amber-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-primary truncate">{doc.name}</p>
+                      <p className="text-[10px] text-slate-400">{new Date(doc.created_at).toLocaleDateString()} · {(doc.size / 1024 / 1024).toFixed(1)} MB</p>
+                    </div>
+                    <ChevronRight size={14} className="text-slate-300 shrink-0" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
