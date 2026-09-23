@@ -197,6 +197,8 @@ export default function ContactDetail() {
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [uploadDialogName, setUploadDialogName] = useState('');
   const [uploadDialogCategory, setUploadDialogCategory] = useState('other');
+  const [dialogSaving, setDialogSaving] = useState(false);
+  const [docsSavedToast, setDocsSavedToast] = useState<string | null>(null);
 
   // Avatar state
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -661,10 +663,18 @@ export default function ContactDetail() {
   };
 
   const handleUploadDialogConfirm = async () => {
-    setShowUploadDialog(false);
-    await handleUploadDirect(pendingUploadFiles, pendingUploadInputRef, uploadDialogName.trim() || pendingUploadFiles[0]?.name || 'Document', uploadDialogCategory);
-    setPendingUploadFiles([]);
-    setPendingUploadInputRef(null);
+    setDialogSaving(true);
+    try {
+      await handleUploadDirect(pendingUploadFiles, pendingUploadInputRef, uploadDialogName.trim() || pendingUploadFiles[0]?.name || 'Document', uploadDialogCategory);
+      setShowUploadDialog(false);
+      setPendingUploadFiles([]);
+      setPendingUploadInputRef(null);
+      const name = contact?.first_name ? `${contact.first_name}'s` : 'customer';
+      setDocsSavedToast(`Saved to ${name} documents`);
+      setTimeout(() => setDocsSavedToast(null), 4000);
+    } finally {
+      setDialogSaving(false);
+    }
   };
 
   const handleUploadDialogCancel = () => {
@@ -1146,6 +1156,14 @@ export default function ContactDetail() {
         </div>
       </div>
 
+      {/* Save-to-customer success toast */}
+      {docsSavedToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-3 text-white text-sm font-bold shadow-xl animate-fade-in">
+          <CheckCircle2 size={16} />
+          {docsSavedToast}
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto p-6 no-scrollbar">
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }} transition={{ duration: 0.2 }}>
@@ -1328,9 +1346,12 @@ export default function ContactDetail() {
         </div>
       )}
       
-      {/* Document naming dialog */}
+      {/* Document naming / save dialog */}
       {showUploadDialog && pendingUploadFiles.length > 0 && (
-        <div className="fixed inset-0 z-[90] flex items-end bg-black/50" onClick={handleUploadDialogCancel}>
+        <div
+          className="fixed inset-0 z-[90] flex items-end bg-black/50"
+          onClick={dialogSaving ? undefined : handleUploadDialogCancel}
+        >
           <div
             className="w-full rounded-t-3xl bg-white"
             style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
@@ -1338,27 +1359,31 @@ export default function ContactDetail() {
           >
             <div className="px-6 pt-4 pb-2">
               <div className="mx-auto h-1 w-10 rounded-full bg-slate-200 mb-4" />
-              <h3 className="text-lg font-bold text-primary mb-1">Name this document</h3>
+              <h3 className="text-lg font-bold text-primary mb-1">
+                Save to {contact?.first_name ? `${contact.first_name}'s` : 'Customer'} Documents
+              </h3>
               <p className="text-xs text-slate-500 mb-5">{pendingUploadFiles[0]?.name}</p>
 
               <div className="space-y-4">
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Document name</label>
                   <input
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
                     value={uploadDialogName}
                     onChange={(e) => setUploadDialogName(e.target.value)}
                     placeholder="Enter document name"
                     autoFocus
+                    disabled={dialogSaving}
                   />
                 </div>
 
                 <div>
                   <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Category</label>
                   <select
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50"
                     value={uploadDialogCategory}
                     onChange={(e) => setUploadDialogCategory(e.target.value)}
+                    disabled={dialogSaving}
                   >
                     <optgroup label="Measurements">
                       <option value="measurement:roof">📐 Roof Measurement</option>
@@ -1384,16 +1409,23 @@ export default function ContactDetail() {
               <button
                 type="button"
                 onClick={handleUploadDialogCancel}
-                className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-sm font-bold text-slate-600"
+                disabled={dialogSaving}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-sm font-bold text-slate-600 disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleUploadDialogConfirm}
-                className="flex-1 rounded-2xl bg-accent py-4 text-sm font-bold text-white"
+                disabled={dialogSaving}
+                className="flex-1 rounded-2xl bg-accent py-4 text-sm font-bold text-white disabled:opacity-70 flex items-center justify-center gap-2"
               >
-                Upload
+                {dialogSaving ? (
+                  <>
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Saving…
+                  </>
+                ) : 'Save to Customer'}
               </button>
             </div>
           </div>
