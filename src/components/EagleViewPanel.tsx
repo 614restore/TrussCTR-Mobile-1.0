@@ -1,7 +1,7 @@
 // EagleViewPanel — order EagleView aerial measurement reports from the
 // customer's Documents tab and save the PDF to their document library.
 import React, { useState, useEffect, useCallback } from 'react';
-import { Satellite, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, Settings } from 'lucide-react';
+import { Satellite, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, Settings, X, TrendingUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { buildStoredDocumentUrl } from '../lib/documentAccess';
 import { EagleViewClient } from '../lib/integrations/eagleview';
@@ -16,6 +16,7 @@ interface Props {
   contactName?: string;
   userId?: string;
   onDocumentSaved?: () => void;
+  onBuildEstimate?: () => void;
 }
 
 type OrderStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -82,7 +83,7 @@ function useToast() {
 }
 
 export default function EagleViewPanel({
-  contactId, companyId, address, city, state, zip, contactName, userId, onDocumentSaved,
+  contactId, companyId, address, city, state, zip, contactName, userId, onDocumentSaved, onBuildEstimate,
 }: Props) {
   const [configStatus, setConfigStatus] = useState<'unknown' | 'ok' | 'missing'>('unknown');
   const [client, setClient] = useState<EagleViewClient | null>(null);
@@ -92,6 +93,9 @@ export default function EagleViewPanel({
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [dupWarning, setDupWarning] = useState<string | null>(null);
+  const [showEstimateOffer, setShowEstimateOffer] = useState(false);
+  const [existingEstCount, setExistingEstCount] = useState(0);
   const { msg, toast } = useToast();
 
   const fullAddress = [address, city, state, zip].filter(Boolean).join(', ');
@@ -113,8 +117,8 @@ export default function EagleViewPanel({
           .eq('company_id', companyId)
           .eq('integration_type', 'eagleview')
           .eq('is_active', true)
-          .single();
-        if (error && error.code !== 'PGRST116') { setConfigStatus('missing'); return; }
+          .maybeSingle();
+        if (error) { setConfigStatus('missing'); return; }
         const credentials = data != null ? (data as any).credentials : null;
         const apiKey = credentials?.apiKey;
         const clientId = credentials?.clientId;
@@ -197,8 +201,26 @@ export default function EagleViewPanel({
   };
 
   // ── Save ─────────────────────────────────────────────────────────────────────
-  const handleSave = async () => {
+  const handleSave = async (force = false) => {
     if (!order) return;
+
+    const intendedName = `EagleView ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`;
+
+    if (!force) {
+      const { data: existing } = await supabase
+        .from('documents')
+        .select('name, created_at')
+        .eq('contact_id', contactId)
+        .eq('name', intendedName)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        setDupWarning(intendedName);
+        toast({ text: `A document named "${intendedName}" already exists. Click Save Again to overwrite.`, type: 'info' });
+        return;
+      }
+    }
+
+    setDupWarning(null);
     setSaving(true);
     try {
       let fileBlob: Blob;
@@ -255,6 +277,9 @@ export default function EagleViewPanel({
       }
 
       toast({ text: 'Report saved to customer documents!', type: 'success' });
+      const { data: estRows } = await supabase.from('estimates').select('id').eq('contact_id', contactId);
+      setExistingEstCount(estRows?.length ?? 0);
+      setShowEstimateOffer(true);
       persist(null);
       onDocumentSaved?.();
     } catch (err: any) {
@@ -318,6 +343,50 @@ export default function EagleViewPanel({
             {fullAddress || <span className="text-slate-400 italic">No address — add in Overview tab</span>}
           </div>
 
+          {/* Post-save estimate offer */}
+          {showEstimateOffer && (
+            <div className="bg-white border border-violet-200 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp size={15} className="text-violet-600" />
+                  <p className="text-sm font-bold text-slate-800">Build an Estimate?</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEstimateOffer(false)}
+                  className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              {existingEstCount > 0 ? (
+                <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+                  ⚠️ This customer already has {existingEstCount} estimate{existingEstCount !== 1 ? 's' : ''} on file. Create another?
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Open the estimator to build a quote using this aerial report.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowEstimateOffer(false); onBuildEstimate?.(); }}
+                  className="flex-1 bg-violet-600 text-white py-2.5 rounded-xl text-xs font-bold active:scale-95"
+                >
+                  {existingEstCount > 0 ? 'Create New Estimate' : 'Build Estimate'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEstimateOffer(false)}
+                  className="flex-1 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold active:scale-95"
+                >
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
+
           {order ? (
             <div className="space-y-3">
               <div className="bg-white border border-slate-100 rounded-xl p-4 space-y-3">
@@ -345,12 +414,14 @@ export default function EagleViewPanel({
                   )}
                   {order.status === 'completed' && (
                     <button
-                      onClick={handleSave}
+                      onClick={() => dupWarning ? handleSave(true) : handleSave()}
                       disabled={saving}
-                      className="flex items-center gap-1.5 bg-accent text-white px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50"
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50 ${
+                        dupWarning ? 'bg-amber-500 text-white' : 'bg-accent text-white'
+                      }`}
                     >
                       {saving ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                      {saving ? 'Saving…' : 'Save to Documents'}
+                      {saving ? 'Saving…' : dupWarning ? '⚠️ Save Anyway?' : 'Save to Documents'}
                     </button>
                   )}
                   {(order.status === 'failed' || order.status === 'cancelled') && (

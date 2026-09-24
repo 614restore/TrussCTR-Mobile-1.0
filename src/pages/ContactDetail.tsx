@@ -198,7 +198,13 @@ export default function ContactDetail() {
   const [uploadDialogName, setUploadDialogName] = useState('');
   const [uploadDialogCategory, setUploadDialogCategory] = useState('other');
   const [dialogSaving, setDialogSaving] = useState(false);
+  const [uploadDialogIsMeasurement, setUploadDialogIsMeasurement] = useState(false);
   const [docsSavedToast, setDocsSavedToast] = useState<string | null>(null);
+
+  // Duplicate detection state
+  const [showDuplicateWarning, setShowDuplicateWarning] = useState(false);
+  const [duplicateDetails, setDuplicateDetails] = useState<Array<{ fileName: string; docName: string; uploadedAt: string }>>([]);
+  const [duplicateProceed, setDuplicateProceed] = useState<(() => void) | null>(null);
 
   // Avatar state
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -569,23 +575,50 @@ export default function ContactDetail() {
     }, 220);
   };
 
+  const findFileDuplicates = (files: File[]) =>
+    files.flatMap(file => {
+      const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
+      const match = documents.find(doc =>
+        doc.name?.toLowerCase() === baseName &&
+        Number(doc.size) === file.size
+      );
+      return match
+        ? [{ fileName: file.name, docName: match.name, uploadedAt: match.created_at as string }]
+        : [];
+    });
+
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length || !id) return;
 
-    // For single-file uploads show the naming dialog; for multi-file, upload directly
-    if (files.length === 1) {
-      const file = files[0];
-      const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
-      const isImage = file.type.startsWith('image/');
-      setPendingUploadFiles(files);
-      setPendingUploadInputRef(e.target);
-      setUploadDialogName(nameWithoutExt);
-      setUploadDialogCategory(isImage ? 'photo' : 'other');
-      setShowUploadDialog(true);
+    const dupes = findFileDuplicates(files);
+
+    const proceedWithUpload = () => {
+      setShowDuplicateWarning(false);
+      if (files.length === 1) {
+        const file = files[0];
+        const nameWithoutExt = file.name.replace(/\.[^.]+$/, '');
+        const isImage = file.type.startsWith('image/');
+        const lowerName = file.name.toLowerCase();
+        const isMeasurementPdf = !isImage && lowerName.endsWith('.pdf') &&
+          /\b(roofr|eagle[_\-]?view|measurement|aerial|roof[_\-]?report)\b/i.test(lowerName);
+        setPendingUploadFiles(files);
+        setPendingUploadInputRef(e.target);
+        setUploadDialogName(nameWithoutExt);
+        setUploadDialogCategory(isImage ? 'photo' : isMeasurementPdf ? 'measurement:roof' : 'other');
+        setUploadDialogIsMeasurement(isMeasurementPdf);
+        setShowUploadDialog(true);
+      } else {
+        handleUploadDirect(files, e.target, '', '');
+      }
+    };
+
+    if (dupes.length > 0) {
+      setDuplicateDetails(dupes);
+      setDuplicateProceed(() => proceedWithUpload);
+      setShowDuplicateWarning(true);
     } else {
-      // Multi-file: upload directly without dialog
-      handleUploadDirect(files, e.target, '', '');
+      proceedWithUpload();
     }
   };
 
@@ -682,6 +715,7 @@ export default function ContactDetail() {
     if (pendingUploadInputRef) pendingUploadInputRef.value = '';
     setPendingUploadFiles([]);
     setPendingUploadInputRef(null);
+    setUploadDialogIsMeasurement(false);
   };
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1346,6 +1380,62 @@ export default function ContactDetail() {
         </div>
       )}
       
+      {/* Duplicate file warning */}
+      {showDuplicateWarning && (
+        <div
+          className="fixed inset-0 z-[95] flex items-end bg-black/50"
+          onClick={() => setShowDuplicateWarning(false)}
+        >
+          <div
+            className="w-full rounded-t-3xl bg-white"
+            style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-6 pt-4 pb-2">
+              <div className="mx-auto h-1 w-10 rounded-full bg-slate-200 mb-4" />
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+                  <span className="text-base">⚠️</span>
+                </div>
+                <h3 className="text-lg font-bold text-primary">Duplicate Detected</h3>
+              </div>
+              <p className="text-sm text-slate-500 mb-4">
+                {duplicateDetails.length === 1
+                  ? 'A file with the same name and size already exists for this contact.'
+                  : `${duplicateDetails.length} files with matching names and sizes already exist for this contact.`}
+              </p>
+              <div className="space-y-2 mb-2">
+                {duplicateDetails.map((d, i) => (
+                  <div key={i} className="rounded-xl bg-amber-50 border border-amber-100 px-4 py-3">
+                    <p className="text-xs font-bold text-amber-800">{d.fileName}</p>
+                    <p className="text-[11px] text-amber-600 mt-0.5">
+                      Already saved as <em>{d.docName}</em>
+                      {d.uploadedAt ? ` · ${new Date(d.uploadedAt).toLocaleDateString()}` : ''}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex gap-3 px-6 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowDuplicateWarning(false)}
+                className="flex-1 rounded-2xl border border-slate-200 bg-white py-4 text-sm font-bold text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => duplicateProceed?.()}
+                className="flex-1 rounded-2xl bg-amber-500 py-4 text-sm font-bold text-white"
+              >
+                Upload Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Document naming / save dialog */}
       {showUploadDialog && pendingUploadFiles.length > 0 && (
         <div
@@ -1362,7 +1452,13 @@ export default function ContactDetail() {
               <h3 className="text-lg font-bold text-primary mb-1">
                 Save to {contact?.first_name ? `${contact.first_name}'s` : 'Customer'} Documents
               </h3>
-              <p className="text-xs text-slate-500 mb-5">{pendingUploadFiles[0]?.name}</p>
+              <p className="text-xs text-slate-500 mb-3">{pendingUploadFiles[0]?.name}</p>
+              {uploadDialogIsMeasurement && (
+                <div className="flex items-center gap-2 rounded-xl bg-blue-50 border border-blue-100 px-3 py-2 mb-4">
+                  <span className="text-base">📐</span>
+                  <p className="text-xs font-semibold text-blue-700">Measurement report detected — pre-selected category.</p>
+                </div>
+              )}
 
               <div className="space-y-4">
                 <div>
@@ -1405,6 +1501,14 @@ export default function ContactDetail() {
               </div>
             </div>
 
+            {dialogSaving && (
+              <div className="px-6 pb-2">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full animate-pulse rounded-full bg-accent" style={{ width: '60%', transition: 'width 0.5s ease' }} />
+                </div>
+                <p className="mt-1.5 text-center text-[10px] text-slate-400">Uploading…</p>
+              </div>
+            )}
             <div className="flex gap-3 px-6 pt-5">
               <button
                 type="button"
@@ -4350,6 +4454,7 @@ function PhotoAlbumModal({ photos: initialPhotos, initialIndex, onClose, onDelet
 
 function DocumentsTab({ contactId, companyId, address, city, state, zip, contactName, userId, documents, onUpload, onLegalUpload, onDocumentSaved, onDeleteDocument }: { contactId: string; companyId: string; address: string; city: string; state: string; zip: string; contactName?: string; userId?: string; documents: any[]; onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void; onLegalUpload: (label: string, docType: string, e: React.ChangeEvent<HTMLInputElement>) => void; onDocumentSaved?: () => void; onDeleteDocument?: (docId: string, url: string) => Promise<void> }) {
   const navigate = useNavigate();
+  const handleBuildEstimate = () => navigate(`/contacts/${contactId}/estimate`);
   const [filter, setFilter] = useState<'all' | 'photos' | 'docs' | 'legal'>('all');
   const [editMode, setEditMode] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -4815,6 +4920,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
             contactName={contactName}
             userId={userId}
             onDocumentSaved={onDocumentSaved}
+            onBuildEstimate={handleBuildEstimate}
           />
           <RoofrPanel
             contactId={contactId}
@@ -4826,6 +4932,7 @@ function DocumentsTab({ contactId, companyId, address, city, state, zip, contact
             contactName={contactName}
             userId={userId}
             onDocumentSaved={onDocumentSaved}
+            onBuildEstimate={handleBuildEstimate}
           />
 
           {/* Before & After Report */}

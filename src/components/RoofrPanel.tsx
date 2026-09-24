@@ -1,7 +1,7 @@
 // RoofrPanel — order Roofr aerial measurement reports from the customer's
 // Documents tab, display measurements inline, and save to the customer's files.
 import React, { useState, useEffect, useCallback } from 'react';
-import { Ruler, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, ExternalLink, Settings } from 'lucide-react';
+import { Ruler, Loader2, RefreshCw, CheckCircle, AlertTriangle, Clock, Download, ExternalLink, Settings, DollarSign, X, TrendingUp } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { buildStoredDocumentUrl } from '../lib/documentAccess';
 import { RoofrClient, RoofrReport } from '../lib/integrations/roofr';
@@ -16,6 +16,7 @@ interface Props {
   contactName?: string;
   userId?: string;
   onDocumentSaved?: () => void;
+  onBuildEstimate?: () => void;
 }
 
 type OrderStatus = 'pending' | 'processing' | 'completed' | 'failed';
@@ -80,7 +81,7 @@ function useToast() {
 }
 
 export default function RoofrPanel({
-  contactId, companyId, address, city, state, zip, contactName, userId, onDocumentSaved,
+  contactId, companyId, address, city, state, zip, contactName, userId, onDocumentSaved, onBuildEstimate,
 }: Props) {
   const [configStatus, setConfigStatus] = useState<'unknown' | 'ok' | 'missing'>('unknown');
   const [client, setClient] = useState<RoofrClient | null>(null);
@@ -89,6 +90,11 @@ export default function RoofrPanel({
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [tierRates, setTierRates] = useState<{ good: string; better: string; best: string }>({ good: '', better: '', best: '' });
+  const [activeTier, setActiveTier] = useState<'good' | 'better' | 'best'>('good');
+  const [dupWarning, setDupWarning] = useState<string | null>(null);
+  const [showEstimateOffer, setShowEstimateOffer] = useState(false);
+  const [existingEstCount, setExistingEstCount] = useState(0);
   const { msg, toast } = useToast();
 
   const fullAddress = [address, city, state, zip].filter(Boolean).join(', ');
@@ -110,8 +116,8 @@ export default function RoofrPanel({
           .eq('company_id', companyId)
           .eq('integration_type', 'roofr')
           .eq('is_active', true)
-          .single();
-        if (error && error.code !== 'PGRST116') { setConfigStatus('missing'); return; }
+          .maybeSingle();
+        if (error) { setConfigStatus('missing'); return; }
         const credentials = data != null ? (data as any).credentials : null;
         const apiKey = credentials?.apiKey;
         if (!apiKey) { setConfigStatus('missing'); return; }
@@ -203,19 +209,64 @@ export default function RoofrPanel({
   };
 
   // ── Save to documents ───────────────────────────────────────────────────────
-  const handleSave = async () => {
+  const handleSave = async (force = false) => {
     if (!order) return;
+
+    // Build the display name we intend to use
+    const intendedName = `Roofr ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`;
+
+    // Duplicate check: query existing docs for this contact and look for same name
+    if (!force) {
+      const { data: existing } = await supabase
+        .from('documents')
+        .select('name, created_at')
+        .eq('contact_id', contactId)
+        .eq('name', intendedName)
+        .limit(1);
+      if (existing && existing.length > 0) {
+        setDupWarning(intendedName);
+        toast({ text: `A document named "${intendedName}" already exists. Click Save Again to overwrite.`, type: 'info' });
+        return;
+      }
+    }
+
+    setDupWarning(null);
     setSaving(true);
     try {
-      let fileBlob: Blob;
+      let fileBlob: Blob | undefined;
       let ext = 'html';
 
+      // Build pricing summary rows for the saved document
+      const sq = order.measurements?.totalSquares ?? 0;
+      const pricingHtml = (() => {
+        const rates = {
+          good:   parseFloat(tierRates.good)   || 0,
+          better: parseFloat(tierRates.better) || 0,
+          best:   parseFloat(tierRates.best)   || 0,
+        };
+        const hasAny = rates.good > 0 || rates.better > 0 || rates.best > 0;
+        if (!hasAny || sq === 0) return '';
+        const fmt = (n: number) => n > 0 ? `$${(n * sq).toLocaleString(undefined, { maximumFractionDigits: 0 })} ($${n}/sq)` : '—';
+        return `<h2 style="color:#7c3aed;margin-top:24px">Per Square Pricing</h2>
+          <table><thead><tr><th>Tier</th><th>$/Square</th><th>Total (${sq} sq)</th></tr></thead><tbody>
+          <tr><td>Good</td><td>${rates.good > 0 ? '$'+rates.good : '—'}</td><td>${rates.good > 0 ? fmt(rates.good).split(' ')[0] : '—'}</td></tr>
+          <tr><td>Better</td><td>${rates.better > 0 ? '$'+rates.better : '—'}</td><td>${rates.better > 0 ? fmt(rates.better).split(' ')[0] : '—'}</td></tr>
+          <tr><td>Best</td><td>${rates.best > 0 ? '$'+rates.best : '—'}</td><td>${rates.best > 0 ? fmt(rates.best).split(' ')[0] : '—'}</td></tr>
+          </tbody></table>`;
+      })();
+
+      // Try to download actual PDF; fall back to demo HTML on failure (e.g. CSP-blocked sandbox URLs)
       if (order.downloadUrl && !order.reportId.startsWith('DEMO-')) {
-        const res = await fetch(order.downloadUrl);
-        if (!res.ok) throw new Error('Could not download report PDF');
-        fileBlob = await res.blob();
-        ext = 'pdf';
-      } else {
+        try {
+          const res = await fetch(order.downloadUrl);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          fileBlob = await res.blob();
+          ext = 'pdf';
+        } catch {
+          // Fall through to demo HTML
+        }
+      }
+      if (!fileBlob) {
         const m = order.measurements;
         const rows = m ? `
           <tr><td>Total Squares</td><td>${m.totalSquares} sq</td></tr>
@@ -239,7 +290,9 @@ export default function RoofrPanel({
           <p><strong>Type:</strong> ${order.reportType} &nbsp;·&nbsp; <strong>Order:</strong> ${order.reportId}</p>
           <p><strong>Ordered:</strong> ${new Date(order.orderedAt).toLocaleString()}</p>
           <table><thead><tr><th>Measurement</th><th>Value</th></tr></thead>
-          <tbody>${rows}</tbody></table></body></html>`], { type: 'text/html' });
+          <tbody>${rows}</tbody></table>
+          ${pricingHtml}
+          </body></html>`], { type: 'text/html' });
       }
 
       const safeName = repName.replace(/\s+/g, '_');
@@ -247,7 +300,7 @@ export default function RoofrPanel({
       const fileName = `Roofr_${order.reportType}_${safeName}_${date}.${ext}`;
       const filePath = `${contactId}/${Math.random().toString(36).slice(2)}.${ext}`;
 
-      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, fileBlob);
+      const { error: uploadError } = await supabase.storage.from('documents').upload(filePath, fileBlob!);
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('documents').getPublicUrl(filePath);
@@ -266,7 +319,7 @@ export default function RoofrPanel({
         name: `Roofr ${order.reportType.charAt(0).toUpperCase() + order.reportType.slice(1)} Report — ${repName}`,
         type: 'measurement',
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
-        size: fileBlob.size,
+        size: fileBlob!.size,
         uploaded_by: userId ?? 'Roofr',
       }).select('id').single();
       if (dbError) throw dbError;
@@ -279,6 +332,10 @@ export default function RoofrPanel({
       }
 
       toast({ text: 'Report saved to customer documents!', type: 'success' });
+      // Check existing estimates so we can offer to build one
+      const { data: estRows } = await supabase.from('estimates').select('id').eq('contact_id', contactId);
+      setExistingEstCount(estRows?.length ?? 0);
+      setShowEstimateOffer(true);
       persist(null);
       onDocumentSaved?.();
     } catch (err: any) {
@@ -338,6 +395,50 @@ export default function RoofrPanel({
             {fullAddress || <span className="text-slate-400 italic">No address — add in Overview tab</span>}
           </div>
 
+          {/* Post-save estimate offer */}
+          {showEstimateOffer && (
+            <div className="bg-white border border-violet-200 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp size={15} className="text-violet-600" />
+                  <p className="text-sm font-bold text-slate-800">Build an Estimate?</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowEstimateOffer(false)}
+                  className="rounded-full p-1 text-slate-400 hover:bg-slate-100"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              {existingEstCount > 0 ? (
+                <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2">
+                  ⚠️ This customer already has {existingEstCount} estimate{existingEstCount !== 1 ? 's' : ''} on file. Create another?
+                </p>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Use the saved measurements to start a quote — no re-entry needed.
+                </p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowEstimateOffer(false); onBuildEstimate?.(); }}
+                  className="flex-1 bg-violet-600 text-white py-2.5 rounded-xl text-xs font-bold active:scale-95"
+                >
+                  {existingEstCount > 0 ? 'Create New Estimate' : 'Build Estimate'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowEstimateOffer(false)}
+                  className="flex-1 bg-slate-100 text-slate-600 py-2.5 rounded-xl text-xs font-bold active:scale-95"
+                >
+                  Skip
+                </button>
+              </div>
+            </div>
+          )}
+
           {order ? (
             <div className="space-y-3">
               <div className="bg-white border border-slate-100 rounded-xl p-4 space-y-3">
@@ -381,6 +482,92 @@ export default function RoofrPanel({
                   </div>
                 )}
 
+                {/* Per Square Pricing */}
+                {order.status === 'completed' && order.measurements && (() => {
+                  const sq = order.measurements.totalSquares;
+                  const rates = {
+                    good:   parseFloat(tierRates.good)   || 0,
+                    better: parseFloat(tierRates.better) || 0,
+                    best:   parseFloat(tierRates.best)   || 0,
+                  };
+                  const totals = {
+                    good:   rates.good   * sq,
+                    better: rates.better * sq,
+                    best:   rates.best   * sq,
+                  };
+                  const tiers = ['good', 'better', 'best'] as const;
+                  const tierColors: Record<string, string> = {
+                    good:   'border-slate-400 bg-slate-100 text-slate-800',
+                    better: 'border-blue-400 bg-blue-100 text-blue-800',
+                    best:   'border-violet-400 bg-violet-100 text-violet-800',
+                  };
+                  const activeColors: Record<string, string> = {
+                    good:   'border-slate-500 bg-slate-200 text-slate-900',
+                    better: 'border-blue-500 bg-blue-200 text-blue-900',
+                    best:   'border-violet-500 bg-violet-200 text-violet-900',
+                  };
+                  return (
+                    <div className="mt-3 border border-violet-100 rounded-xl bg-violet-50 p-3 space-y-3">
+                      <div className="flex items-center gap-1.5">
+                        <DollarSign size={13} className="text-violet-600" />
+                        <p className="text-[10px] font-bold text-violet-700 uppercase tracking-wider">Per Square Pricing</p>
+                        <span className="text-[10px] text-violet-400 ml-1">{sq} sq</span>
+                      </div>
+
+                      {/* Tier tabs */}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {tiers.map((tier) => (
+                          <button
+                            key={tier}
+                            onClick={() => setActiveTier(tier)}
+                            className={`rounded-lg border-2 px-2 py-1.5 text-[10px] font-bold capitalize transition-colors ${
+                              activeTier === tier ? activeColors[tier] : 'border-slate-200 bg-white text-slate-500'
+                            }`}
+                          >
+                            {tier}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* $/sq input for active tier */}
+                      <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2">
+                        <span className="text-xs font-bold text-slate-400">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="5"
+                          placeholder="0"
+                          value={tierRates[activeTier]}
+                          onChange={(e) => setTierRates(prev => ({ ...prev, [activeTier]: e.target.value }))}
+                          className="flex-1 text-sm font-bold text-slate-800 bg-transparent outline-none min-w-0"
+                        />
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap">/ sq — <span className="capitalize">{activeTier}</span></span>
+                      </div>
+
+                      {/* Tier totals comparison */}
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {tiers.map((tier) => (
+                          <div
+                            key={tier}
+                            className={`rounded-lg px-2 py-2 border-2 ${activeTier === tier ? activeColors[tier] : tierColors[tier]}`}
+                          >
+                            <p className="text-[9px] font-bold uppercase tracking-wider opacity-70 capitalize">{tier}</p>
+                            <p className="text-xs font-bold mt-0.5">
+                              {rates[tier] > 0
+                                ? `$${totals[tier].toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                                : <span className="opacity-40">—</span>
+                              }
+                            </p>
+                            {rates[tier] > 0 && (
+                              <p className="text-[9px] opacity-60">${rates[tier]}/sq</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Actions */}
                 <div className="flex flex-wrap gap-2 pt-1">
                   {order.status !== 'completed' && order.status !== 'failed' && (
@@ -408,12 +595,16 @@ export default function RoofrPanel({
                         </a>
                       )}
                       <button
-                        onClick={handleSave}
+                        onClick={() => dupWarning ? handleSave(true) : handleSave()}
                         disabled={saving}
-                        className="flex items-center gap-1.5 bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50"
+                        className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold active:scale-95 disabled:opacity-50 ${
+                          dupWarning
+                            ? 'bg-amber-500 text-white'
+                            : 'bg-emerald-600 text-white'
+                        }`}
                       >
                         {saving ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-                        {saving ? 'Saving…' : 'Save to Documents'}
+                        {saving ? 'Saving…' : dupWarning ? '⚠️ Save Anyway?' : 'Save to Documents'}
                       </button>
                     </>
                   )}
