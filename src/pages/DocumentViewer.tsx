@@ -241,10 +241,13 @@ export default function DocumentViewer() {
                   </button>
                 </div>
               ) : isPdf ? (
-                // Safari can't render PDF blob: URLs in iframes — use the signed URL directly
+                // Use the blob URL here — Supabase signed URLs have Content-Disposition:attachment
+                // which causes iframes to show about:blank while triggering a download.
+                // Blob URLs bypass that header and render inline in Chrome/Firefox/Safari desktop.
+                // iOS native PDFs are handled by the Capacitor branch above.
                 <iframe
                   title={viewerState.name}
-                  src={viewerState.sourceUrl || viewerState.objectUrl || ''}
+                  src={viewerState.objectUrl || ''}
                   className="h-[78vh] w-full rounded-2xl bg-slate-50"
                 />
               ) : isImage ? (
@@ -255,13 +258,26 @@ export default function DocumentViewer() {
                     className="max-h-[78vh] w-auto max-w-full rounded-2xl object-contain"
                   />
                 </div>
-              ) : isHtml ? (
+              ) : isHtml && !Capacitor.isNativePlatform() ? (
                 <iframe
                   title={viewerState.name}
                   src={viewerState.objectUrl || ''}
                   className="h-[78vh] w-full rounded-2xl bg-white"
                   sandbox="allow-scripts allow-same-origin"
                 />
+              ) : isHtml ? (
+                <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 rounded-2xl bg-slate-50 p-8 text-center">
+                  <FileText size={40} className="text-slate-400" />
+                  <p className="text-sm font-semibold text-slate-600">{viewerState.name}</p>
+                  <p className="text-xs text-slate-400">Opens in Safari on iOS</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenExternal}
+                    className="mt-2 rounded-2xl bg-primary px-5 py-3 text-sm font-bold text-white"
+                  >
+                    Open Report
+                  </button>
+                </div>
               ) : (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 rounded-2xl bg-slate-50 p-8 text-center">
                   <FileText size={40} className="text-slate-400" />
