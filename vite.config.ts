@@ -3,8 +3,19 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import {defineConfig, loadEnv} from 'vite';
 
-export default defineConfig(({mode}) => {
+// TrussCTR must only use its own Supabase project; QuoteMGR's projects are
+// read-only. Any other real project fails the build (placeholders are allowed).
+const TRUSSCTR_SUPABASE_REF = 'llamtjsquoqlejznmyjl';
+
+export default defineConfig(({mode, command}) => {
   const env = loadEnv(mode, '.', '');
+  const supabaseRef = (env.VITE_SUPABASE_URL || '').match(/^https:\/\/([a-z0-9]{20})\.supabase\.co/)?.[1];
+  if (command === 'build' && supabaseRef && supabaseRef !== TRUSSCTR_SUPABASE_REF) {
+    throw new Error(
+      `VITE_SUPABASE_URL points at Supabase project ${supabaseRef}, not TrussCTR production (${TRUSSCTR_SUPABASE_REF}). ` +
+      'QuoteMGR projects are read-only for TrussCTR.'
+    );
+  }
   return {
     base: './',
     plugins: [react(), tailwindcss()],
