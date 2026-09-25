@@ -266,7 +266,7 @@ export default function EagleViewPanel({
         type: 'measurement',
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
         size: fileBlob.size,
-        uploaded_by: userId ?? 'EagleView',
+        uploaded_by: userId ?? null,
       }).select('id').single();
       if (dbError) throw dbError;
       if (inserted?.id) {

@@ -263,7 +263,8 @@ export default function DocumentViewer() {
                   title={viewerState.name}
                   src={viewerState.objectUrl || ''}
                   className="h-[78vh] w-full rounded-2xl bg-white"
-                  sandbox="allow-scripts allow-same-origin"
+                  // Empty sandbox: uploaded HTML can't run scripts or act as the app
+                  sandbox=""
                 />
               ) : isHtml ? (
                 <div className="flex min-h-[50vh] flex-col items-center justify-center gap-4 rounded-2xl bg-slate-50 p-8 text-center">

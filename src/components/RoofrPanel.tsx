@@ -320,7 +320,7 @@ export default function RoofrPanel({
         type: 'measurement',
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
         size: fileBlob!.size,
-        uploaded_by: userId ?? 'Roofr',
+        uploaded_by: userId ?? null,
       }).select('id').single();
       if (dbError) throw dbError;
       // Set category after insert so saving works even if migration hasn't run yet
@@ -417,7 +417,7 @@ export default function RoofrPanel({
                 </p>
               ) : (
                 <p className="text-xs text-slate-500">
-                  Use the saved measurements to start a quote — no re-entry needed.
+                  Open the estimator and tap Import Measurements to fill in the quote from this report.
                 </p>
               )}
               <div className="flex gap-2">
