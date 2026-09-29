@@ -2048,11 +2048,16 @@ function wmoIcon(code: number): string {
 
 // ─── Contact Storm History Card ───────────────────────────────────────────────
 
+const STORM_WIND_OPTIONS = [0, 30, 35, 40, 50, 58, 65, 75];
+const STORM_HAIL_OPTIONS = [0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
 function ContactStormCard({ contact }: { contact: any }) {
   const [loading,  setLoading]  = useState(true);
   const [events,   setEvents]   = useState<ContactStormEvent[]>([]);
   const [geocoded, setGeocoded] = useState(true);
   const [expanded, setExpanded] = useState(false);
+  const [minWind,  setMinWind]  = useState(0);
+  const [minHail,  setMinHail]  = useState(0);
   const navigate = useNavigate();
 
   const hasAddress = !!(contact?.city || contact?.zip);
@@ -2078,7 +2083,12 @@ function ContactStormCard({ contact }: { contact: any }) {
     return () => { cancelled = true; };
   }, [contact?.id, contact?.city, contact?.state, contact?.zip, contact?.company_id]);
 
-  const displayEvents = expanded ? events : events.slice(0, 3);
+  const filteredEvents = events.filter((ev) => {
+    if (ev.type === 'WIND' && minWind > 0 && ev.magnitude < minWind) return false;
+    if (ev.type === 'HAIL' && minHail > 0 && ev.magnitude < minHail) return false;
+    return true;
+  });
+  const displayEvents = expanded ? filteredEvents : filteredEvents.slice(0, 3);
 
   const formatEventDate = (dateStr: string) => {
     if (!dateStr) return '';
@@ -2096,6 +2106,36 @@ function ContactStormCard({ contact }: { contact: any }) {
         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Storm Reports Nearby</h3>
         <Zap size={16} className="text-amber-500" />
       </div>
+
+      {/* Filters — only show once events are loaded */}
+      {!loading && events.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Min Wind</span>
+            <select
+              value={minWind}
+              onChange={(e) => { setMinWind(Number(e.target.value)); setExpanded(false); }}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              {STORM_WIND_OPTIONS.map((w) => (
+                <option key={w} value={w}>{w === 0 ? 'Any speed' : `${w}+ mph`}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Min Hail</span>
+            <select
+              value={minHail}
+              onChange={(e) => { setMinHail(Number(e.target.value)); setExpanded(false); }}
+              className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              {STORM_HAIL_OPTIONS.map((h) => (
+                <option key={h} value={h}>{h === 0 ? 'Any size' : `${h}"`}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (
@@ -2129,8 +2169,13 @@ function ContactStormCard({ contact }: { contact: any }) {
         </div>
       )}
 
+      {/* No events after filtering */}
+      {!loading && events.length > 0 && filteredEvents.length === 0 && (
+        <p className="text-sm text-slate-400 text-center py-2">No events match the selected filters.</p>
+      )}
+
       {/* Event list */}
-      {!loading && events.length > 0 && (
+      {!loading && filteredEvents.length > 0 && (
         <div className="space-y-2">
           {displayEvents.map((ev) => (
             <div
@@ -2171,12 +2216,12 @@ function ContactStormCard({ contact }: { contact: any }) {
           ))}
 
           {/* Expand / collapse */}
-          {events.length > 3 && (
+          {filteredEvents.length > 3 && (
             <button
               onClick={() => setExpanded((v) => !v)}
               className="w-full text-[11px] font-bold text-accent py-1"
             >
-              {expanded ? 'Show less' : `Show ${events.length - 3} more`}
+              {expanded ? 'Show less' : `Show ${filteredEvents.length - 3} more`}
             </button>
           )}
 
