@@ -49,11 +49,13 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
     appt_type: 'inspection' as 'inspection' | 'build' | 'other',
     appt_notes: '',
   };
+  const [customProjectType, setCustomProjectType] = useState(false);
   const [formData, setFormData] = useState(initialFormData);
 
   useEffect(() => {
     if (!isOpen) {
       setFormData(initialFormData);
+      setCustomProjectType(false);
       setLoading(false);
       setSaveError(null);
       setShowInsurance(false);
@@ -344,19 +346,35 @@ export default function NewContactModal({ isOpen, onClose, onSuccess }: NewConta
                   <div className="space-y-4">
                     <h3 className={sectionHdr}>Project Type</h3>
                     <div className="grid grid-cols-2 gap-2">
-                      {['Roofing', 'Siding', 'Gutters', 'Windows'].map(type => (
-                        <button key={type} type="button"
-                          onClick={() => set({ project_type: type })}
-                          className={`p-4 rounded-2xl text-sm font-bold border transition-all ${
-                            formData.project_type === type
-                              ? 'bg-accent border-accent text-white shadow-lg shadow-accent/20'
-                              : 'bg-white border-slate-100 text-slate-600'
-                          }`}
-                        >
-                          {type}
-                        </button>
-                      ))}
+                      {['Roofing', 'Siding', 'Gutters', 'Windows', 'Interior', 'Custom'].map(type => {
+                        const selected = type === 'Custom' ? customProjectType : !customProjectType && formData.project_type === type;
+                        return (
+                          <button key={type} type="button"
+                            onClick={() => {
+                              setCustomProjectType(type === 'Custom');
+                              set({ project_type: type === 'Custom' ? '' : type });
+                            }}
+                            className={`p-4 rounded-2xl text-sm font-bold border transition-all ${
+                              selected
+                                ? 'bg-accent border-accent text-white shadow-lg shadow-accent/20'
+                                : 'bg-white border-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {type}
+                          </button>
+                        );
+                      })}
                     </div>
+                    {customProjectType && (
+                      <input
+                        type="text"
+                        autoFocus
+                        value={formData.project_type}
+                        onChange={(e) => set({ project_type: e.target.value })}
+                        placeholder="Type the project type (e.g. Deck Build)"
+                        className="w-full p-4 rounded-2xl border border-slate-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                    )}
                   </div>
 
                   {/* ── Insurance Information (collapsible) ── */}
