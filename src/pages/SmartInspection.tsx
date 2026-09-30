@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Camera, ArrowLeft, CheckCircle2, Send, ClipboardCheck, Plus } from 'lucide-react';
+import { Camera, ArrowLeft, CheckCircle2, Send, ClipboardCheck, Plus, Loader2 } from 'lucide-react';
 import { PageTransition } from '../components/PageTransition';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../context/AuthContext';
 import { cn } from '../lib/utils';
 import { buildStoredDocumentUrl } from '../lib/documentAccess';
 import { handleAutoMove } from '../lib/store';
+import { compressImageWithLightCompressor, PHOTO_POLICY_PRESETS } from '../lib/lightCompressor';
 
 type Section = 'exterior' | 'detached' | 'interior';
 
@@ -58,19 +59,27 @@ export default function SmartInspection() {
     ? (customRoom.trim() || 'Custom')
     : activeLocation;
 
+  const [uploading, setUploading] = useState(false);
+
   const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    // Reset input so the same file can be re-selected if needed
+    e.target.value = '';
     if (!file || !id || !profile) return;
 
+    setUploading(true);
     try {
-      const rawExt = (file.name.split('.').pop() || 'jpg').toLowerCase();
-      const ext = rawExt === 'heic' || rawExt === 'heif' ? 'jpg' : rawExt;
-      const locationLabel = effectiveLocation.replace(/\s+/g, '_');
-      const filePath = `${id}/${locationLabel}_${Date.now()}.${ext}`;
+      // Compress to ~3MP (2048×1536) before upload — keeps storage costs low and
+      // prevents large raw iPhone photos (5-10MB each) from timing out on upload.
+      const compressed = await compressImageWithLightCompressor(file, PHOTO_POLICY_PRESETS.standard3mp);
 
+      const locationLabel = effectiveLocation.replace(/\s+/g, '_');
+      const filePath = `${id}/${locationLabel}_${Date.now()}.jpg`;
+
+      const uploadBytes = await compressed.arrayBuffer();
       const { error: uploadError } = await supabase.storage
         .from('documents')
-        .upload(filePath, file);
+        .upload(filePath, uploadBytes, { contentType: 'image/jpeg' });
 
       if (uploadError) throw uploadError;
 
@@ -84,7 +93,7 @@ export default function SmartInspection() {
         name: `${effectiveLocation} Photo`,
         type: 'photo',
         url: buildStoredDocumentUrl(publicUrl, 'documents', filePath),
-        size: file.size,
+        size: compressed.size,
         uploaded_by: profile.id,
       } as any);
 
@@ -94,7 +103,9 @@ export default function SmartInspection() {
       }));
     } catch (err) {
       console.error('Upload error:', err);
-      alert('Photo upload failed. Check Supabase storage bucket.');
+      alert('Photo upload failed. Please try again or check your connection.');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -366,20 +377,25 @@ export default function SmartInspection() {
             </div>
           )}
 
-          <label className={cn('block w-full', section === 'interior' && activeLocation === 'Custom' && !customRoom.trim() ? 'pointer-events-none opacity-50' : 'cursor-pointer')}>
+          <label className={cn('block w-full', (uploading || (section === 'interior' && activeLocation === 'Custom' && !customRoom.trim())) ? 'pointer-events-none opacity-50' : 'cursor-pointer')}>
             <input
               type="file"
               accept="image/jpeg,image/jpg,image/png,image/gif,image/webp"
               capture="environment"
               className="hidden"
+              disabled={uploading}
               onChange={handleCapture}
             />
             <div className="aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-3 text-slate-400 active:bg-slate-100 transition-colors">
               <div className="w-16 h-16 bg-accent text-white rounded-full flex items-center justify-center shadow-lg">
-                <Camera size={28} />
+                {uploading ? <Loader2 size={28} className="animate-spin" /> : <Camera size={28} />}
               </div>
-              <span className="text-sm font-bold text-slate-500">Tap to capture {effectiveLocation}</span>
-              <span className="text-xs text-slate-400">Photos upload directly to Supabase</span>
+              <span className="text-sm font-bold text-slate-500">
+                {uploading ? 'Uploading…' : `Tap to capture ${effectiveLocation}`}
+              </span>
+              <span className="text-xs text-slate-400">
+                {uploading ? 'Compressing & uploading photo' : 'Photos are compressed before upload'}
+              </span>
             </div>
           </label>
 

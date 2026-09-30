@@ -264,27 +264,19 @@ function validateContactTypeCompatibility(contact: any, newStatus: string): stri
  * Enhanced auto-progression rules
  */
 export async function enhancedAutoProgression(contactId: string, newStatus: string, userId: string, userEmail: string, companyId: string): Promise<void> {
+  // Only auto-advance production stages that are purely time-ordered.
+  // Sales/scope stages (inspection → estimating → estimate_sent → contingency) are
+  // intentionally omitted: each requires deliberate user action, and auto-advancing
+  // them was silently moving contacts to "Pending Scope" (quoted) without user intent.
   const progressionRules: Record<string, string> = {
-    // Core pipeline progression (the missing pieces!)
-    'prospect': 'lead', // When prospect is identified
-    'lead': 'contacted', // When first contact is made  
-    // NOTE: contacted → appt_set should be triggered by appointment creation, not auto
-    'appt_set': 'inspection_completed', // When appointment time arrives (needs time trigger)
-    'inspection_completed': 'estimating', // After appointment is marked complete
-    'estimating': 'estimate_sent', // When estimate is built and sent
-    'estimate_sent': 'contingency', // Move to follow-up phase after some delay
-    
-    // Advanced pipeline stages
-    'contingency': 'approved', // When customer/insurance approves
-    'approved': 'signed', // When contract is signed
-    'signed': 'ordering_material', // Start material procurement
-    'ordering_material': 'in_progress', // When materials arrive and work begins
-    'in_progress': 'build_phase', // Main construction phase
-    'build_phase': 'cleanup', // Final cleanup phase
-    'cleanup': 'completed', // Job completion
-    'completed': 'invoicing', // Generate final invoice
-    'invoicing': 'pending_payment', // Waiting for payment
-    // 'pending_payment': 'paid' (should be triggered by payment, not auto)
+    // Production stages — advance automatically as work progresses
+    'signed': 'ordering_material',       // Contract signed → start material procurement
+    'ordering_material': 'in_progress',  // Materials ready → work begins
+    'in_progress': 'build_phase',        // Active build phase
+    'build_phase': 'cleanup',            // Main work done → cleanup
+    'cleanup': 'completed',              // Job completed
+    'completed': 'invoicing',            // Generate final invoice
+    'invoicing': 'pending_payment',      // Awaiting payment
   };
 
   const nextStatus = progressionRules[newStatus];

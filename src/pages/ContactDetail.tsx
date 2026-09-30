@@ -3066,13 +3066,18 @@ function InspectionTab({ contact, userId, onDocumentsChanged, onContactUpdated }
       // Use statusManager for consistent status updates
       try {
         const { updateContactStatus } = await import('../lib/statusManager');
-        const result = await updateContactStatus(
-          contact.id,
-          contact.company_id,
-          'inspected' as CustomerStatus,
-          user?.id,
-          'Inspection marked complete'
-        );
+        const result = await updateContactStatus({
+          contactId: contact.id,
+          newStatus: 'inspected' as CustomerStatus,
+          oldStatus: contact.status,
+          contactName: `${contact.first_name || ''} ${contact.last_name || ''}`.trim(),
+          contactEmail: contact.email || '',
+          userId: user?.id || '',
+          userEmail: user?.email || '',
+          companyId: contact.company_id,
+          source: 'manual_mobile',
+          reason: 'Inspection marked complete',
+        });
         
         if (!result.success) {
           throw new Error(result.error);
